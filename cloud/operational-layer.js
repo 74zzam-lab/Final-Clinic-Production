@@ -14,7 +14,8 @@
     doctors: 'doctors.json',
     inventoryItems: 'inventory-items.json',
     inventorySuppliers: 'inventory-suppliers.json',
-    inventoryMovements: 'inventory-movements.json'
+    inventoryMovements: 'inventory-movements.json',
+    attachments_meta: 'attachments-meta.json',
   };
 
   const OPERATIONAL_TABLES = Object.keys(TABLE_FILES);

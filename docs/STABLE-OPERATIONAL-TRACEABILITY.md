@@ -12,6 +12,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-5-branch-switch-hardening-7c71` | 5 — Branch switch re-hydrate | DONE (code) | Required after merge |
 | `cursor/phase-6-sync-guards-7c71` | 6 — Sync guards | DONE (code) | Required after merge |
 | `cursor/phase-7-conflict-tombstone-idempotency-7c71` | 7 — Tombstone / idempotency | DONE (code) | Required after merge |
+| `cursor/phase-8-attachments-authority-7c71` | 8 — Attachments authority | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -86,6 +87,15 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Duplicate save → no duplicate outbox rows
 3. Dual tombstone → newer delete wins automatically
 
-## Deferred phases (8–14)
+## Phase 8 — Attachments authority
+
+**Goal:** `attachments_meta` canonical; legacy manifest migrate; branch + hash authority.
+
+**Operator UAT (you):**
+1. Device A attachment → B pull shows same hash metadata
+2. Branch switch → attachment list scoped correctly
+3. Legacy manifest clinic → migrates without data loss
+
+## Deferred phases (9–14)
 
 See planning doc in agent conversation — not started on this branch.

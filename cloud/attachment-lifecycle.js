@@ -1,11 +1,11 @@
 /**
  * V2-5.9 Attachment Lifecycle — wired operational path (not helpers-only).
+ * Phase 8: metadata authority via `attachments_meta` (legacy manifest migrated on read).
  * States: PENDING | UPLOADING | SYNCED | FAILED | MISSING_REMOTE | QUARANTINED | DELETED
  */
 (function (global) {
   'use strict';
 
-  const MANIFEST_KEY = '__tdw_attachment_manifest__';
   const STATES = Object.freeze({
     PENDING: 'PENDING',
     UPLOADING: 'UPLOADING',
@@ -16,7 +16,18 @@
     DELETED: 'DELETED',
   });
 
+  const MANIFEST_KEY = global.AttachmentAuthority?.LEGACY_MANIFEST_KEY || '__tdw_attachment_manifest__';
+
+  function auth() {
+    return global.AttachmentAuthority || null;
+  }
+
   function loadManifest() {
+    const AA = auth();
+    if (AA?.loadItems) {
+      const items = AA.loadItems();
+      return { version: 2, items, updatedAt: new Date().toISOString(), source: 'attachments_meta' };
+    }
     try {
       const m = global.DB?.get?.(MANIFEST_KEY, null);
       if (m && typeof m === 'object' && Array.isArray(m.items)) return m;
@@ -24,8 +35,19 @@
     return { version: 1, items: [], updatedAt: null };
   }
 
-  function saveManifest(m) {
-    m.updatedAt = new Date().toISOString();
+  async function saveManifest(m) {
+    const items = Array.isArray(m?.items) ? m.items : [];
+    const AA = auth();
+    if (AA?.saveItems) {
+      const res = await AA.saveItems(items, { source: 'attachment_lifecycle' });
+      if (res?.ok === false) {
+        try { global.DB?.__rawSet?.(MANIFEST_KEY, m); } catch {
+          try { global.DB?.set?.(MANIFEST_KEY, m); } catch { /* empty */ }
+        }
+        return m;
+      }
+      return { version: 2, items, updatedAt: new Date().toISOString(), source: 'attachments_meta' };
+    }
     if (global.SqliteBridge?.setAuthoritative) {
       return global.SqliteBridge.setAuthoritative(MANIFEST_KEY, m).then((r) => {
         if (!r?.ok) {
@@ -39,18 +61,32 @@
   }
 
   function centerId() {
-    return global.CenterId?.getStoredCenterId?.() || global.LicenseCloud?.loadLocal?.()?.centerId || '';
+    return auth()?.centerId?.() || global.CenterId?.getStoredCenterId?.()
+      || global.LicenseCloud?.loadLocal?.()?.centerId || '';
   }
 
   function branchId(explicit) {
-    return explicit
+    return auth()?.branchId?.(explicit)
+      || explicit
       || global.BranchContexts?.getOperationalWriteBranch?.()
       || global.BranchScope?.getActiveBranchId?.()
       || 'BR-MAIN';
   }
 
   function sha256Hex(buffer) {
-    // Prefer Electron IPC hashing when available; else subtle crypto in renderer.
+    const AA = auth();
+    if (AA?.verifyContentHash && buffer) {
+      return Promise.resolve().then(async () => {
+        const api = global.cuppingElectron?.attachments || global.tadawi?.attachments;
+        if (api?.hashBuffer) return api.hashBuffer(buffer);
+        if (global.crypto?.subtle && buffer) {
+          const ab = buffer instanceof ArrayBuffer ? buffer : (buffer.buffer || buffer);
+          const dig = await crypto.subtle.digest('SHA-256', ab);
+          return Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, '0')).join('');
+        }
+        throw new Error('hash_unavailable');
+      });
+    }
     return Promise.resolve().then(async () => {
       const api = global.cuppingElectron?.attachments || global.tadawi?.attachments;
       if (api?.hashBuffer) return api.hashBuffer(buffer);
@@ -64,6 +100,10 @@
   }
 
   function findById(manifest, id) {
+    if (auth()?.findById) {
+      const hit = auth().findById(id);
+      if (hit) return hit;
+    }
     return (manifest.items || []).find((x) => x && x.id === id) || null;
   }
 
@@ -89,6 +129,14 @@
     }
     if (!validated.sha256) return { ok: false, error: 'hash_required' };
 
+    const AA = auth();
+    if (AA?.findByHash) {
+      const dup = AA.findByHash(validated.sha256, bid);
+      if (dup && dup.state !== STATES.DELETED) {
+        return { ok: true, item: dup, state: dup.state, duplicate: true };
+      }
+    }
+
     const id = 'att-' + validated.sha256.slice(0, 16) + '-' + Date.now().toString(36);
     const remotePath = global.DriveLayout?.attachmentBlobPath?.(cid, bid, validated.sha256)
       || `NajjarTech/centers/${cid}/branches/${bid}/attachments/${validated.sha256}`;
@@ -112,6 +160,11 @@
       lastError: null,
     };
 
+    if (AA?.assertBranchWrite) {
+      const gate = AA.assertBranchWrite(item, bid);
+      if (!gate.ok) return gate;
+    }
+
     if (api?.writeLocal) {
       const local = await api.writeLocal(validated.sha256, buffer);
       if (!local?.ok) return { ok: false, error: local?.error || 'local_write_failed' };
@@ -119,7 +172,6 @@
     }
 
     const manifest = loadManifest();
-    // Duplicate filename different content → new id (content-addressed by hash).
     manifest.items.push(item);
     await saveManifest(manifest);
     return { ok: true, item, state: item.state };
@@ -134,6 +186,12 @@
       return { ok: false, error: 'not_uploadable', state: item.state };
     }
     if (item.centerId !== centerId()) return { ok: false, error: 'wrong_center' };
+
+    const AA = auth();
+    if (AA?.assertBranchWrite) {
+      const gate = AA.assertBranchWrite(item, branchId());
+      if (!gate.ok) return gate;
+    }
 
     item.state = STATES.UPLOADING;
     item.attempts = (item.attempts || 0) + 1;
@@ -160,10 +218,12 @@
         return { ok: false, error: 'no_buffer', item };
       }
 
-      const hash = await sha256Hex(buffer);
-      if (hash !== item.sha256) {
+      const hashCheck = AA?.verifyContentHash
+        ? await AA.verifyContentHash(buffer, item.sha256)
+        : { ok: (await sha256Hex(buffer)) === item.sha256 };
+      if (!hashCheck.ok) {
         item.state = STATES.QUARANTINED;
-        item.lastError = 'hash_mismatch';
+        item.lastError = hashCheck.error || 'hash_mismatch';
         await saveManifest(manifest);
         return { ok: false, error: 'hash_mismatch', item };
       }
@@ -174,7 +234,6 @@
         resume: options.resume !== false,
       });
       if (!up || up.ok === false) {
-        // Fallback: sync file upload helper if present
         const up2 = await global.BackupBridge?.uploadSyncFile?.(buffer, item.sha256, 'google', item.remotePath);
         if (!up2?.ok) {
           item.state = STATES.FAILED;
@@ -246,6 +305,8 @@
   }
 
   function verifyBranchIsolation(branchIdWanted) {
+    const AA = auth();
+    if (AA?.verifyBranchIsolation) return AA.verifyBranchIsolation(branchIdWanted);
     const leaks = list().filter((i) => i.state !== STATES.DELETED && i.branchId && i.branchId !== branchIdWanted);
     return { ok: leaks.length === 0, leaks };
   }

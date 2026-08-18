@@ -27,6 +27,7 @@
     inventoryItems: { strategy: STRATEGIES.MOVEMENT_AWARE, label: 'المخزون', caution: 'high' },
     inventorySuppliers: { strategy: STRATEGIES.MERGE_FIELDS, label: 'موردو المخزون', caution: 'medium' },
     inventoryMovements: { strategy: STRATEGIES.MOVEMENT_AWARE, label: 'حركات المخزون', caution: 'critical' },
+    attachments_meta: { strategy: STRATEGIES.STRICT_CONFLICT, label: 'مرفقات', caution: 'high', protectedFields: ['sha256'] },
     activityLog: { strategy: STRATEGIES.APPEND_UNION, label: 'سجل النشاط', caution: 'low' }
   };
 
