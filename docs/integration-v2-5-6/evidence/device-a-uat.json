@@ -1,0 +1,22 @@
+{
+  "device": "A",
+  "role": "ux-ops-visibility-uat",
+  "startedAt": "2026-08-18T19:27:53.026Z",
+  "finishedAt": "2026-08-18T19:27:53.297Z",
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "release": "6.12.94+"
+  },
+  "unitExit": 0,
+  "scenariosExit": 0,
+  "unitOk": true,
+  "scenariosPassed": 6,
+  "build": {
+    "platform": "linux",
+    "arch": "x64",
+    "winUnpacked": null,
+    "installer": null
+  },
+  "result": "PASS"
+}
