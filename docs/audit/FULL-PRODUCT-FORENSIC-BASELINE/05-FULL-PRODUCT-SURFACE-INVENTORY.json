@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "generated": "2026-08-18T12:58:26.386Z",
+    "source": "index.html",
+    "lines": 27279
+  },
+  "pages": [
+    "dashboard",
+    "daily",
+    "queue-display",
+    "search",
+    "invoices",
+    "reports",
+    "payroll",
+    "employee-ledger",
+    "doctors",
+    "employee",
+    "packages",
+    "settings",
+    "bookings",
+    "messages",
+    "clients",
+    "attendance",
+    "expenses",
+    "inventory",
+    "cashfloat",
+    "logs",
+    "owner-hub",
+    "users"
+  ],
+  "dataPages": [
+    "reports",
+    "payroll",
+    "employee-ledger",
+    "logs"
+  ],
+  "counts": {
+    "buttons": 334,
+    "onclicks": 390,
+    "pages": 22
+  },
+  "classificationSummary": {
+    "WORKING": 0,
+    "SOURCE_CONFIRMED": 724,
+    "UNVERIFIED": 724,
+    "BROKEN": 3,
+    "DEAD": "unknown_without_runtime_trace",
+    "note": "No installed Windows EXE runtime in audit environment. All UI controls classified UNVERIFIED unless static handler confirmed."
+  },
+  "criticalBrokenPaths": [
+    {"id": "backup-v1-restore", "screen": "page-settings", "classification": "BROKEN", "reason": "LevelDB restore while SQLite is SoT"},
+    {"id": "cloud-restore-scenario-c", "screen": "restore-wizard", "classification": "BROKEN", "reason": "Documented FAIL per CURRENT-STATUS.md"},
+    {"id": "benign-error-suppression", "screen": "global", "classification": "BROKEN", "reason": "isBenignCloudErr hides ReferenceErrors"}
+  ]
+}
