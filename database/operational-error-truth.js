@@ -126,6 +126,36 @@ const CATALOG = Object.freeze({
     userMessageAr: 'يلزم إكمال ترحيل الفروع قبل المزامنة.',
     userMessageEn: 'Complete branch migration before sync.',
   },
+  migration_backup_required: {
+    category: 'migration',
+    severity: 'error',
+    userMessageAr: 'يلزم إنشاء نسخة احتياطية قبل ترحيل البيانات.',
+    userMessageEn: 'A pre-migration backup is required.',
+  },
+  pre_migration_backup_required: {
+    category: 'migration',
+    severity: 'error',
+    userMessageAr: 'فشل الترحيل — أنشئ نسخة احتياطية إلزامية قبل المتابعة.',
+    userMessageEn: 'Migration blocked — create mandatory backup first.',
+  },
+  migration_failed: {
+    category: 'migration',
+    severity: 'error',
+    userMessageAr: 'فشل ترحيل البيانات — تمت استعادة النسخة الاحتياطية إن وُجدت.',
+    userMessageEn: 'Data migration failed — pre-migration backup restored if available.',
+  },
+  integrity_failed: {
+    category: 'migration',
+    severity: 'error',
+    userMessageAr: 'فشل فحص سلامة قاعدة البيانات بعد الترحيل — تمت الاستعادة.',
+    userMessageEn: 'Database integrity check failed after migration — restored.',
+  },
+  comparison_mismatch: {
+    category: 'migration',
+    severity: 'error',
+    userMessageAr: 'عدم تطابق البيانات بعد الترحيل — تمت استعادة النسخة الاحتياطية.',
+    userMessageEn: 'Row counts mismatch after migration — backup restored.',
+  },
   cloud_v2_disabled: {
     category: 'config',
     severity: 'info',

@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const { openDatabase, integrityCheck, getSchemaVersion } = require('./connection');
 const { createRepositories } = require('./repositories');
+const migrationSafety = require('./migration-safety');
 
 const TABLE_KEY_MAP = {
   clientsRegistry: 'clients',
@@ -73,34 +74,7 @@ function summarizeSource(snapshot) {
  * @param {string} [options.backupPath] - write pre-migration copy of existing db if present
  * @param {boolean} [options.dryRun]
  */
-function migrateFromSnapshot(options) {
-  const opts = options || {};
-  const snapshot = opts.snapshot;
-  const validation = validateSnapshot(snapshot);
-  if (!validation.ok) return { ok: false, error: validation.error };
-
-  const source = summarizeSource(snapshot);
-  const report = {
-    startedAt: new Date().toISOString(),
-    source,
-    steps: [],
-    ok: false,
-  };
-
-  const dbPath = opts.dbPath || ':memory:';
-  if (dbPath !== ':memory:' && fs.existsSync(dbPath) && opts.backupPath) {
-    fs.mkdirSync(path.dirname(opts.backupPath), { recursive: true });
-    fs.copyFileSync(dbPath, opts.backupPath);
-    report.steps.push({ step: 'backup_existing_db', path: opts.backupPath });
-  }
-
-  if (opts.dryRun) {
-    report.ok = true;
-    report.dryRun = true;
-    report.finishedAt = new Date().toISOString();
-    return report;
-  }
-
+function executeImportTransaction(snapshot, dbPath, opts, report) {
   let db;
   try {
     db = openDatabase(dbPath);
@@ -194,6 +168,7 @@ function migrateFromSnapshot(options) {
     };
     report.target = target;
 
+    const source = report.source || summarizeSource(snapshot);
     const countOk =
       target.clients === source.clients &&
       target.visits === source.visits &&
@@ -220,6 +195,47 @@ function migrateFromSnapshot(options) {
   } finally {
     try { db?.close(); } catch { /* ignore */ }
   }
+}
+
+function migrateFromSnapshot(options) {
+  const opts = options || {};
+  const snapshot = opts.snapshot;
+  const validation = validateSnapshot(snapshot);
+  if (!validation.ok) return { ok: false, error: validation.error };
+
+  const source = summarizeSource(snapshot);
+  const dbPath = opts.dbPath || ':memory:';
+  const safetyCtx = migrationSafety.prepareMigrationRun({
+    dbPath,
+    backupPath: opts.backupPath,
+    dryRun: opts.dryRun,
+    skipBackup: opts.skipBackup,
+  });
+
+  if (!safetyCtx.ok) {
+    return migrationSafety.finalizeMigrationRun(
+      { ok: true, dryRun: !!opts.dryRun, originalDbPath: dbPath, existed: false },
+      { ok: false, error: safetyCtx.error, source, startedAt: new Date().toISOString() }
+    );
+  }
+
+  const report = {
+    startedAt: new Date().toISOString(),
+    source,
+    steps: [],
+    ok: false,
+  };
+
+  if (safetyCtx.backup) {
+    report.steps.push({
+      step: 'backup_existing_db',
+      path: safetyCtx.backup.path,
+      sha256: safetyCtx.backup.sha256,
+    });
+  }
+
+  const core = executeImportTransaction(snapshot, safetyCtx.targetDbPath, opts, report);
+  return migrationSafety.finalizeMigrationRun(safetyCtx, core);
 }
 
 function migrateFromFile(jsonPath, dbPath, options = {}) {
