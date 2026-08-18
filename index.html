@@ -9343,10 +9343,18 @@ function checkAttDuplicate() {
 }
 
 // ═══════════════════════════════════════════════
-// DATA STORE (localStorage-based persistence)
+// DATA STORE — SQLite authoritative; localStorage UI/cache mirror only
 // ═══════════════════════════════════════════════
 const DB = {
-  get: (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
+  get: (k, def) => {
+    try {
+      if (typeof SqliteBridge !== 'undefined' && SqliteBridge.readOperational) {
+        const authoritative = SqliteBridge.readOperational(k);
+        if (authoritative !== undefined) return authoritative;
+      }
+    } catch { /* empty */ }
+    try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; }
+  },
   set: (k, v) => {
     if (typeof dbSetGuarded === 'function' && !dbSetGuarded(k, v)) return;
     try { localStorage.setItem(k, JSON.stringify(v)); } catch {}

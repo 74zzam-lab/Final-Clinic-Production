@@ -1,10 +1,10 @@
 /**
- * Renderer SQLite bridge — V2-5.9 authoritative SoT (no optimistic operational cache).
+ * Renderer SQLite bridge — authoritative operational SoT (Phase 1).
  *
- * Path:
- *   UI action → SQLite transaction (+ outbox) → success → mirror cache + memory
- * On failure:
- *   no success UI, no divergent cache, no outbox (tx rolled back), reload last commit
+ * Read path (Electron):
+ *   DB.get operational key → memory lastCommitted / SQLite hydrate — NOT localStorage
+ * Write path:
+ *   UI → SQLite transaction (+ outbox) → success → LS cache mirror + memory
  */
 (function (global) {
   'use strict';
@@ -14,25 +14,23 @@
     'users', 'settings', 'packages', 'services', 'otRecords', 'budget', 'invoiceCounter',
     'clientFileCounter', 'nextSessions', 'employeeLeaveRequests', 'employeeLedgerAccruals',
     'employeeLedgerPayments', 'employeeLedgerEntries', 'importHistory',
-    // V2-5.10 Category B: inventory synced tables → SQLite KV until dedicated tables land
     'inventoryItems', 'inventorySuppliers', 'inventoryMovements',
-    // sync/attachment meta (not LS-only)
     '__tdw_conflict_queue__',
     '__tdw_conflict_archive__',
     '__tdw_attachment_manifest__',
+    'activityLog',
+    'messageLog',
+    'backupLog',
   ];
-  const OPERATIONAL_KEYS = new Set(CORE_TABLES.concat([
-    'users', 'settings', 'packages', 'services',
-    'inventoryItems', 'inventorySuppliers', 'inventoryMovements',
-    '__tdw_conflict_queue__',
-    '__tdw_attachment_manifest__',
-  ]));
+  const OPERATIONAL_KEYS = new Set(CORE_TABLES.concat(KV_MIRROR));
   const UI_ONLY_KEYS = new Set([
     '__tdw_ui_theme__', '__tdw_ui_lang__', '__tdw_last_tab__', '__tdw_wizard_ui__',
+    'tdw_sidebar_collapsed',
   ]);
 
   const state = {
     ready: false,
+    bootPromise: null,
     sqlitePrimary: false,
     lastError: null,
     status: null,
@@ -42,6 +40,46 @@
 
   function api() {
     return global.cuppingElectron?.database || global.tadawi?.database || null;
+  }
+
+  function isOperationalKey(key) {
+    return OPERATIONAL_KEYS.has(key) || CORE_TABLES.includes(key);
+  }
+
+  function defaultForKey(key) {
+    if (key.endsWith('Counter')) return 0;
+    if (key === 'settings') return {};
+    return [];
+  }
+
+  function readFromLocalStorageOnly(k, def) {
+    try {
+      const raw = localStorage.getItem(k);
+      return raw ? JSON.parse(raw) : def;
+    } catch {
+      return def;
+    }
+  }
+
+  /**
+   * Authoritative read for operational keys.
+   * Returns undefined → caller may fall back to localStorage (browser-only / pre-bridge).
+   */
+  function readOperational(key, def) {
+    if (UI_ONLY_KEYS.has(key)) return undefined;
+    if (!isOperationalKey(key)) return undefined;
+
+    if (Object.prototype.hasOwnProperty.call(state.lastCommitted, key)) {
+      return state.lastCommitted[key];
+    }
+
+    const db = api();
+    if (db) {
+      if (state.ready) return def !== undefined ? def : defaultForKey(key);
+      return def !== undefined ? def : defaultForKey(key);
+    }
+
+    return undefined;
   }
 
   function rawSet(k, v) {
@@ -61,6 +99,12 @@
     else if (tableKey === 'services') global.services = value;
     else if (tableKey === 'packages') global.packages = value;
     else if (tableKey === 'settings' && value && !Array.isArray(value)) global.settings = value;
+    else if (tableKey === 'inventoryItems') global.inventoryItems = value;
+    else if (tableKey === 'inventorySuppliers') global.inventorySuppliers = value;
+    else if (tableKey === 'inventoryMovements') global.inventoryMovements = value;
+    else if (tableKey === 'activityLog') global.activityLog = value;
+    else if (tableKey === 'messageLog') global.messageLog = value;
+    else if (tableKey === 'backupLog') global.backupLog = value;
   }
 
   function rememberCommit(key, value) {
@@ -81,18 +125,14 @@
     return true;
   }
 
+  /** Migration-only: LS snapshot when SQLite not yet primary. */
   function collectSnapshotFromLocal() {
     const snap = {};
     const read = (k, def) => {
-      if (typeof DB !== 'undefined' && (DB.__rawSet || DB.get)) {
-        try {
-          if (DB.get) return DB.get(k, def);
-        } catch { /* empty */ }
+      if (api() && state.ready && Object.prototype.hasOwnProperty.call(state.lastCommitted, k)) {
+        return state.lastCommitted[k];
       }
-      try {
-        const raw = localStorage.getItem(k);
-        return raw ? JSON.parse(raw) : def;
-      } catch { return def; }
+      return readFromLocalStorageOnly(k, def);
     };
     snap.clientsRegistry = read('clientsRegistry', []);
     snap.cases = read('cases', []);
@@ -100,7 +140,9 @@
     snap.doctors = read('doctors', []);
     snap.attendance = read('attendance', []);
     snap.expenses = read('expenses', []);
-    for (const k of KV_MIRROR) snap[k] = read(k, k.endsWith('Counter') ? 0 : (k === 'settings' ? {} : []));
+    for (const k of KV_MIRROR) {
+      snap[k] = read(k, k.endsWith('Counter') ? 0 : (k === 'settings' ? {} : []));
+    }
     if (typeof buildFullBackupObject === 'function') {
       try {
         const full = buildFullBackupObject();
@@ -173,6 +215,7 @@
 
     state.ready = true;
     installWriteThrough();
+    installReadThrough();
     return { ok: true, status: state.status, report: res, sqlitePrimary: state.sqlitePrimary };
   }
 
@@ -203,9 +246,6 @@
     };
   }
 
-  /**
-   * Authoritative operational commit. Cache/memory updated ONLY after SQLite success.
-   */
   async function commitOperational(tableKey, records, options) {
     options = options || {};
     const db = api();
@@ -280,9 +320,6 @@
     }
   }
 
-  /**
-   * Async authoritative setter for UI call sites.
-   */
   async function setAuthoritative(key, value) {
     if (UI_ONLY_KEYS.has(key)) {
       rawSet(key, value);
@@ -294,15 +331,19 @@
     return { ok: true, local: true };
   }
 
+  function installReadThrough() {
+    if (typeof DB === 'undefined') return;
+    DB.__sqliteReadThrough = true;
+    DB.readOperational = readOperational;
+  }
+
   function installWriteThrough() {
     if (typeof DB === 'undefined') return;
     if (!DB.__rawSet) {
-      // Prefer unbridged raw if DbBridge wrapped DB.
       const candidate = DB.raw?.set ? DB.raw.set.bind(DB.raw) : DB.set.bind(DB);
       DB.__rawSet = candidate;
     }
     if (DB.__sqliteWriteThrough) {
-      // Re-install to drop optimistic paths after upgrades.
       DB.__sqliteWriteThrough = false;
     }
     const baseRaw = DB.__rawSet;
@@ -312,13 +353,11 @@
         return true;
       }
       const db = api();
-      // Browser/unit without Electron: local only, never invent outbox.
       if (!db || !state.sqlitePrimary) {
         baseRaw(k, v);
         rememberCommit(k, v);
         return true;
       }
-      // Operational keys: NEVER optimistic cache. Fire authoritative commit; cache only on success.
       if (CORE_TABLES.includes(k) || OPERATIONAL_KEYS.has(k) || KV_MIRROR.includes(k)) {
         const run = CORE_TABLES.includes(k)
           ? commitOperational(k, Array.isArray(v) ? v : [])
@@ -333,8 +372,6 @@
             } catch { /* empty */ }
           }
         });
-        // Return false-ish signal: sync callers must not assume success.
-        // Value is NOT written to LS until commit resolves.
         return false;
       }
       baseRaw(k, v);
@@ -345,6 +382,33 @@
     DB.commitOperational = commitOperational;
     DB.setAuthoritative = setAuthoritative;
     DB.restoreLastCommit = restoreLastCommit;
+    DB.readOperational = readOperational;
+  }
+
+  async function bootFromSQLiteSoT() {
+    const db = api();
+    if (!db) {
+      return { ok: true, mode: 'browser_localStorage_fallback' };
+    }
+    let res = await hydrateIntoMemory();
+    if (!res?.ok) {
+      const mig = await migrateAndEnable({ sourceLabel: 'boot_localStorage_migration' });
+      if (mig?.ok) res = mig;
+    }
+    if (res?.ok) {
+      try {
+        if (typeof global.reloadClientStoreFromDb === 'function') global.reloadClientStoreFromDb();
+        if (typeof global.syncAppGlobals === 'function') global.syncAppGlobals();
+      } catch { /* empty */ }
+    }
+    return res || { ok: false, error: 'boot_hydrate_failed' };
+  }
+
+  function bootFromSQLiteSoTOnce() {
+    if (!state.bootPromise) {
+      state.bootPromise = bootFromSQLiteSoT();
+    }
+    return state.bootPromise;
   }
 
   async function status() {
@@ -362,11 +426,14 @@
   global.SqliteBridge = {
     migrateAndEnable,
     hydrateIntoMemory,
+    bootFromSQLiteSoT,
+    bootFromSQLiteSoTOnce,
     ensureSqlitePrimaryEnabled,
     commitOperational,
     commitKv,
     setAuthoritative,
     restoreLastCommit,
+    readOperational,
     status,
     isPrimary,
     collectSnapshotFromLocal,
@@ -382,4 +449,10 @@
     }),
     getLastError: () => state.lastError,
   };
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => {
+      void bootFromSQLiteSoTOnce();
+    });
+  }
 })(typeof window !== 'undefined' ? window : global);

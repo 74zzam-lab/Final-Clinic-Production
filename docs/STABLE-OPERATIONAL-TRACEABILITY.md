@@ -5,7 +5,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | Branch | Phase | Status | Operator UAT |
 |--------|-------|--------|--------------|
 | `cursor/phase-0-git-baseline-7c71` | 0 — Git baseline | DONE | — |
-| `cursor/phase-1-sqlite-sot-7c71` | 1 — SQLite SoT | PENDING | — |
+| `cursor/phase-1-sqlite-sot-7c71` | 1 — SQLite SoT | DONE (code) | Required after merge |
 
 ## Branch naming
 
