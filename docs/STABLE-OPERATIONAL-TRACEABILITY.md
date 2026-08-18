@@ -7,6 +7,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-0-git-baseline-7c71` | 0 — Git baseline | DONE | — |
 | `cursor/phase-1-sqlite-sot-7c71` | 1 — SQLite SoT | DONE (code) | Required after merge |
 | `cursor/phase-2-transactions-crash-7c71` | 2 — Atomic transactions | DONE (code) | Required after merge |
+| `cursor/phase-3-remove-backup-encryption-7c71` | 3 — Backup V2 plaintext | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -38,6 +39,16 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Clear localStorage in DevTools after login → operational data still from SQLite
 3. Restart after save (patient, invoice, booking)
 
-## Deferred phases (2–14)
+## Phase 3 — Backup V2 plaintext
+
+**Goal:** New `.tdw` backups are plaintext ZIP; no password on create/schedule/restore. Legacy encrypted import only.
+
+**Operator UAT (you):**
+1. Create backup without password
+2. Restore without password
+3. Scheduled backup without stored password
+4. Legacy encrypted file requires password
+
+## Deferred phases (4–14)
 
 See planning doc in agent conversation — not started on this branch.

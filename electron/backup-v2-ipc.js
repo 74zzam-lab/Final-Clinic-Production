@@ -98,6 +98,17 @@ function registerBackupV2Ipc({
     return path.join(getUserDataPath(), 'Backups', 'V2');
   }
 
+  function optionalBackupPassword(opts) {
+    if (opts.password == null || opts.password === '') return null;
+    const password = V.asString(opts.password, { name: 'password', required: false, allowEmpty: true, max: 256 });
+    if (password && password.length < 8) {
+      const err = new Error('password_too_short');
+      err.code = 'password_too_short';
+      throw err;
+    }
+    return password || null;
+  }
+
   async function runRestore(filePath, password, opts = {}) {
     const identity = resolveIdentity(opts);
     const progress = [];
@@ -147,12 +158,7 @@ function registerBackupV2Ipc({
 
   handle('backup:v2:create', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options' });
-    const password = V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 });
-    if (password.length < 8) {
-      const err = new Error('password_too_short');
-      err.code = 'password_too_short';
-      throw err;
-    }
+    const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
     const userDataDir = getUserDataPath();
     const outDir = opts.outputDir
@@ -236,29 +242,32 @@ function registerBackupV2Ipc({
   handle('backup:v2:verify', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
     const filePath = V.asString(opts.filePath, { name: 'filePath', required: true, allowEmpty: false });
-    const password = V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 });
+    const password = optionalBackupPassword(opts);
     return backupV2.verifyBackupFile(filePath, password, opts);
   });
 
   handle('backup:v2:inspect', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
     const filePath = V.asString(opts.filePath, { name: 'filePath', required: true, allowEmpty: false });
-    const password = V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 });
+    const password = optionalBackupPassword(opts);
     const buf = fs.readFileSync(filePath);
-    const inspected = backupV2.inspectEncryptedBackup(buf, password, opts);
+    const inspected = backupV2.inspectBackupBuffer(buf, password, opts);
     return {
       ok: true,
       manifest: inspected.manifest,
       database: inspected.database,
+      encrypted: inspected.encrypted,
+      packageSha256: inspected.packageSha256,
       encryptedSha256: inspected.encryptedSha256,
       encryptedSize: inspected.encryptedSize,
+      size: inspected.size,
     };
   });
 
   handle('backup:v2:restore', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
     const filePath = V.asString(opts.filePath, { name: 'filePath', required: true, allowEmpty: false });
-    const password = V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 });
+    const password = optionalBackupPassword(opts);
     return runRestore(filePath, password, opts);
   });
 
@@ -272,7 +281,7 @@ function registerBackupV2Ipc({
 
   handle('backup:v2:pickLatest', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
-    const password = V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 });
+    const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
     const localDir = opts.dir
       ? V.asString(opts.dir, { name: 'dir', required: true, allowEmpty: false })
@@ -296,7 +305,7 @@ function registerBackupV2Ipc({
 
   handle('backup:v2:restoreLatest', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
-    const password = V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 });
+    const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
     const localDir = opts.dir
       ? V.asString(opts.dir, { name: 'dir', required: true, allowEmpty: false })
@@ -322,14 +331,25 @@ function registerBackupV2Ipc({
     return { ok: true, filePath: result.filePaths[0] };
   });
 
+  handle('backup:v2:importLegacy', async (_e, options) => {
+    const legacyImport = require('./backup-v2-legacy-import');
+    const opts = V.asObject(options, { name: 'options', required: true });
+    const filePath = V.asString(opts.filePath, { name: 'filePath', required: true, allowEmpty: false });
+    const password = V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 });
+    if (password.length < 8) {
+      const err = new Error('password_too_short');
+      err.code = 'password_too_short';
+      throw err;
+    }
+    return legacyImport.importLegacyEncryptedBackup({ ...opts, filePath, password });
+  });
+
   handle('backup:v2:gate', async () => backupV2.readRestoreGate(getUserDataPath()));
 
   handle('backup:v2:stageRemote', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
     const sourcePath = V.asString(opts.sourcePath, { name: 'sourcePath', required: true, allowEmpty: false });
-    const password = opts.password
-      ? V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 })
-      : null;
+    const password = optionalBackupPassword(opts);
     const stageDir = path.join(getUserDataPath(), 'Backups', 'V2', 'staging');
     fs.mkdirSync(stageDir, { recursive: true });
     const destPath = path.join(stageDir, path.basename(sourcePath).replace(/[^\w.\-]+/g, '_'));
@@ -348,7 +368,7 @@ function registerBackupV2Ipc({
   handle('backup:v2:downloadAndRestore', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
     const sourcePath = V.asString(opts.sourcePath, { name: 'sourcePath', required: true, allowEmpty: false });
-    const password = V.asString(opts.password, { name: 'password', required: true, allowEmpty: false, max: 256 });
+    const password = optionalBackupPassword(opts);
     const stageDir = path.join(getUserDataPath(), 'Backups', 'V2', 'staging');
     fs.mkdirSync(stageDir, { recursive: true });
     const destPath = path.join(stageDir, path.basename(sourcePath).replace(/[^\w.\-]+/g, '_'));

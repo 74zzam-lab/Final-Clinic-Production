@@ -136,7 +136,6 @@ function listLocalBackupFiles(backupDir) {
  * Candidates: [{ filePath, createdAt? }] or plain path strings.
  */
 function pickLatestAuthorizedBackup(candidates, password, expectedIdentity = {}, options = {}) {
-  if (!password || String(password).length < 8) throw new Error('password_too_short');
   const list = Array.isArray(candidates) ? candidates : [];
   const inspected = [];
   const rejected = [];
@@ -148,7 +147,7 @@ function pickLatestAuthorizedBackup(candidates, password, expectedIdentity = {},
     }
     try {
       const buf = fs.readFileSync(filePath);
-      const info = inspectEncryptedBackup(buf, password, options);
+      const info = inspectBackupBuffer(buf, password, options);
       assertRestoreIdentityAllowed(info.manifest, expectedIdentity);
       const createdAt = String(info.manifest?.createdAt || item?.createdAt || '') || null;
       const createdMs = Date.parse(createdAt || '') || fs.statSync(filePath).mtimeMs;
@@ -386,7 +385,7 @@ function buildManifest(options, entries, databaseInfo) {
         : (options.branchId ? [String(options.branchId).slice(0, 128)] : [])
     },
     roots: [...RESTORE_ROOTS],
-    encryption: { required: true, algorithm: 'AES-256-GCM', kdf: 'scrypt' },
+    encryption: { required: false, algorithm: null, note: 'plaintext_zip_v2_plain' },
     integrity: { algorithm: 'SHA-256', verifiedBeforeCommit: true },
     files,
   };
@@ -473,23 +472,64 @@ function verifyStagedDatabase(databaseBuffer) {
   }
 }
 
-function inspectEncryptedBackup(encryptedBuffer, password, options = {}) {
-  const outer = Buffer.isBuffer(encryptedBuffer) ? encryptedBuffer : Buffer.from(encryptedBuffer);
-  const zipBuffer = backupCrypto.decryptBuffer(outer, password);
+function isEncryptedBackupBuffer(buf) {
+  const input = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || []);
+  if (input.length < 4) return false;
+  const magic = input.subarray(0, 4);
+  return magic.equals(backupCrypto.MAGIC_V2) || magic.equals(backupCrypto.MAGIC_LEGACY);
+}
+
+function isZipBackupBuffer(buf) {
+  const input = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || []);
+  return input.length >= 2 && input[0] === 0x50 && input[1] === 0x4b;
+}
+
+/**
+ * Inspect Backup V2 package: plaintext ZIP (default) or legacy encrypted envelope.
+ */
+function inspectBackupBuffer(outerBuffer, password, options = {}) {
+  const outer = Buffer.isBuffer(outerBuffer) ? outerBuffer : Buffer.from(outerBuffer);
+  let zipBuffer;
+  let encrypted = false;
+  let encryptedSha256 = null;
+  let encryptedSize = null;
+  if (isEncryptedBackupBuffer(outer)) {
+    if (!password || String(password).length < 8) {
+      const err = new Error('backup_legacy_encrypted_password_required');
+      err.code = 'backup_legacy_encrypted_password_required';
+      throw err;
+    }
+    zipBuffer = backupCrypto.decryptBuffer(outer, password);
+    encrypted = true;
+    encryptedSha256 = backupCrypto.sha256Hex(outer);
+    encryptedSize = outer.length;
+  } else if (!isZipBackupBuffer(outer)) {
+    throw new Error('invalid_backup_format');
+  } else {
+    zipBuffer = outer;
+  }
   const inspected = parseAndVerifyArchive(zipBuffer, options);
   const database = verifyStagedDatabase(inspected.entries[DATABASE_PATH]);
+  const packageSha256 = backupCrypto.sha256Hex(outer);
   return {
     ...inspected,
     zipBuffer,
     database,
-    encryptedSize: outer.length,
-    encryptedSha256: backupCrypto.sha256Hex(outer),
+    encrypted,
+    encryptedSha256,
+    encryptedSize,
+    packageSha256,
+    hash: packageSha256,
+    size: outer.length,
   };
+}
+
+function inspectEncryptedBackup(encryptedBuffer, password, options = {}) {
+  return inspectBackupBuffer(encryptedBuffer, password, options);
 }
 
 async function createBackupBuffer(options) {
   if (!options?.userDataDir) throw new Error('backup_user_data_dir_required');
-  if (!options.password || String(options.password).length < 8) throw new Error('password_too_short');
   const userDataDir = path.resolve(options.userDataDir);
   const sourceDatabase = path.resolve(options.databasePath || path.join(userDataDir, DATABASE_PATH.replace(/\//g, path.sep)));
   const stageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tdw-backup-v2-'));
@@ -506,29 +546,24 @@ async function createBackupBuffer(options) {
     const entries = { [DATABASE_PATH]: new Uint8Array(fs.readFileSync(stagedDatabase)) };
     emitProgress(options, 'collecting_files');
     for (const root of RESTORE_ROOTS.slice(1)) collectDirectory(path.join(userDataDir, root), root, entries);
-    if (options.securityMaterial?.fieldKey) {
-      const fieldKey = String(options.securityMaterial.fieldKey);
-      if (Buffer.from(fieldKey, 'base64').length !== 32) throw new Error('backup_field_key_invalid');
-      entries[SECURITY_PATH] = fflate.strToU8(JSON.stringify({ version: 1, fieldKey }));
-    }
+    // Phase 3: no clinic field-key / security material in operational backup path.
 
     const manifest = buildManifest(options, entries, databaseInfo);
     entries[MANIFEST_PATH] = fflate.strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
     emitProgress(options, 'compressing', { files: manifest.files.length });
     const zipBuffer = zipEntries(entries);
-    emitProgress(options, 'encrypting');
-    const encryptedBuffer = backupCrypto.encryptBuffer(zipBuffer, options.password);
     failpoint(options, 'after_package');
 
     emitProgress(options, 'verifying');
-    const verified = inspectEncryptedBackup(encryptedBuffer, options.password, options);
+    const verified = inspectBackupBuffer(zipBuffer, null, options);
     if (verified.manifest.backupId !== manifest.backupId || verified.database.quickCheck !== 'ok') {
       throw new Error('backup_post_write_verification_failed');
     }
     return {
-      buffer: encryptedBuffer,
-      hash: verified.encryptedSha256,
-      encryptedSize: encryptedBuffer.length,
+      buffer: zipBuffer,
+      hash: verified.packageSha256,
+      packageSha256: verified.packageSha256,
+      encryptedSize: zipBuffer.length,
       zipSize: zipBuffer.length,
       manifest,
       sourceHealth,
@@ -548,8 +583,8 @@ async function createBackupFile(options) {
   emitProgress(options, 'committing');
   writeFileAtomicSync(outputPath, result.buffer, { mode: 0o600 });
   const persisted = fs.readFileSync(outputPath);
-  const verified = inspectEncryptedBackup(persisted, options.password, options);
-  if (verified.encryptedSha256 !== result.hash) throw new Error('backup_persisted_hash_mismatch');
+  const verified = inspectBackupBuffer(persisted, null, options);
+  if (verified.packageSha256 !== result.hash) throw new Error('backup_persisted_hash_mismatch');
   emitProgress(options, 'complete', { path: outputPath, hash: result.hash });
   return { ok: true, path: outputPath, ...result, buffer: undefined };
 }
@@ -665,14 +700,15 @@ function backupFormatPolicy() {
 
 function verifyBackupFile(filePath, password, options = {}) {
   const resolved = path.resolve(filePath);
-  const inspected = inspectEncryptedBackup(fs.readFileSync(resolved), password, options);
+  const inspected = inspectBackupBuffer(fs.readFileSync(resolved), password, options);
   return {
     ok: true,
     path: resolved,
-    hash: inspected.encryptedSha256,
-    size: inspected.encryptedSize,
+    hash: inspected.packageSha256,
+    size: inspected.size,
     manifest: inspected.manifest,
     database: inspected.database,
+    encrypted: inspected.encrypted,
   };
 }
 
@@ -725,13 +761,13 @@ function rollbackSwaps(userDataDir, rollbackRoot, swapped) {
 
 async function restoreBackupFile(options) {
   if (!options?.userDataDir || !options?.filePath) throw new Error('restore_request_invalid');
-  if (!options.password || String(options.password).length < 8) throw new Error('password_too_short');
+  const password = options.password != null ? String(options.password) : '';
   const userDataDir = path.resolve(options.userDataDir);
   const filePath = path.resolve(options.filePath);
   emitProgress(options, 'reading_manifest');
   let inspected;
   try {
-    inspected = inspectEncryptedBackup(fs.readFileSync(filePath), options.password, options);
+    inspected = inspectBackupBuffer(fs.readFileSync(filePath), password || options.password, options);
   } catch (error) {
     try { saveRestoreDiagnosticCopy(filePath, userDataDir, error.code || error.message); } catch { /* best effort */ }
     throw error;
@@ -871,7 +907,8 @@ function friendlyBackupError(error) {
     backup_field_key_missing: 'هذه النسخة لا تحتوي مفتاح حماية البيانات المطلوب لاستعادة قاعدة البيانات المشفرة.',
     backup_disk_space_insufficient: 'لا توجد مساحة قرص كافية لإكمال العملية.',
     restored_sqlite_integrity_failed: 'قاعدة البيانات المستعادة لم تجتز فحص السلامة.',
-    password_too_short: 'كلمة مرور النسخة يجب ألا تقل عن 8 أحرف.',
+    backup_legacy_encrypted_password_required: 'نسخة مشفّرة قديمة — استخدم أداة الاستيراد أو أدخل كلمة مرور النسخة القديمة.',
+    password_too_short: 'كلمة مرور النسخة القديمة يجب ألا تقل عن 8 أحرف.',
     restore_center_mismatch: 'رُفضت الاستعادة: النسخة تخص مركزاً مختلفاً عن الجهاز الحالي.',
     restore_center_missing: 'رُفضت الاستعادة: النسخة لا تتضمن هوية المركز المطلوبة.',
     restore_branch_unauthorized: 'رُفضت الاستعادة: النسخة تخص فرعاً غير مصرّح لهذا الجهاز.',
@@ -896,6 +933,9 @@ module.exports = {
   createBackupBuffer,
   createBackupFile,
   createBackupWithUpload,
+  inspectBackupBuffer,
+  isEncryptedBackupBuffer,
+  isZipBackupBuffer,
   inspectEncryptedBackup,
   verifyBackupFile,
   restoreBackupFile,
