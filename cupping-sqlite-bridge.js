@@ -194,6 +194,15 @@
     else state.bundleOps.push(op);
   }
 
+  function getTableRevision(tableKey, branchId) {
+    return Number(
+      global.VersionsIndex?.getTableRevision?.(tableKey, branchId) ||
+      global.Repository?.getRevision?.(tableKey) ||
+      global.Repository?._revisions?.[tableKey] ||
+      0
+    );
+  }
+
   function buildOutboxEntryForKv(key, value) {
     const centerId =
       global.ConfigLayer?.getCenterId?.() ||
@@ -209,16 +218,20 @@
       global.DeviceConfig?.getDeviceId?.() ||
       global.DeviceConfig?.load?.()?.deviceUuid ||
       'unknown-device';
-    return {
+    const base = getTableRevision(key, branchId);
+    const next = base + 1;
+    const payload_json = JSON.stringify(value ?? null);
+    const entry = {
       center_id: centerId,
       branch_id: branchId,
       table_name: key,
       operation: 'TABLE_BUMP',
-      base_revision: 0,
-      new_revision: Date.now(),
+      base_revision: base,
+      new_revision: next,
       device_id: deviceId,
-      payload_json: JSON.stringify(value ?? null),
+      payload_json,
     };
+    return entry;
   }
 
   function getOperationalWriteBranchId() {
@@ -478,16 +491,20 @@
       global.DeviceConfig?.load?.()?.deviceUuid ||
       'unknown-device';
     if (!centerId) return null;
-    return {
+    const base = getTableRevision(tableKey, branchId);
+    const next = base + 1;
+    const payload_json = JSON.stringify(records ?? null);
+    const entry = {
       center_id: centerId,
       branch_id: branchId,
       table_name: tableKey,
       operation: 'TABLE_BUMP',
-      base_revision: 0,
-      new_revision: Date.now(),
+      base_revision: base,
+      new_revision: next,
       device_id: deviceId,
-      payload_json: JSON.stringify(records ?? null),
+      payload_json,
     };
+    return entry;
   }
 
   async function commitOperational(tableKey, records, options) {

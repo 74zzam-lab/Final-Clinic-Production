@@ -46,10 +46,35 @@
     return conflicts;
   }
 
+  function applyTombstoneDecision(tombDecision) {
+    if (!tombDecision) return null;
+    switch (tombDecision.action) {
+      case 'skip':
+        return { action: ACTIONS.SKIP, reason: tombDecision.reason };
+      case 'push':
+        return { action: ACTIONS.PUSH, reason: tombDecision.reason };
+      case 'pull':
+        return { action: ACTIONS.PULL, reason: tombDecision.reason };
+      case 'conflict':
+        return {
+          action: ACTIONS.CONFLICT,
+          reason: tombDecision.reason,
+          fields: tombDecision.fields,
+          local: tombDecision.local,
+          remote: tombDecision.remote,
+        };
+      default:
+        return null;
+    }
+  }
+
   function decideRecord(local, remote, table) {
     if (table && global.TableMergePolicy?.decideForTable) {
       return global.TableMergePolicy.decideForTable(table, local, remote);
     }
+    const tombDecision = global.TombstonePolicy?.decideTombstone?.(local, remote, table);
+    const tombResolved = applyTombstoneDecision(tombDecision);
+    if (tombResolved) return tombResolved;
     if (!local && !remote) return { action: ACTIONS.SKIP };
     if (local && !remote) return { action: ACTIONS.PUSH, reason: 'local_only' };
     if (!local && remote) return { action: ACTIONS.PULL, reason: 'cloud_only' };

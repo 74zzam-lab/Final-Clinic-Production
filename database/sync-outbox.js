@@ -5,6 +5,7 @@
  * Main-process and Node test harness use this module directly.
  */
 const crypto = require('crypto');
+const idempotencyKeys = require('./idempotency-keys');
 
 function nowIso() {
   return new Date().toISOString();
@@ -120,15 +121,11 @@ function createSyncPlatform(db) {
       : null;
     const payloadHash = entry.payload_hash || (payloadJson ? sha256(payloadJson) : null);
     const eventId = entry.event_id || uuid();
-    const idempotencyKey = entry.idempotency_key || [
-      entry.center_id,
-      entry.branch_id,
-      entry.table_name,
-      entry.record_id || '',
-      entry.operation,
-      entry.new_revision,
-      payloadHash || '',
-    ].join(':');
+    const idempotencyKey = idempotencyKeys.buildOutboxIdempotencyKey({
+      ...entry,
+      payload_hash: payloadHash,
+      payload_json: payloadJson,
+    });
 
     const row = {
       event_id: eventId,

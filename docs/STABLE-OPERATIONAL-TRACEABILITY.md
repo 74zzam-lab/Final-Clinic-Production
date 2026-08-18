@@ -11,6 +11,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-4-branch-sql-isolation-7c71` | 4 — Branch SQL isolation | DONE (code) | Required after merge |
 | `cursor/phase-5-branch-switch-hardening-7c71` | 5 — Branch switch re-hydrate | DONE (code) | Required after merge |
 | `cursor/phase-6-sync-guards-7c71` | 6 — Sync guards | DONE (code) | Required after merge |
+| `cursor/phase-7-conflict-tombstone-idempotency-7c71` | 7 — Tombstone / idempotency | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -76,6 +77,15 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 1. New device + cloud data → pull before push
 2. Empty export does not wipe Drive
 
-## Deferred phases (7–14)
+## Phase 7 — Tombstone / idempotency
+
+**Goal:** Tombstone delete sync rules; stable outbox idempotency; revision-based bridge outbox.
+
+**Operator UAT (you):**
+1. Delete vs offline edit → conflict queue (not silent overwrite)
+2. Duplicate save → no duplicate outbox rows
+3. Dual tombstone → newer delete wins automatically
+
+## Deferred phases (8–14)
 
 See planning doc in agent conversation — not started on this branch.

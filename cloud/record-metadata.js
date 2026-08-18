@@ -100,6 +100,10 @@
     }
   }
 
+  function isTombstone(record) {
+    return global.TombstonePolicy?.isTombstone?.(record) || !!(record && record.deletedAt);
+  }
+
   global.RecordMetadata = {
     REQUIRED,
     migrateLegacy,
@@ -107,6 +111,7 @@
     stampUpdate,
     validate,
     contentHash,
+    isTombstone,
     getDeviceId,
     getBranchId,
     getUserLabel
