@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "build": {
+    "at": "2026-08-18T12:25:44.403Z",
+    "platform": "linux",
+    "arch": "x64",
+    "release": "6.12.94+",
+    "distPresent": false,
+    "winUnpacked": null,
+    "installer": null
+  },
+  "exitCodes": {
+    "unit": 0,
+    "scenarios": 0,
+    "inventory": 0
+  }
+}

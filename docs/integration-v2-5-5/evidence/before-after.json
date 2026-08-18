@@ -1,0 +1,230 @@
+{
+  "phase": "V2-5.5",
+  "recordedAt": "2026-08-18T12:25:41.093Z",
+  "baseline": {
+    "note": "pre-V2-5.5 baseline stub (no historical median archive)",
+    "coldOpen": null,
+    "warmOpen": null,
+    "dashboardQuery": null
+  },
+  "current": {
+    "coldOpen": {
+      "medianMs": 1.789,
+      "runs": [
+        1.789,
+        1.507,
+        1.97
+      ]
+    },
+    "warmOpen": {
+      "medianMs": 0.015,
+      "runs": [
+        0.058,
+        0.015,
+        0.01
+      ]
+    },
+    "offlineStartup": {
+      "medianMs": 0.05,
+      "runs": [
+        1.313,
+        0.05,
+        0.025
+      ]
+    },
+    "onlineStartup": {
+      "medianMs": 0.055,
+      "runs": [
+        0.113,
+        0.04,
+        0.055
+      ]
+    },
+    "dashboardQuery": {
+      "medianMs": 0.052,
+      "runs": [
+        0.119,
+        0.052,
+        0.029
+      ]
+    },
+    "clientSearch": {
+      "medianMs": 0.052,
+      "runs": [
+        0.135,
+        0.052,
+        0.047
+      ]
+    },
+    "largeReport": {
+      "medianMs": 0.164,
+      "runs": [
+        0.201,
+        0.164,
+        0.131
+      ]
+    },
+    "largeExport": {
+      "medianMs": 0.265,
+      "runs": [
+        0.282,
+        0.265,
+        0.236
+      ]
+    },
+    "largeImport": {
+      "medianMs": 1.019,
+      "runs": [
+        1.019,
+        1.741,
+        0.802
+      ]
+    },
+    "fullBackup": {
+      "medianMs": 2.285,
+      "runs": [
+        5.058,
+        2.285,
+        2.252
+      ]
+    },
+    "incrementalBackupPolicy": {
+      "medianMs": 0.005,
+      "runs": [
+        0.076,
+        0.005,
+        0.003
+      ]
+    },
+    "fullRestore": {
+      "medianMs": 3.142,
+      "runs": [
+        3.238,
+        3.142,
+        2.84
+      ]
+    },
+    "initialSync": {
+      "medianMs": 1.048,
+      "runs": [
+        2.876,
+        0.968,
+        1.048
+      ]
+    },
+    "noChangePoll": {
+      "medianMs": 0.024,
+      "runs": [
+        0.106,
+        0.024,
+        0.02
+      ]
+    },
+    "singleEventPush": {
+      "medianMs": 0.355,
+      "runs": [
+        0.511,
+        0.355,
+        0.235
+      ]
+    },
+    "flush100": {
+      "medianMs": 5.556,
+      "runs": [
+        5.556,
+        5.321,
+        7.971
+      ]
+    },
+    "flush1000": {
+      "medianMs": 56.473,
+      "runs": [
+        52.013,
+        56.473,
+        57.65
+      ]
+    },
+    "largeAttachmentMeta": {
+      "medianMs": 0.093,
+      "runs": [
+        0.225,
+        0.093,
+        0.055
+      ]
+    }
+  },
+  "deltas": {
+    "coldOpen": {
+      "currentMedianMs": 1.789,
+      "baselineMedianMs": null
+    },
+    "warmOpen": {
+      "currentMedianMs": 0.015,
+      "baselineMedianMs": null
+    },
+    "offlineStartup": {
+      "currentMedianMs": 0.05,
+      "baselineMedianMs": null
+    },
+    "onlineStartup": {
+      "currentMedianMs": 0.055,
+      "baselineMedianMs": null
+    },
+    "dashboardQuery": {
+      "currentMedianMs": 0.052,
+      "baselineMedianMs": null
+    },
+    "clientSearch": {
+      "currentMedianMs": 0.052,
+      "baselineMedianMs": null
+    },
+    "largeReport": {
+      "currentMedianMs": 0.164,
+      "baselineMedianMs": null
+    },
+    "largeExport": {
+      "currentMedianMs": 0.265,
+      "baselineMedianMs": null
+    },
+    "largeImport": {
+      "currentMedianMs": 1.019,
+      "baselineMedianMs": null
+    },
+    "fullBackup": {
+      "currentMedianMs": 2.285,
+      "baselineMedianMs": null
+    },
+    "incrementalBackupPolicy": {
+      "currentMedianMs": 0.005,
+      "baselineMedianMs": null
+    },
+    "fullRestore": {
+      "currentMedianMs": 3.142,
+      "baselineMedianMs": null
+    },
+    "initialSync": {
+      "currentMedianMs": 1.048,
+      "baselineMedianMs": null
+    },
+    "noChangePoll": {
+      "currentMedianMs": 0.024,
+      "baselineMedianMs": null
+    },
+    "singleEventPush": {
+      "currentMedianMs": 0.355,
+      "baselineMedianMs": null
+    },
+    "flush100": {
+      "currentMedianMs": 5.556,
+      "baselineMedianMs": null
+    },
+    "flush1000": {
+      "currentMedianMs": 56.473,
+      "baselineMedianMs": null
+    },
+    "largeAttachmentMeta": {
+      "currentMedianMs": 0.093,
+      "baselineMedianMs": null
+    }
+  }
+}

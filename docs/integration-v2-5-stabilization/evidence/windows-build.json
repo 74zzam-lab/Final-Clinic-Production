@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-18T12:25:43.645Z",
+  "ok": true,
+  "build": {
+    "platform": "linux",
+    "arch": "x64",
+    "release": "6.12.94+",
+    "distPresent": false,
+    "distDeferred": true,
+    "winUnpacked": null,
+    "installer": null
+  }
+}
