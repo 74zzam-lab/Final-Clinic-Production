@@ -10,6 +10,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-3-remove-backup-encryption-7c71` | 3 — Backup V2 plaintext | DONE (code) | Required after merge |
 | `cursor/phase-4-branch-sql-isolation-7c71` | 4 — Branch SQL isolation | DONE (code) | Required after merge |
 | `cursor/phase-5-branch-switch-hardening-7c71` | 5 — Branch switch re-hydrate | DONE (code) | Required after merge |
+| `cursor/phase-6-sync-guards-7c71` | 6 — Sync guards | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -67,6 +68,14 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 1. Data on BR-A and BR-B — switch branches → correct lists
 2. No stale rows from previous branch in operational forms
 
-## Deferred phases (6–14)
+## Phase 6 — Sync guards
+
+**Goal:** Block empty push, localRev=0 destructive push, stale remote overwrite.
+
+**Operator UAT (you):**
+1. New device + cloud data → pull before push
+2. Empty export does not wipe Drive
+
+## Deferred phases (7–14)
 
 See planning doc in agent conversation — not started on this branch.

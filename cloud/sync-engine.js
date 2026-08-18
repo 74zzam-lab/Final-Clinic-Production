@@ -105,6 +105,55 @@
     return result;
   }
 
+  function getLocalRevisionForTable(table, branchId) {
+    branchId = getBranchId(branchId);
+    const fromRepo = Number(global.Repository?.getRevision?.(table) || 0);
+    if (fromRepo > 0) return fromRepo;
+    const local = global.VersionsIndex?.loadLocal?.(getCenterId());
+    return Number(local?.branches?.[branchId]?.databaseVersion || local?.databaseVersion || 0);
+  }
+
+  async function getRemoteBranchDatabaseRevision(branchId) {
+    branchId = getBranchId(branchId);
+    const centerId = getCenterId();
+    if (!centerId || !global.DriveAdapter?.downloadVersions) {
+      return { ok: false, remoteRevision: 0 };
+    }
+    const res = await global.DriveAdapter.downloadVersions(centerId, branchId);
+    if (!res?.ok || !res.data) return { ok: false, remoteRevision: 0, error: res?.error };
+    const remoteRev = Number(
+      res.data?.branches?.[branchId]?.databaseVersion || res.data?.databaseVersion || 0
+    );
+    return { ok: true, versions: res.data, remoteRevision: remoteRev };
+  }
+
+  async function assertPushAllowed(table, branchId, recordCount, options) {
+    options = options || {};
+    const localRev = options.localRevision != null
+      ? Number(options.localRevision)
+      : getLocalRevisionForTable(table, branchId);
+    let remoteRev = Number(options.remoteRevision || 0);
+    if (options.remoteRevision == null && !options.skipRemoteFetch) {
+      const remote = await getRemoteBranchDatabaseRevision(branchId);
+      remoteRev = Number(remote.remoteRevision || 0);
+    }
+    const guard = global.SyncPushGuards?.evaluatePushGuard?.({
+      localRevision: localRev,
+      remoteRevision: remoteRev,
+      recordCount,
+      strictLocalRevZero: options.strictLocalRevZero === true,
+    }) || { ok: true };
+    if (!guard.ok) {
+      global.SyncState?.setError?.(guard.code || guard.reason);
+      global.AuditLogger?.logSyncEvent?.('SYNC_PUSH_BLOCKED', {
+        entity: table,
+        entityId: branchId,
+        summary: guard.code || guard.reason,
+      });
+    }
+    return guard;
+  }
+
   function schedulePush(table, branchId) {
     if (!global.CloudMeta?.isCloudV2Enabled?.()) return;
     branchId = getBranchId(branchId);
@@ -190,6 +239,7 @@
 
     let remotePath;
     let payload;
+    let operationalRecordCount = 0;
 
     if (meta.layer === 'config' || (meta.file === 'settings.json' && table === 'settings')) {
       const pack = global.ConfigLayer?.exportBranchPack?.(branchId);
@@ -221,6 +271,11 @@
       }
     } else {
       payload = global.OperationalLayer?.exportTable?.(table, branchId);
+      operationalRecordCount = Array.isArray(payload?.records) ? payload.records.length : 0;
+      const pushGuard = await assertPushAllowed(table, branchId, operationalRecordCount);
+      if (!pushGuard.ok) {
+        return { ok: false, blocked: true, reason: pushGuard.code || pushGuard.reason, guard: pushGuard };
+      }
       remotePath = global.OperationalLayer?.drivePathForTable?.(centerId, branchId, table);
       const upOp = await global.DriveAdapter.uploadJson(remotePath, payload, { overwrite: true });
       if (!upOp?.ok) {
@@ -295,6 +350,25 @@
       ? await global.DriveAdapter.downloadJsonFirst(paths)
       : await global.DriveAdapter.downloadJson(paths[0]);
     if (!dl?.ok) return dl;
+
+    const localRev = getLocalRevisionForTable(table, branchId);
+    const remoteRev = Number(dl.data?.revision || 0);
+    let pendingOutbox = 0;
+    if (global.SqliteOutboxBridge?.counts) {
+      try {
+        const counts = await global.SqliteOutboxBridge.counts(branchId);
+        pendingOutbox = Number(counts?.pending || 0) + Number(counts?.inflight || 0);
+      } catch { /* empty */ }
+    }
+    const pullGuard = global.SyncPushGuards?.evaluatePullApplyGuard?.({
+      localRevision: localRev,
+      remoteRevision: remoteRev,
+      pendingOutbox,
+    }) || { ok: true };
+    if (!pullGuard.ok) {
+      return { ok: false, blocked: true, reason: pullGuard.code || pullGuard.reason, guard: pullGuard };
+    }
+
     return blockIfUnsafePull(global.OperationalLayer?.importTable?.(table, dl.data, branchId), table);
   }
 
@@ -541,6 +615,10 @@
     branch_id: 'ربط الفرع',
     device_id: 'تسجيل الجهاز',
     device_sync_blocked: 'الجهاز محظور من المزامنة',
+    empty_push_blocked: 'رفض رفع نسخة فارغة — اسحب من السحابة أولاً',
+    local_rev_zero_pull_required: 'الجهاز جديد محلياً — اسحب البيانات قبل الرفع',
+    stale_remote_skipped: 'نسخة سحابية أقدم من المحلي — تم تخطيها',
+    stale_overwrite_blocked: 'رفض استبدال محلي أحدث — أفرغ قائمة الانتظار أو ادمج',
     sync_guard_blocked: 'حارس المزامنة موقوف — اضغط استئناف',
     unsafe: 'حارس المزامنة أوقف المزامنة بعد تحليل البيانات — اضغط استئناف المزامنة',
     UNSAFE: 'حارس المزامنة أوقف المزامنة بعد تحليل البيانات — اضغط استئناف المزامنة',
