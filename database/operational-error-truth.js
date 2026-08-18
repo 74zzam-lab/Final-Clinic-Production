@@ -156,6 +156,30 @@ const CATALOG = Object.freeze({
     userMessageAr: 'عدم تطابق البيانات بعد الترحيل — تمت استعادة النسخة الاحتياطية.',
     userMessageEn: 'Row counts mismatch after migration — backup restored.',
   },
+  database_unhealthy: {
+    category: 'sqlite',
+    severity: 'error',
+    userMessageAr: 'قاعدة البيانات غير صالحة — أوقف التشغيل واستعد من نسخة احتياطية.',
+    userMessageEn: 'Database unhealthy — stop operations and restore from backup.',
+  },
+  integrity_check_failed: {
+    category: 'sqlite',
+    severity: 'error',
+    userMessageAr: 'فشل فحص سلامة قاعدة البيانات.',
+    userMessageEn: 'Database integrity check failed.',
+  },
+  foreign_key_violation: {
+    category: 'sqlite',
+    severity: 'error',
+    userMessageAr: 'انتهاك قيود الارتباط في قاعدة البيانات.',
+    userMessageEn: 'Foreign key constraint violation.',
+  },
+  schema_version_mismatch: {
+    category: 'sqlite',
+    severity: 'error',
+    userMessageAr: 'إصدار مخطط قاعدة البيانات غير متوقع.',
+    userMessageEn: 'Unexpected database schema version.',
+  },
   cloud_v2_disabled: {
     category: 'config',
     severity: 'info',

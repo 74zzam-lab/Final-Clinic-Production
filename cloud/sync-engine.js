@@ -621,6 +621,10 @@
     branch_id: 'ربط الفرع',
     device_id: 'تسجيل الجهاز',
     device_sync_blocked: 'الجهاز محظور من المزامنة',
+    database_unhealthy: 'قاعدة البيانات غير صالحة — أوقف التشغيل واستعد من نسخة احتياطية',
+    integrity_check_failed: 'فشل فحص سلامة قاعدة البيانات',
+    foreign_key_violation: 'انتهاك قيود الارتباط في قاعدة البيانات',
+    schema_version_mismatch: 'إصدار مخطط قاعدة البيانات غير متوقع',
     empty_push_blocked: 'رفض رفع نسخة فارغة — اسحب من السحابة أولاً',
     local_rev_zero_pull_required: 'الجهاز جديد محلياً — اسحب البيانات قبل الرفع',
     stale_remote_skipped: 'نسخة سحابية أقدم من المحلي — تم تخطيها',
@@ -671,6 +675,13 @@
       if (deviceId && global.DeviceRegistry?.canSync) {
         const cs = global.DeviceRegistry.canSync(null, deviceId);
         if (cs && cs.ok === false) missing.push(cs.error || 'device_sync_blocked');
+      }
+    } catch { /* empty */ }
+
+    try {
+      const dbHealth = global.OperationalDbHealth?.isOperationalAllowed?.();
+      if (dbHealth && dbHealth.ok === false) {
+        missing.push(dbHealth.error || 'database_unhealthy');
       }
     } catch { /* empty */ }
 
