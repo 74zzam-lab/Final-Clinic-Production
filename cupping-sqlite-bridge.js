@@ -444,6 +444,7 @@
     state.ready = true;
     installWriteThrough();
     installReadThrough();
+    try { await global.OperationalDbHealth?.refresh?.({ force: true }); } catch { /* empty */ }
     return { ok: true, status: state.status, report: res, sqlitePrimary: state.sqlitePrimary };
   }
 
@@ -527,6 +528,15 @@
     if (global.LegacyBranchMigration?.isPushBlocked?.()) {
       return { ok: false, error: 'legacy_branch_migration_required' };
     }
+    const healthBlock = global.OperationalDbHealth?.isOperationalAllowed?.();
+    if (healthBlock && healthBlock.ok === false) {
+      return {
+        ok: false,
+        error: healthBlock.error || 'database_unhealthy',
+        health: healthBlock.health,
+        messageAr: healthBlock.messageAr,
+      };
+    }
     const list = filterRecordsForWriteBranch(Array.isArray(records) ? records : []);
     const branchId = getOperationalWriteBranchId();
     state.pendingKeys.add(tableKey);
@@ -567,6 +577,15 @@
     if (!state.sqlitePrimary) {
       const en = await ensureSqlitePrimaryEnabled();
       if (!en.ok) return { ok: false, error: en.error || 'sqlite_primary_required' };
+    }
+    const healthBlock = global.OperationalDbHealth?.isOperationalAllowed?.();
+    if (healthBlock && healthBlock.ok === false) {
+      return {
+        ok: false,
+        error: healthBlock.error || 'database_unhealthy',
+        health: healthBlock.health,
+        messageAr: healthBlock.messageAr,
+      };
     }
     state.pendingKeys.add(key);
     try {

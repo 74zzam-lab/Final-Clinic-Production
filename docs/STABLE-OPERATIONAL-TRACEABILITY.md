@@ -16,6 +16,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-9-owner-rbac-hardening-7c71` | 9 — Owner/RBAC hardening | DONE (code) | Required after merge |
 | `cursor/phase-10-error-truthfulness-7c71` | 10 — Error truthfulness | DONE (code) | Required after merge |
 | `cursor/phase-11-migration-safety-7c71` | 11 — Migration safety | DONE (code) | Required after merge |
+| `cursor/phase-12-operational-db-health-7c71` | 12 — DB health gates | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -126,6 +127,15 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Failed import → data restored; Arabic error (not raw code)
 3. Dry-run → live DB unchanged
 
-## Deferred phases (12–14)
+## Phase 12 — Operational DB health
+
+**Goal:** Integrity/FK/schema gates before writes and sync.
+
+**Operator UAT (you):**
+1. Unhealthy DB → operational saves blocked; sync not ready
+2. Healthy clinic → `operationalHealth.ok` in status
+3. Blocked save shows Arabic backup-restore guidance
+
+## Deferred phases (13–14)
 
 See planning doc in agent conversation — not started on this branch.

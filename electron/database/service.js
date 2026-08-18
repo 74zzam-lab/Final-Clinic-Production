@@ -10,6 +10,7 @@ const { openDatabase, defaultDbPath, integrityCheck, getSchemaVersion } = requir
 const { createRepositories } = require('../../database/repositories');
 const { migrateFromSnapshot, exportSnapshot } = require('../../database/migrate-from-json');
 const { createSyncPlatform } = require('../../database/sync-outbox');
+const operationalDbHealth = require('../../database/operational-db-health');
 
 let db = null;
 let repos = null;
@@ -33,15 +34,27 @@ function ensureDb() {
   }
 }
 
+function getOperationalHealth() {
+  ensureDb();
+  return operationalDbHealth.assessHealth(db);
+}
+
+function assertOperationalWriteAllowed() {
+  const health = getOperationalHealth();
+  return operationalDbHealth.assertWriteAllowed(health);
+}
+
 function getStatus() {
   ensureDb();
   const meta = {};
   for (const row of db.prepare('SELECT key, value FROM meta').all()) meta[row.key] = row.value;
+  const operationalHealth = operationalDbHealth.assessHealth(db);
   return {
     ok: true,
     path: getDbPath(),
     schemaVersion: getSchemaVersion(db),
     integrity: integrityCheck(db),
+    operationalHealth,
     meta,
     counts: {
       clients: repos.clients.count(),
@@ -71,6 +84,8 @@ function hydrate() {
 }
 
 function persistTable(tableKey, records, options = {}) {
+  const gate = assertOperationalWriteAllowed();
+  if (!gate.ok) return gate;
   ensureDb();
   const list = Array.isArray(records) ? records : [];
   const branchId = options.branchId ? String(options.branchId) : null;
@@ -104,6 +119,8 @@ function persistTable(tableKey, records, options = {}) {
 }
 
 function persistKv(key, value) {
+  const gate = assertOperationalWriteAllowed();
+  if (!gate.ok) return gate;
   ensureDb();
   repos.kv.set(key, value);
   return { ok: true };
@@ -281,8 +298,18 @@ function applyBundleSteps(steps) {
 }
 
 function syncOp(request) {
-  const sp = ensureSync();
   const req = request || {};
+  const writeOps = new Set([
+    'enqueueAtomicPersistKv',
+    'enqueueAtomicPersistTable',
+    'enqueueAtomicBundle',
+    'persistBundle',
+  ]);
+  if (writeOps.has(req.op)) {
+    const gate = assertOperationalWriteAllowed();
+    if (!gate.ok) return gate;
+  }
+  const sp = ensureSync();
   switch (req.op) {
     case 'enqueue':
       return sp.enqueue(req.entry || {});
