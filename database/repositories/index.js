@@ -1,5 +1,7 @@
 'use strict';
 
+const branchSlice = require('./branch-slice');
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -61,6 +63,13 @@ function createClientRepository(db) {
       });
       tx(list);
     },
+    replaceBranchSlice(list, branchId) {
+      branchSlice.replaceBranchSlice(db, 'clients', this, list, branchId, (id) => {
+        db.prepare('UPDATE visits SET client_id = NULL WHERE client_id = ?').run(id);
+      });
+    },
+    countForBranch: (branchId) => branchSlice.countForBranch(db, 'clients', branchId),
+    getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'clients', id, branchId),
   };
 }
 
@@ -122,6 +131,13 @@ function createVisitRepository(db) {
       });
       tx(list);
     },
+    replaceBranchSlice(list, branchId) {
+      branchSlice.replaceBranchSlice(db, 'visits', this, list, branchId, (id) => {
+        db.prepare('DELETE FROM visit_cups WHERE visit_id = ?').run(id);
+      });
+    },
+    countForBranch: (branchId) => branchSlice.countForBranch(db, 'visits', branchId),
+    getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'visits', id, branchId),
   };
 }
 
@@ -167,6 +183,11 @@ function createBookingRepository(db) {
       });
       tx(list);
     },
+    replaceBranchSlice(list, branchId) {
+      branchSlice.replaceBranchSlice(db, 'appointments', this, list, branchId);
+    },
+    countForBranch: (branchId) => branchSlice.countForBranch(db, 'appointments', branchId),
+    getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'appointments', id, branchId),
   };
 }
 
@@ -211,6 +232,13 @@ function createEmployeeRepository(db) {
       });
       tx(list);
     },
+    replaceBranchSlice(list, branchId) {
+      branchSlice.replaceBranchSlice(db, 'employees', this, list, branchId, (id) => {
+        db.prepare('DELETE FROM attendance WHERE employee_id = ?').run(id);
+      });
+    },
+    countForBranch: (branchId) => branchSlice.countForBranch(db, 'employees', branchId),
+    getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'employees', id, branchId),
   };
 }
 
@@ -252,6 +280,20 @@ function createAttendanceRepository(db) {
         }
       });
       tx(list);
+    },
+    replaceBranchSlice(list, branchId) {
+      branchSlice.replaceAttendanceBranchSlice(db, this, list, branchId);
+    },
+    countForBranch(branchId) {
+      const bid = branchSlice.normalizeBranchId(branchId);
+      let count = 0;
+      for (const row of db.prepare('SELECT payload_json FROM attendance').all()) {
+        try {
+          const payload = JSON.parse(row.payload_json);
+          if (branchSlice.recordMatchesBranch(payload, bid)) count += 1;
+        } catch { /* skip */ }
+      }
+      return count;
     },
   };
 }
@@ -296,6 +338,11 @@ function createExpenseRepository(db) {
       });
       tx(list);
     },
+    replaceBranchSlice(list, branchId) {
+      branchSlice.replaceBranchSlice(db, 'expenses', this, list, branchId);
+    },
+    countForBranch: (branchId) => branchSlice.countForBranch(db, 'expenses', branchId),
+    getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'expenses', id, branchId),
   };
 }
 
@@ -347,4 +394,5 @@ module.exports = {
   createAttendanceRepository,
   createExpenseRepository,
   createKvRepository,
+  branchSlice,
 };
