@@ -6451,12 +6451,13 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
             <button class="btn btn-accent btn-sm" type="button" onclick="runBackupV2RestoreManual()" aria-label="Restore backup file via wizard">♻️ استعادة من ملف</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="runBackupV2RestoreLatest()" aria-label="Restore latest authorized backup">⏫ أحدث نسخة</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="refreshBackupV2HistoryUi()" aria-label="Refresh backup history">📜 سجل النسخ</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="runBackupV2ImportLegacy()" aria-label="Import legacy encrypted backup">🔐 نسخة مشفّرة قديمة</button>
           </div>
         </div>
         <div id="ops-ux-backup-host">
           <div id="ops-ux-status-host"></div>
         </div>
-        <p class="backup-card-desc">مسار الإنتاج لاستعادة قاعدة البيانات والمرفقات. يُرفض أي نسخة لمركز/فرع غير مصرّح به.</p>
+        <p class="backup-card-desc">مسار الإنتاج لاستعادة قاعدة البيانات والمرفقات (ZIP غير مشفّر — بلا كلمة مرور). النسخ المشفّرة القديمة تتطلب كلمة مرور عبر «نسخة مشفّرة قديمة». يُرفض أي نسخة لمركز/فرع غير مصرّح به.</p>
         <div class="form-grid form-grid-2" style="gap:10px;margin-top:10px">
           <div class="form-group" style="margin:0;display:none" aria-hidden="true">
             <label class="form-label">مفتاح التشفير (تلقائي)</label>
@@ -16883,10 +16884,35 @@ function getBackupV2IdentityMeta() {
 function getBackupV2Password() {
   const field = document.getElementById('bk-v2-pass')?.value || '';
   if (field && field.length >= 8) return field;
-  const legacy = document.getElementById('bk-encrypt-pass')?.value || '';
-  if (legacy && legacy.length >= 8) return legacy;
-  const center = (typeof CenterId !== 'undefined' && CenterId.getStoredCenterId?.()) || 'CENTER';
-  return `tdw-v2-${String(center).replace(/[^a-zA-Z0-9]/g,'').slice(0,24)}-auto`;
+  return null;
+}
+
+/** Prompt only when a backup file is legacy encrypted (CDB2/CDBK envelope). */
+async function resolveBackupV2PasswordForFile(api, filePath) {
+  if (!filePath || !api?.v2Inspect) return { password: null, legacyEncrypted: false };
+  try {
+    const inspected = await api.v2Inspect({ filePath });
+    if (inspected?.encrypted) {
+      const pwd = window.prompt('نسخة مشفّرة قديمة — أدخل كلمة مرور النسخة (8+)', '');
+      if (!pwd || pwd.length < 8) {
+        notify('كلمة مرور النسخة القديمة مطلوبة (8+)', 'warning');
+        return { password: null, legacyEncrypted: true, cancelled: true };
+      }
+      return { password: pwd, legacyEncrypted: true };
+    }
+    return { password: null, legacyEncrypted: false };
+  } catch (err) {
+    const code = String(err?.code || err?.message || '');
+    if (/backup_legacy_encrypted_password_required/i.test(code)) {
+      const pwd = window.prompt('نسخة مشفّرة قديمة — أدخل كلمة مرور النسخة (8+)', '');
+      if (!pwd || pwd.length < 8) {
+        notify('كلمة مرور النسخة القديمة مطلوبة (8+)', 'warning');
+        return { password: null, legacyEncrypted: true, cancelled: true };
+      }
+      return { password: pwd, legacyEncrypted: true };
+    }
+    throw err;
+  }
 }
 
 async function refreshBackupV2Status() {
@@ -16923,14 +16949,14 @@ async function runBackupV2Create() {
     notify('⚠️ جلسة الصلاحيات غير مربوطة — أعد تسجيل الدخول ثم حاول مجدداً (rbac_session_required)', 'warning');
     return;
   }
-  const password = getBackupV2Password();
-  if (!password || password.length < 8) {
-    notify('⚠️ أدخل كلمة مرور Backup V2 (8 أحرف على الأقل)', 'warning');
-    return;
-  }
   notify('⏳ جاري إنشاء Backup V2...', 'warning');
   try {
-    const res = await api.v2Create({ password, backupType: 'manual', ...getBackupV2IdentityMeta() });
+    const password = getBackupV2Password();
+    const res = await api.v2Create({
+      ...(password ? { password } : {}),
+      backupType: 'manual',
+      ...getBackupV2IdentityMeta(),
+    });
     if (res?.ok || res?.path || res?.hash) {
       notify('✅ تم إنشاء نسخة Backup V2', 'success');
       await refreshBackupV2Status();
@@ -17000,11 +17026,6 @@ async function runBackupV2RestoreManual() {
     notify('Backup V2 unavailable', 'danger');
     return;
   }
-  const password = getBackupV2Password();
-  if (!password || password.length < 8) {
-    notify('Backup V2 password required (8+)', 'warning');
-    return;
-  }
   try {
     let filePath = null;
     if (api.v2PickFile) {
@@ -17016,6 +17037,9 @@ async function runBackupV2RestoreManual() {
       notify('No file selected', 'warning');
       return;
     }
+    const pwdMeta = await resolveBackupV2PasswordForFile(api, filePath);
+    if (pwdMeta.cancelled) return;
+    const password = pwdMeta.password;
     const typed = window.prompt('Type confirmation phrase to overwrite', '');
     if (!window.DangerConfirm?.restoreOverwriteConfirm?.({ typed })?.ok) {
       notify('Restore cancelled — phrase mismatch', 'warning');
@@ -17030,7 +17054,7 @@ async function runBackupV2RestoreManual() {
         notify('Restoring...', 'warning');
         const res = await api.v2Restore({
           filePath,
-          password,
+          ...(password ? { password } : {}),
           relaunch: true,
           ...getBackupV2IdentityMeta(),
         });
@@ -17052,17 +17076,13 @@ async function runBackupV2RestoreLatest() {
     notify('Backup V2 unavailable', 'danger');
     return;
   }
-  const password = getBackupV2Password();
-  if (!password || password.length < 8) {
-    notify('Backup V2 password required (8+)', 'warning');
-    return;
-  }
   const typed = window.prompt('Type confirmation phrase to overwrite', '');
   if (!window.DangerConfirm?.restoreOverwriteConfirm?.({ typed })?.ok) {
     notify('Restore cancelled — phrase mismatch', 'warning');
     return;
   }
   try {
+    const password = getBackupV2Password();
     const flow = await window.OpsUxBridge.runRestoreWizardFlow({
       filePath: 'latest-authorized',
       typedPhrase: typed,
@@ -17071,7 +17091,7 @@ async function runBackupV2RestoreLatest() {
       execute: async () => {
         notify('Restoring latest authorized...', 'warning');
         return await api.v2RestoreLatest({
-          password,
+          ...(password ? { password } : {}),
           relaunch: true,
           ...getBackupV2IdentityMeta(),
         });
@@ -17084,20 +17104,45 @@ async function runBackupV2RestoreLatest() {
   }
 }
 
+async function runBackupV2ImportLegacy() {
+  const api = getBackupV2Api();
+  if (!api?.v2ImportLegacy || !api?.v2PickFile) {
+    notify('استيراد النسخ المشفّرة القديمة غير متاح', 'danger');
+    return;
+  }
+  try {
+    const picked = await api.v2PickFile();
+    if (picked?.canceled) return;
+    const filePath = picked?.filePath;
+    if (!filePath) {
+      notify('لم يُحدد ملف', 'warning');
+      return;
+    }
+    const password = window.prompt('كلمة مرور النسخة المشفّرة القديمة (8+)', '');
+    if (!password || password.length < 8) {
+      notify('كلمة مرور مطلوبة (8+)', 'warning');
+      return;
+    }
+    notify('⏳ جاري فحص النسخة المشفّرة القديمة...', 'warning');
+    const res = await api.v2ImportLegacy({ filePath, password });
+    if (res?.ok) {
+      notify('✅ النسخة المشفّرة القديمة صالحة — يمكنك استعادتها من «استعادة من ملف»', 'success');
+    } else {
+      notify('⚠️ ' + (res?.error || 'فشل الاستيراد'), 'danger');
+    }
+  } catch (err) {
+    notify('⚠️ ' + (err?.message || err), 'danger');
+  }
+}
+
 async function saveBackupV2ScheduleFromUI() {
   const api = getBackupV2Api();
   if (!api?.v2ScheduleConfigure) return;
   const mins = Number(document.getElementById('bk-v2-schedule-interval')?.value || 0);
-  const password = getBackupV2Password();
   try {
-    if (mins > 0 && (!password || password.length < 8)) {
-      notify('⚠️ فعّل الجدولة يتطلب كلمة مرور Backup V2', 'warning');
-      return;
-    }
     await api.v2ScheduleConfigure({
       enabled: mins > 0,
       intervalMinutes: mins > 0 ? mins : 60,
-      password: mins > 0 ? password : undefined,
       ...getBackupV2IdentityMeta(),
     });
     await refreshBackupV2Status();

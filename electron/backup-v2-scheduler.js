@@ -104,16 +104,12 @@ class BackupV2Scheduler {
     let config = this.readConfig();
     if (!config.enabled) return { ok: false, skipped: 'disabled' };
     if (!force && !this.isDue(config)) return { ok: false, skipped: 'not_due', status: this.status(config) };
-    const password = this.credentialVault.get(PASSWORD_CREDENTIAL);
-    if (!password) {
-      config = this.writeConfig({ ...config, lastStatus: 'needs_password', lastError: 'scheduled_backup_password_unavailable' });
-      return { ok: false, skipped: 'needs_password', status: this.status(config) };
-    }
     this.running = true;
     const attemptedAt = new Date(this.now()).toISOString();
     config = this.writeConfig({ ...config, lastAttemptAt: attemptedAt, lastStatus: 'running', lastError: null });
     try {
-      const result = await this.runBackup(password, { ...config, trigger: 'scheduled', backupMode: 'scheduled' });
+      const legacyPassword = this.credentialVault.get(PASSWORD_CREDENTIAL);
+      const result = await this.runBackup(legacyPassword || null, { ...config, trigger: 'scheduled', backupMode: 'scheduled' });
       if (!result?.ok) throw new Error(result?.message || result?.error || 'scheduled_backup_failed');
       const completedAt = new Date(this.now()).toISOString();
       config = this.writeConfig({ ...config, lastSuccessAt: completedAt, lastStatus: result.cloudOk === false && config.cloudEnabled ? 'local_only' : 'success', lastError: result.uploadError || null });

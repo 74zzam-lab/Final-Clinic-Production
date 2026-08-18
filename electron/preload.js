@@ -63,6 +63,7 @@ const ALLOWED_INVOKE = new Set([
   'backup:v2:formatPolicy',
   'backup:v2:scheduleStatus',
   'backup:v2:scheduleConfigure',
+  'backup:v2:importLegacy',
   'cache:writeBranchConfig',
   'cache:readBranchConfig',
   'cache:writeLicense',
@@ -215,6 +216,7 @@ const cuppingApi = {
     v2FormatPolicy: () => invoke('backup:v2:formatPolicy'),
     v2ScheduleStatus: () => invoke('backup:v2:scheduleStatus'),
     v2ScheduleConfigure: (options) => invoke('backup:v2:scheduleConfigure', options),
+    v2ImportLegacy: (options) => invoke('backup:v2:importLegacy', options),
   },
   cache: {
     writeBranchConfig: (centerId, branchId, pack) =>

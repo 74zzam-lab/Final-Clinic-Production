@@ -34,52 +34,59 @@ async function main() {
   check(health.ok === true, 'databaseHealth ok');
   check(Number(health.schemaVersion) >= 4, `schemaVersion expected >=4 got ${health.schemaVersion}`);
 
-  const password = 'hybrid-test-password';
   const outPath = path.join(root, 'backup.tdw');
   const created = await backupV2.createBackupFile({
     userDataDir,
     outputPath: outPath,
-    password,
     appVersion: '2.0.0',
     backupType: 'manual',
   });
   check(created.ok === true, 'createBackupFile ok');
   check(fs.existsSync(outPath), 'backup file exists');
   check(created.hash && /^[a-f0-9]{64}$/i.test(created.hash), 'backup hash present');
+  check(created.manifest?.encryption?.required === false, 'manifest marks encryption not required');
 
-  const verified = backupV2.verifyBackupFile(outPath, password);
-  check(verified.ok === true || verified.manifest?.format === backupV2.BACKUP_FORMAT || verified.database?.ok, 'verifyBackupFile ok');
-
-  // wrong password
-  let wrongOk = false;
-  try {
-    backupV2.verifyBackupFile(outPath, 'wrong-password-xx');
-    wrongOk = true;
-  } catch (err) {
-    check(/backup_authentication_failed|password|auth/i.test(String(err.message)), `wrong password error: ${err.message}`);
-  }
-  check(!wrongOk, 'wrong password must fail');
-
-  // corrupted file
-  const corruptPath = path.join(root, 'corrupt.tdw');
   const buf = fs.readFileSync(outPath);
-  buf[buf.length - 1] ^= 0xff;
-  fs.writeFileSync(corruptPath, buf);
+  check(backupV2.isZipBackupBuffer(buf), 'new backup is plaintext ZIP');
+  check(!backupV2.isEncryptedBackupBuffer(buf), 'new backup is not encrypted envelope');
+
+  const verified = backupV2.verifyBackupFile(outPath, null);
+  check(verified.ok === true || verified.manifest?.format === backupV2.BACKUP_FORMAT || verified.database?.ok, 'verifyBackupFile ok without password');
+
+  // Legacy encrypted envelope still requires password
+  const backupCrypto = require('../../electron/backup-crypto-v2');
+  const legacyPassword = 'hybrid-test-password';
+  const encPath = path.join(root, 'legacy-enc.tdw');
+  fs.writeFileSync(encPath, backupCrypto.encryptBuffer(buf, legacyPassword));
+  let legacyNoPwdFailed = false;
+  try {
+    backupV2.verifyBackupFile(encPath, null);
+  } catch (err) {
+    legacyNoPwdFailed = /backup_legacy_encrypted_password_required|password/i.test(String(err.code || err.message));
+  }
+  check(legacyNoPwdFailed, 'legacy encrypted backup rejects missing password');
+
+  const legacyVerified = backupV2.verifyBackupFile(encPath, legacyPassword);
+  check(legacyVerified.ok === true || legacyVerified.manifest?.format === backupV2.BACKUP_FORMAT, 'legacy encrypted verify with password');
+
+  // Corrupted plaintext file (truncate — must fail verify)
+  const corruptPath = path.join(root, 'corrupt.tdw');
+  const corruptBuf = Buffer.from(buf).subarray(0, Math.max(64, buf.length - 32));
+  fs.writeFileSync(corruptPath, corruptBuf);
   let corruptFailed = false;
   try {
-    backupV2.verifyBackupFile(corruptPath, password);
+    backupV2.verifyBackupFile(corruptPath, null);
   } catch {
     corruptFailed = true;
   }
   check(corruptFailed, 'corrupted backup must fail');
 
-  // restore to alternate userData
+  // Restore plaintext to alternate userData
   const restoreDir = path.join(root, 'restoreUserData');
   fs.mkdirSync(restoreDir, { recursive: true });
   const restored = await backupV2.restoreBackupFile({
     userDataDir: restoreDir,
     filePath: outPath,
-    password,
   });
   check(restored.ok === true || fs.existsSync(path.join(restoreDir, 'database', 'tadawi.db')), 'restore writes database');
   if (fs.existsSync(path.join(restoreDir, 'database', 'tadawi.db'))) {

@@ -56,19 +56,11 @@
       return { ok: true, skipped: true, reason: 'empty_local_db' };
     }
 
-    // Prefer Backup V2 emergency, then legacy runBackupNow.
+    // Prefer Backup V2 emergency snapshot (plaintext — no password).
     try {
       const api = global.cuppingElectron?.backup || global.tadawi?.backup;
       if (api?.v2Create) {
-        const password = options.password
-          || (typeof global.getBackupV2Password === 'function' && global.getBackupV2Password())
-          || (typeof global.getBackupPassword === 'function' && await global.getBackupPassword())
-          || '';
-        if (!password || String(password).length < 8) {
-          return { ok: false, error: 'pre_restore_password_required', mandatory: true };
-        }
         const res = await api.v2Create({
-          password,
           backupType: 'emergency-before-restore',
           cloud: false,
           ...(typeof global.getBackupV2IdentityMeta === 'function' ? global.getBackupV2IdentityMeta() : {}),
