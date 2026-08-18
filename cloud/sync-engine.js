@@ -28,7 +28,8 @@
     doctors: { layer: 'operational', file: 'doctors.json', table: 'doctors' },
     inventoryItems: { layer: 'operational', file: 'inventory-items.json', table: 'inventoryItems' },
     inventorySuppliers: { layer: 'operational', file: 'inventory-suppliers.json', table: 'inventorySuppliers' },
-    inventoryMovements: { layer: 'operational', file: 'inventory-movements.json', table: 'inventoryMovements' }
+    inventoryMovements: { layer: 'operational', file: 'inventory-movements.json', table: 'inventoryMovements' },
+    attachments_meta: { layer: 'operational', file: 'attachments-meta.json', table: 'attachments_meta' },
   };
 
   let _pollTimer = null;

@@ -15,6 +15,7 @@
     'clientFileCounter', 'nextSessions', 'employeeLeaveRequests', 'employeeLedgerAccruals',
     'employeeLedgerPayments', 'employeeLedgerEntries', 'importHistory',
     'inventoryItems', 'inventorySuppliers', 'inventoryMovements',
+    'attachments_meta',
     '__tdw_conflict_queue__',
     '__tdw_conflict_archive__',
     '__tdw_attachment_manifest__',

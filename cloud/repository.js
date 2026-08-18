@@ -9,7 +9,8 @@
   const SYNCED_TABLES = [
     'cases', 'clientsRegistry', 'bookings', 'users', 'doctors',
     'settings', 'expenses', 'packages', 'services',
-    'attendance', 'inventoryItems', 'inventorySuppliers', 'inventoryMovements'
+    'attendance', 'inventoryItems', 'inventorySuppliers', 'inventoryMovements',
+    'attachments_meta',
   ];
 
   const SYNCED_SET = new Set(SYNCED_TABLES);
