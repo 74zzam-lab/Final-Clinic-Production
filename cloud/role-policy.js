@@ -62,6 +62,14 @@
   }
 
   function canResolveConflicts(user) {
+    user = user || getUser();
+    if (global.RbacGuard?.resolveAuthoritativeUser) {
+      const auth = global.RbacGuard.resolveAuthoritativeUser(user);
+      if (!auth) return false;
+      user = auth;
+    }
+    if (!user) return false;
+    if (isDev(user)) return true;
     return isManager(user);
   }
 

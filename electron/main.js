@@ -873,6 +873,7 @@ handle('database:exportSnapshot', () => ({ ok: true, data: dbService.exportSnaps
 handle('database:syncOp', (_e, request) => {
   const req = V.asObject(request, { required: true, maxKeys: 40 });
   const op = V.asString(req.op, { name: 'op', max: 64, required: true, allowEmpty: false });
+  rbacSession.assertSyncOpAllowed(_e, op);
   return dbService.syncOp({ ...req, op });
 });
 

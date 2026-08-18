@@ -13,6 +13,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-6-sync-guards-7c71` | 6 — Sync guards | DONE (code) | Required after merge |
 | `cursor/phase-7-conflict-tombstone-idempotency-7c71` | 7 — Tombstone / idempotency | DONE (code) | Required after merge |
 | `cursor/phase-8-attachments-authority-7c71` | 8 — Attachments authority | DONE (code) | Required after merge |
+| `cursor/phase-9-owner-rbac-hardening-7c71` | 9 — Owner/RBAC hardening | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -96,6 +97,15 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Branch switch → attachment list scoped correctly
 3. Legacy manifest clinic → migrates without data loss
 
-## Deferred phases (9–14)
+## Phase 9 — Owner / RBAC hardening
+
+**Goal:** Authoritative role resolution; manager IPC gates for conflict resolve; owner hub mutate guards.
+
+**Operator UAT (you):**
+1. Reception cannot open conflict manager or resolve via IPC
+2. Forged `currentUser.role` does not elevate privileges
+3. Owner-only hub actions blocked for non-owner
+
+## Deferred phases (10–14)
 
 See planning doc in agent conversation — not started on this branch.

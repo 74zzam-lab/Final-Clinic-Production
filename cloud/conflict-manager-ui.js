@@ -126,7 +126,8 @@
   }
 
   function open() {
-    if (!global.RolePolicy?.canResolveConflicts?.()) {
+    if (!global.OperationalRbacGuard?.canResolveConflicts?.()
+      && !global.RolePolicy?.canResolveConflicts?.()) {
       global.notify?.('⛔ شاشة التعارضات للمدير فقط', 'danger');
       return false;
     }

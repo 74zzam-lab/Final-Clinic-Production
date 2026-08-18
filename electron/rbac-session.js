@@ -1,5 +1,7 @@
 'use strict';
 
+const { SYNC_OP_MIN_RANK } = require('../database/operational-rbac-policy');
+
 /**
  * V2-5.4 — Electron main RBAC session + channel policy.
  * Session is bound per webContents; privileged channels require an active session.
@@ -201,6 +203,27 @@ function sessionAllowsChannel(session, channel) {
   return { ok: true };
 }
 
+function assertSyncOpAllowed(event, op) {
+  const minRank = SYNC_OP_MIN_RANK[String(op || '')];
+  if (!minRank) return { ok: true };
+  const session = getSession(event);
+  if (!session) {
+    const err = new Error('rbac_session_required');
+    err.code = 'rbac_session_required';
+    err.ok = false;
+    err.rbac = { ok: false, error: 'rbac_session_required', op };
+    throw err;
+  }
+  if (session.rank < minRank) {
+    const err = new Error('rbac_rank_denied');
+    err.code = 'rbac_rank_denied';
+    err.ok = false;
+    err.rbac = { ok: false, error: 'rbac_rank_denied', minRank, rank: session.rank, op };
+    throw err;
+  }
+  return { ok: true, session };
+}
+
 function assertChannelAllowed(event, channel) {
   if (PUBLIC_CHANNELS.has(channel)) return { ok: true, public: true };
   const session = getSession(event);
@@ -233,6 +256,7 @@ module.exports = {
   getSession,
   sessionAllowsChannel,
   assertChannelAllowed,
+  assertSyncOpAllowed,
   assertBranchInSession,
   rankOf,
 };
