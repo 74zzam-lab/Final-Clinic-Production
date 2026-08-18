@@ -14371,6 +14371,7 @@ function saveCase() {
   if (cups<=0) { notify('⚠️ يجب إدخال عدد الكاسات', 'danger'); return; }
 
   window._saveCaseBusy = true;
+  if (typeof SqliteBridge !== 'undefined' && SqliteBridge.beginBundle) SqliteBridge.beginBundle();
   try {
   const doc = doctors.find(x => x.id === doctor);
   const d = getDiscountCalc(cups);
@@ -14559,7 +14560,19 @@ function saveCase() {
   if (typeof releaseStaleUiLocks === 'function') releaseStaleUiLocks();
   scheduleMessagingCheck();
   } finally {
-    window._saveCaseBusy = false;
+    const releaseBusy = () => { window._saveCaseBusy = false; };
+    if (typeof SqliteBridge !== 'undefined' && SqliteBridge.commitBundle) {
+      void SqliteBridge.commitBundle().then((res) => {
+        if (!res?.ok && !res?.skipped) {
+          try {
+            notify('⚠️ فشل حفظ الجلسة في SQLite — ' + (res?.error || 'bundle_commit_failed'), 'danger');
+          } catch { /* empty */ }
+        }
+        releaseBusy();
+      }).catch(() => releaseBusy());
+    } else {
+      releaseBusy();
+    }
   }
 }
 

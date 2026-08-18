@@ -6,6 +6,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 |--------|-------|--------|--------------|
 | `cursor/phase-0-git-baseline-7c71` | 0 — Git baseline | DONE | — |
 | `cursor/phase-1-sqlite-sot-7c71` | 1 — SQLite SoT | DONE (code) | Required after merge |
+| `cursor/phase-2-transactions-crash-7c71` | 2 — Atomic transactions | DONE (code) | Required after merge |
 
 ## Branch naming
 
