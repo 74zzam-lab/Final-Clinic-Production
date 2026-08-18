@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-18T12:25:44.473Z",
+  "ok": true,
+  "errors": [],
+  "exitCode": 0,
+  "checks": {
+    "ownerPasswordEnforced": true,
+    "activationWizardSteps": true,
+    "duplicatePanelsHidden": true,
+    "modalVariants": true,
+    "dashboardGated": true
+  }
+}

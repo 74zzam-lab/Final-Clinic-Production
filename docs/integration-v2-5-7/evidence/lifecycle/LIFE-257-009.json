@@ -1,0 +1,12 @@
+{
+  "id": "LIFE-257-009",
+  "title": "Silent uninstall defaults app-only",
+  "ok": true,
+  "result": "PASS",
+  "at": "2026-08-18T12:25:43.491Z",
+  "evidence": {
+    "silentDefaultsAppOnly": true,
+    "fullWipeRequiresFlag": true,
+    "nsis": true
+  }
+}
