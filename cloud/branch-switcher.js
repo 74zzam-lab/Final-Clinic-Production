@@ -27,6 +27,15 @@
   }
 
   function refreshSurfaces() {
+    void refreshSurfacesAsync();
+  }
+
+  async function refreshSurfacesAsync() {
+    if (global.SqliteBridge?.rehydrateBranchView) {
+      try {
+        await global.SqliteBridge.rehydrateBranchView();
+      } catch { /* non-fatal — fall back to DB.get */ }
+    }
     if (typeof global.reloadClientStoreFromDb === 'function') global.reloadClientStoreFromDb();
     if (typeof global.refreshCaseDerivedViews === 'function') global.refreshCaseDerivedViews();
     if (typeof global.refreshDashboard === 'function') global.refreshDashboard();

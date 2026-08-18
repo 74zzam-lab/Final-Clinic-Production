@@ -67,12 +67,72 @@
    * Authoritative read for operational keys.
    * Returns undefined → caller may fall back to localStorage (browser-only / pre-bridge).
    */
+  function shouldUseAggregateView() {
+    if (global.BranchScope?.isAggregateBranchView?.()) return true;
+    const active = global.BranchScope?.getActiveBranchId?.();
+    return active === '*' || active === '__ALL__';
+  }
+
+  function filterForActiveViewIfNeeded(key, value) {
+    if (!CORE_TABLES.includes(key) || !Array.isArray(value)) return value;
+    if (shouldUseAggregateView()) return value;
+    if (global.BranchScope?.filterForActiveView) {
+      return global.BranchScope.filterForActiveView(value);
+    }
+    if (global.BranchScope?.filterByBranch) {
+      const bid = global.BranchContexts?.getOperationalWriteBranch?.()
+        || global.BranchScope?.getActiveBranchId?.()
+        || 'BR-MAIN';
+      return global.BranchScope.filterByBranch(value, bid);
+    }
+    return value;
+  }
+
+  function filterRecordsForWriteBranch(records) {
+    if (!Array.isArray(records)) return [];
+    const bid = getOperationalWriteBranchId();
+    if (global.BranchScope?.filterByBranch) {
+      return global.BranchScope.filterByBranch(records, bid);
+    }
+    return records;
+  }
+
+  function recordOutsideBranch(record, branchId) {
+    if (!record || typeof record !== 'object') return true;
+    const bid = branchId || getOperationalWriteBranchId();
+    if (global.BranchScope?.filterByBranch) {
+      return global.BranchScope.filterByBranch([record], bid).length === 0;
+    }
+    return (record.branchId || 'BR-MAIN') !== bid;
+  }
+
+  function mergeBranchSliceIntoCommitted(tableKey, branchRecords, branchId) {
+    const bid = branchId || getOperationalWriteBranchId();
+    const full = Array.isArray(state.lastCommitted[tableKey])
+      ? state.lastCommitted[tableKey].slice()
+      : [];
+    const others = full.filter((r) => recordOutsideBranch(r, bid));
+    const merged = [...others, ...(Array.isArray(branchRecords) ? branchRecords : [])];
+    rememberCommit(tableKey, merged);
+    const viewVal = filterForActiveViewIfNeeded(tableKey, merged);
+    rawSet(tableKey, viewVal);
+    syncMemory(tableKey, viewVal);
+  }
+
+  function applyCommittedToView(key, value) {
+    rememberCommit(key, value);
+    const viewVal = filterForActiveViewIfNeeded(key, value);
+    rawSet(key, viewVal);
+    syncMemory(key, viewVal);
+  }
+
   function readOperational(key, def) {
     if (UI_ONLY_KEYS.has(key)) return undefined;
     if (!isOperationalKey(key)) return undefined;
 
     if (Object.prototype.hasOwnProperty.call(state.lastCommitted, key)) {
-      return state.lastCommitted[key];
+      const raw = state.lastCommitted[key];
+      return filterForActiveViewIfNeeded(key, raw);
     }
 
     const db = api();
@@ -122,10 +182,11 @@
 
   function queueBundleOp(key, value) {
     const kind = CORE_TABLES.includes(key) ? 'table' : 'kv';
+    const tableValue = kind === 'table' ? filterRecordsForWriteBranch(Array.isArray(value) ? value : []) : undefined;
     const op = {
       key,
       kind,
-      records: kind === 'table' ? (Array.isArray(value) ? value : []) : undefined,
+      records: kind === 'table' ? tableValue : undefined,
       value: kind === 'kv' ? value : undefined,
     };
     const idx = state.bundleOps.findIndex((o) => o.key === key);
@@ -229,10 +290,11 @@
         return { ok: false, error: state.lastError, res };
       }
       for (const op of ops) {
-        const val = op.kind === 'table' ? op.records : op.value;
-        rememberCommit(op.key, val);
-        rawSet(op.key, val);
-        syncMemory(op.key, val);
+        if (op.kind === 'table') {
+          mergeBranchSliceIntoCommitted(op.key, op.records, getOperationalWriteBranchId());
+        } else {
+          applyCommittedToView(op.key, op.value);
+        }
       }
       state.lastError = null;
       return { ok: true, count: ops.length, bundle: true, outbox: entries.length };
@@ -262,8 +324,9 @@
   function restoreLastCommit(key) {
     if (!Object.prototype.hasOwnProperty.call(state.lastCommitted, key)) return false;
     const prev = state.lastCommitted[key];
-    rawSet(key, prev);
-    syncMemory(key, prev);
+    const viewVal = filterForActiveViewIfNeeded(key, prev);
+    rawSet(key, viewVal);
+    syncMemory(key, viewVal);
     return true;
   }
 
@@ -342,8 +405,9 @@
 
     const apply = (k, v) => {
       rememberCommit(k, v);
-      rawSet(k, v);
-      syncMemory(k, v);
+      const viewVal = filterForActiveViewIfNeeded(k, v);
+      rawSet(k, viewVal);
+      syncMemory(k, viewVal);
     };
     apply('clientsRegistry', data.clientsRegistry || []);
     apply('cases', data.cases || []);
@@ -359,6 +423,44 @@
     installWriteThrough();
     installReadThrough();
     return { ok: true, status: state.status, report: res, sqlitePrimary: state.sqlitePrimary };
+  }
+
+  /**
+   * Re-read SQLite SoT and apply active branch view filter to globals (branch switch).
+   */
+  async function rehydrateBranchView() {
+    const db = api();
+    if (!db) return { ok: false, error: 'database_api_unavailable' };
+    const res = await db.hydrate();
+    if (!res?.ok) return res;
+    const data = res.data || {};
+    state.status = res.status;
+    state.sqlitePrimary = !!(res.status && res.status.sqlitePrimary);
+
+    const apply = (k, v) => {
+      rememberCommit(k, v);
+      const viewVal = filterForActiveViewIfNeeded(k, v);
+      rawSet(k, viewVal);
+      syncMemory(k, viewVal);
+    };
+    apply('clientsRegistry', data.clientsRegistry || []);
+    apply('cases', data.cases || []);
+    apply('bookings', data.bookings || []);
+    apply('doctors', data.doctors || []);
+    apply('attendance', data.attendance || []);
+    apply('expenses', data.expenses || []);
+    for (const k of KV_MIRROR) {
+      if (data[k] !== undefined) apply(k, data[k]);
+    }
+
+    state.ready = true;
+    state.lastError = null;
+    return {
+      ok: true,
+      aggregateView: shouldUseAggregateView(),
+      branchId: getOperationalWriteBranchId(),
+      status: state.status,
+    };
   }
 
   function buildOutboxEntry(tableKey, records) {
@@ -399,7 +501,7 @@
     if (global.LegacyBranchMigration?.isPushBlocked?.()) {
       return { ok: false, error: 'legacy_branch_migration_required' };
     }
-    const list = Array.isArray(records) ? records : [];
+    const list = filterRecordsForWriteBranch(Array.isArray(records) ? records : []);
     const branchId = getOperationalWriteBranchId();
     state.pendingKeys.add(tableKey);
     try {
@@ -421,9 +523,7 @@
         restoreLastCommit(tableKey);
         return { ok: false, error: state.lastError, res };
       }
-      rememberCommit(tableKey, list);
-      rawSet(tableKey, list);
-      syncMemory(tableKey, list);
+      mergeBranchSliceIntoCommitted(tableKey, list, branchId);
       state.lastError = null;
       return { ok: true, tableKey, count: list.length, authoritative: true };
     } catch (e) {
@@ -450,9 +550,7 @@
         restoreLastCommit(key);
         return { ok: false, error: state.lastError };
       }
-      rememberCommit(key, value);
-      rawSet(key, value);
-      syncMemory(key, value);
+      applyCommittedToView(key, value);
       state.lastError = null;
       return { ok: true, key, authoritative: true };
     } catch (e) {
@@ -580,6 +678,7 @@
   global.SqliteBridge = {
     migrateAndEnable,
     hydrateIntoMemory,
+    rehydrateBranchView,
     bootFromSQLiteSoT,
     bootFromSQLiteSoTOnce,
     ensureSqlitePrimaryEnabled,
