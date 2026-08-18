@@ -1,0 +1,13 @@
+{
+  "id": "LIFE-257-005",
+  "title": "App-only uninstall preserves data",
+  "ok": true,
+  "result": "PASS",
+  "at": "2026-08-18T19:27:55.080Z",
+  "evidence": {
+    "uninstallPrep": true,
+    "uninstallUnit": true,
+    "nsis": true,
+    "appOnlyDefault": true
+  }
+}

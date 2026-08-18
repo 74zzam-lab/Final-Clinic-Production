@@ -1,0 +1,145 @@
+{
+  "generatedAt": "2026-08-18T19:27:30.410Z",
+  "version": "2.0.1",
+  "productName": "Hijama Management System",
+  "decision": "READY_UNSIGNED_INTERNAL",
+  "blocking": [],
+  "warnings": [
+    "REL-08: no CSC_LINK — READY_UNSIGNED_INTERNAL; Windows host + certificate still required for public signed release (K-32)"
+  ],
+  "checks": [
+    {
+      "id": "REL-01",
+      "ok": true,
+      "detail": "version=2.0.1",
+      "level": "blocking"
+    },
+    {
+      "id": "REL-02",
+      "ok": true,
+      "detail": "productName must match branding",
+      "level": "blocking"
+    },
+    {
+      "id": "REL-03",
+      "ok": true,
+      "detail": "nsis config present",
+      "level": "blocking"
+    },
+    {
+      "id": "REL-04",
+      "ok": true,
+      "detail": "artifactName includes version",
+      "level": "blocking"
+    },
+    {
+      "id": "REL-05",
+      "ok": true,
+      "detail": "cloud files packaged",
+      "level": "blocking"
+    },
+    {
+      "id": "REL-06",
+      "ok": true,
+      "detail": "better-sqlite3 unpacked",
+      "level": "blocking"
+    },
+    {
+      "id": "REL-BRAND",
+      "ok": true,
+      "detail": "Generated BMP: Installer-Sidebar, Uninstaller-Sidebar, Installer-Header | Logo resize: downscale only (no upscale beyond source resolution) | App icon preserved: /workspace/extracted/Tadawi-Clinic-Production-cursor-v2-5-10-final-consolidation-cea9/build/Program-Icon.ico (valid Windows ICO)",
+      "level": "blocking"
+    },
+    {
+      "id": "ASSET:Program-Icon.ico",
+      "ok": true,
+      "detail": "build/Program-Icon.ico",
+      "level": "blocking"
+    },
+    {
+      "id": "ASSET:Installer-Sidebar.bmp",
+      "ok": true,
+      "detail": "build/Installer-Sidebar.bmp",
+      "level": "blocking"
+    },
+    {
+      "id": "ASSET:Installer-Header.bmp",
+      "ok": true,
+      "detail": "build/Installer-Header.bmp",
+      "level": "blocking"
+    },
+    {
+      "id": "ASSET:Uninstaller-Sidebar.bmp",
+      "ok": true,
+      "detail": "build/Uninstaller-Sidebar.bmp",
+      "level": "blocking"
+    },
+    {
+      "id": "ASSET:installer.nsh",
+      "ok": true,
+      "detail": "build/installer.nsh",
+      "level": "blocking"
+    },
+    {
+      "id": "ASSET:installer-branding.nsh",
+      "ok": true,
+      "detail": "build/installer-branding.nsh",
+      "level": "blocking"
+    },
+    {
+      "id": "SCRIPT:fpv-final-production-validation.mjs",
+      "ok": true,
+      "detail": "scripts/fpv-final-production-validation.mjs",
+      "level": "blocking"
+    },
+    {
+      "id": "SCRIPT:rc-validation.mjs",
+      "ok": true,
+      "detail": "scripts/rc-validation.mjs",
+      "level": "blocking"
+    },
+    {
+      "id": "SCRIPT:code-freeze-gate.mjs",
+      "ok": true,
+      "detail": "scripts/code-freeze-gate.mjs",
+      "level": "blocking"
+    },
+    {
+      "id": "SCRIPT:release-evidence-bundle.mjs",
+      "ok": true,
+      "detail": "scripts/release-evidence-bundle.mjs",
+      "level": "blocking"
+    },
+    {
+      "id": "SCRIPT:validate-production-deps.mjs",
+      "ok": true,
+      "detail": "scripts/validate-production-deps.mjs",
+      "level": "blocking"
+    },
+    {
+      "id": "REL-07",
+      "ok": true,
+      "detail": "installer.nsh policy ok",
+      "level": "blocking"
+    },
+    {
+      "id": "REL-08",
+      "ok": true,
+      "detail": "afterPack/resedit icon embed; Authenticode cert still required for public Stable (K-32)",
+      "level": "warning"
+    },
+    {
+      "id": "REL-09",
+      "ok": true,
+      "detail": "✓ Production dependency validation passed |   • google-auth-library |   • fflate",
+      "level": "blocking"
+    }
+  ],
+  "manualWindowsChecklist": [
+    "Build NSIS installer on Windows host",
+    "Validate installer branding (icon/sidebar/header)",
+    "Optional: Authenticode sign with NajjarTech certificate",
+    "Smoke-test First Run + print + backup on Windows",
+    "Confirm zero console errors on installed build"
+  ]
+}

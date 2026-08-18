@@ -1,0 +1,46 @@
+{
+  "licenseId": "L000001",
+  "licenseUuid": "25346e5f-cf79-40a0-a4df-bae82577ea50",
+  "licenseSeq": 1,
+  "centerId": "NJR-CLINIC-F0251B4C",
+  "packageId": "04",
+  "customPackageId": null,
+  "subscriptionId": "05",
+  "actionId": "03",
+  "status": "active",
+  "issueDate": "2026-08-18",
+  "expiryDate": "2027-08-18",
+  "devices": 0,
+  "branches": 2,
+  "branchesList": null,
+  "maxUsers": 15,
+  "deviceBinding": "DEVICE_ANY",
+  "templatePackageId": "03",
+  "templateCustomPackageId": null,
+  "customer": {
+    "name": "Test",
+    "company": "Clinic",
+    "phone": "",
+    "email": "",
+    "deviceReference": ""
+  },
+  "notes": "",
+  "renewHistory": [
+    {
+      "date": "2026-08-18",
+      "fromPackage": "03",
+      "toPackage": "04",
+      "mode": "upgrade_only",
+      "actionId": "03",
+      "keepExpiration": true
+    }
+  ],
+  "tokens": [
+    "V5-L000001-1787081299413",
+    "V5-UPG-L000001-1787081299476"
+  ],
+  "createdAt": "2026-08-18T19:28:19.410Z",
+  "updatedAt": "2026-08-18T19:28:19.475Z",
+  "bundleSig": "6174864b2f8631db731f4c5bd9f8f4253363aff64fd8fcf0722c4eb6b28ab5ec",
+  "productKey": "TDWI2-P04AA-CZCAA-A98JC-Y3NWF"
+}
