@@ -15,6 +15,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-8-attachments-authority-7c71` | 8 — Attachments authority | DONE (code) | Required after merge |
 | `cursor/phase-9-owner-rbac-hardening-7c71` | 9 — Owner/RBAC hardening | DONE (code) | Required after merge |
 | `cursor/phase-10-error-truthfulness-7c71` | 10 — Error truthfulness | DONE (code) | Required after merge |
+| `cursor/phase-11-migration-safety-7c71` | 11 — Migration safety | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -116,6 +117,15 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Drive quota → quota-specific message
 3. No tokens/passwords in sync status bar text
 
-## Deferred phases (11–14)
+## Phase 11 — Migration safety
+
+**Goal:** Mandatory pre-backup, dry-run on copy, rollback on failed import.
+
+**Operator UAT (you):**
+1. Migrate existing SQLite DB → `pre-migrate-*.db` backup created first
+2. Failed import → data restored; Arabic error (not raw code)
+3. Dry-run → live DB unchanged
+
+## Deferred phases (12–14)
 
 See planning doc in agent conversation — not started on this branch.

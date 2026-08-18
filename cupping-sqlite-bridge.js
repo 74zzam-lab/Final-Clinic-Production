@@ -379,7 +379,15 @@
       sourceLabel: options?.sourceLabel || 'localStorage',
       dryRun: !!options?.dryRun,
     });
-    if (!report?.ok) return report;
+    if (!report?.ok) {
+      if (typeof global.MigrationSafety?.notifyMigrationFailure === 'function') {
+        return global.MigrationSafety.notifyMigrationFailure(report, { toast: !options?.silent });
+      }
+      if (typeof global.OperationalErrorTruth?.notifyTruthful === 'function') {
+        global.OperationalErrorTruth.notifyTruthful(report, { toast: !options?.silent });
+      }
+      return report;
+    }
     if (options?.dryRun) return report;
     try { await db.enableSqlitePrimary?.(); } catch { /* empty */ }
     return hydrateIntoMemory();
