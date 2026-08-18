@@ -8,6 +8,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-1-sqlite-sot-7c71` | 1 — SQLite SoT | DONE (code) | Required after merge |
 | `cursor/phase-2-transactions-crash-7c71` | 2 — Atomic transactions | DONE (code) | Required after merge |
 | `cursor/phase-3-remove-backup-encryption-7c71` | 3 — Backup V2 plaintext | DONE (code) | Required after merge |
+| `cursor/phase-4-branch-sql-isolation-7c71` | 4 — Branch SQL isolation | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -49,6 +50,14 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 3. Scheduled backup without stored password
 4. Legacy encrypted file requires password
 
-## Deferred phases (4–14)
+## Phase 4 — Branch SQL isolation
+
+**Goal:** Branch-scoped SQLite writes; cross-branch row wipe prevented; IPC `getById` enforces branch.
+
+**Operator UAT (you):**
+1. Clients on BR-A and BR-B — save on A → B rows remain in DB
+2. Cross-branch id read via IPC → denied
+
+## Deferred phases (5–14)
 
 See planning doc in agent conversation — not started on this branch.

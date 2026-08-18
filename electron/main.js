@@ -832,10 +832,13 @@ ipcMain.on('dialog:promptSync', (event, message, defaultValue) => {
 
 handle('database:status', () => dbService.getStatus());
 handle('database:hydrate', () => dbService.hydrate());
-handle('database:persistTable', (e, tableKey, records) => {
+handle('database:persistTable', (e, tableKey, records, branchId) => {
   const key = V.asString(tableKey, { name: 'tableKey', max: 64, required: true, allowEmpty: false });
   if (!Array.isArray(records)) V.fail('IPC_TYPE', 'records_must_be_array');
   if (records.length > 200000) V.fail('IPC_TOO_LARGE', 'records_too_many');
+  const scopedBranchId = branchId != null && branchId !== ''
+    ? V.asString(branchId, { name: 'branchId', max: 128, required: false, allowEmpty: true })
+    : null;
   // Reject cross-branch payloads when session scope is limited.
   const session = rbacSession.getSession(e);
   if (session && Array.isArray(session.branchScope) && !session.branchScope.includes('*')) {
@@ -845,8 +848,11 @@ handle('database:persistTable', (e, tableKey, records) => {
         V.fail('RBAC_BRANCH', 'branch_access_denied');
       }
     }
+    if (scopedBranchId && !session.branchScope.includes(scopedBranchId)) {
+      V.fail('RBAC_BRANCH', 'branch_access_denied');
+    }
   }
-  return dbService.persistTable(key, records);
+  return dbService.persistTable(key, records, { branchId: scopedBranchId || undefined });
 });
 handle('database:persistKv', (_e, key, value) => {
   const k = V.asString(key, { name: 'key', max: 128, required: true, allowEmpty: false });

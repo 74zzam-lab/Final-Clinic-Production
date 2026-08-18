@@ -160,10 +160,17 @@
     };
   }
 
+  function getOperationalWriteBranchId() {
+    return global.BranchContexts?.getOperationalWriteBranch?.()
+      || global.BranchScope?.getActiveBranchId?.()
+      || 'BR-MAIN';
+  }
+
   function buildBundlePayloadFromOps(ops) {
+    const branchId = getOperationalWriteBranchId();
     const steps = ops.map((op) => {
       if (op.kind === 'table') {
-        return { type: 'table', tableKey: op.key, records: op.records || [] };
+        return { type: 'table', tableKey: op.key, records: op.records || [], branchId };
       }
       return { type: 'kv', key: op.key, value: op.value };
     });
@@ -393,6 +400,7 @@
       return { ok: false, error: 'legacy_branch_migration_required' };
     }
     const list = Array.isArray(records) ? records : [];
+    const branchId = getOperationalWriteBranchId();
     state.pendingKeys.add(tableKey);
     try {
       const entry = buildOutboxEntry(tableKey, list);
@@ -402,10 +410,11 @@
           op: 'enqueueAtomicPersistTable',
           tableKey,
           records: list,
+          branchId,
           entry,
         });
       } else {
-        res = await db.persistTable(tableKey, list);
+        res = await db.persistTable(tableKey, list, branchId);
       }
       if (res && res.ok === false) {
         state.lastError = res.error || 'commit_failed';

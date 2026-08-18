@@ -282,7 +282,7 @@ const cuppingApi = {
   database: {
     status: () => invoke('database:status'),
     hydrate: () => invoke('database:hydrate'),
-    persistTable: (tableKey, records) => invoke('database:persistTable', tableKey, records),
+    persistTable: (tableKey, records, branchId) => invoke('database:persistTable', tableKey, records, branchId),
     persistKv: (key, value) => invoke('database:persistKv', key, value),
     seedUsersIfEmpty: (users) => invoke('database:seedUsersIfEmpty', users),
     enableSqlitePrimary: () => invoke('database:enableSqlitePrimary'),
