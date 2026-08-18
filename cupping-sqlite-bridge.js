@@ -36,6 +36,8 @@
     status: null,
     lastCommitted: {},
     pendingKeys: new Set(),
+    bundleActive: false,
+    bundleOps: [],
   };
 
   function api() {
@@ -105,6 +107,139 @@
     else if (tableKey === 'activityLog') global.activityLog = value;
     else if (tableKey === 'messageLog') global.messageLog = value;
     else if (tableKey === 'backupLog') global.backupLog = value;
+    else if (tableKey === 'cashDrawerSession') global.cashDrawerSession = value;
+  }
+
+  function isBundledOperationalKey(key) {
+    return CORE_TABLES.includes(key) || OPERATIONAL_KEYS.has(key) || KV_MIRROR.includes(key);
+  }
+
+  function beginBundle() {
+    state.bundleActive = true;
+    state.bundleOps = [];
+    return { ok: true };
+  }
+
+  function queueBundleOp(key, value) {
+    const kind = CORE_TABLES.includes(key) ? 'table' : 'kv';
+    const op = {
+      key,
+      kind,
+      records: kind === 'table' ? (Array.isArray(value) ? value : []) : undefined,
+      value: kind === 'kv' ? value : undefined,
+    };
+    const idx = state.bundleOps.findIndex((o) => o.key === key);
+    if (idx >= 0) state.bundleOps[idx] = op;
+    else state.bundleOps.push(op);
+  }
+
+  function buildOutboxEntryForKv(key, value) {
+    const centerId =
+      global.ConfigLayer?.getCenterId?.() ||
+      global.CenterId?.getStoredCenterId?.() ||
+      global.LicenseCloud?.loadLocal?.()?.centerId ||
+      '';
+    if (!centerId) return null;
+    const branchId =
+      global.BranchContexts?.getOperationalWriteBranch?.() ||
+      global.BranchScope?.getActiveBranchId?.() ||
+      'BR-MAIN';
+    const deviceId =
+      global.DeviceConfig?.getDeviceId?.() ||
+      global.DeviceConfig?.load?.()?.deviceUuid ||
+      'unknown-device';
+    return {
+      center_id: centerId,
+      branch_id: branchId,
+      table_name: key,
+      operation: 'TABLE_BUMP',
+      base_revision: 0,
+      new_revision: Date.now(),
+      device_id: deviceId,
+      payload_json: JSON.stringify(value ?? null),
+    };
+  }
+
+  function buildBundlePayloadFromOps(ops) {
+    const steps = ops.map((op) => {
+      if (op.kind === 'table') {
+        return { type: 'table', tableKey: op.key, records: op.records || [] };
+      }
+      return { type: 'kv', key: op.key, value: op.value };
+    });
+    const entries = [];
+    for (const op of ops) {
+      if (op.kind === 'table') {
+        const entry = buildOutboxEntry(op.key, op.records);
+        if (entry) entries.push(entry);
+      } else if (KV_MIRROR.includes(op.key) || OPERATIONAL_KEYS.has(op.key)) {
+        const entry = buildOutboxEntryForKv(op.key, op.value);
+        if (entry) entries.push(entry);
+      }
+    }
+    return { steps, entries };
+  }
+
+  async function commitBundle() {
+    const ops = state.bundleOps.slice();
+    state.bundleActive = false;
+    state.bundleOps = [];
+    if (!ops.length) return { ok: true, skipped: true, reason: 'bundle_empty' };
+
+    const db = api();
+    if (!db) {
+      for (const op of ops) restoreLastCommit(op.key);
+      return { ok: false, error: 'database_api_unavailable' };
+    }
+    if (!state.sqlitePrimary) {
+      const en = await ensureSqlitePrimaryEnabled();
+      if (!en.ok) {
+        for (const op of ops) restoreLastCommit(op.key);
+        return { ok: false, error: en.error || 'sqlite_primary_required' };
+      }
+    }
+    if (global.LegacyBranchMigration?.isPushBlocked?.()) {
+      for (const op of ops) restoreLastCommit(op.key);
+      return { ok: false, error: 'legacy_branch_migration_required' };
+    }
+
+    const { steps, entries } = buildBundlePayloadFromOps(ops);
+    const keys = ops.map((o) => o.key);
+    keys.forEach((k) => state.pendingKeys.add(k));
+
+    try {
+      let res;
+      if (entries.length && db.syncOp) {
+        res = await db.syncOp({ op: 'enqueueAtomicBundle', steps, entries });
+      } else if (db.syncOp) {
+        res = await db.syncOp({ op: 'persistBundle', steps });
+      } else {
+        res = { ok: false, error: 'sync_op_unavailable' };
+      }
+      if (!res?.ok) {
+        state.lastError = res?.error || 'bundle_commit_failed';
+        for (const k of keys) restoreLastCommit(k);
+        return { ok: false, error: state.lastError, res };
+      }
+      for (const op of ops) {
+        const val = op.kind === 'table' ? op.records : op.value;
+        rememberCommit(op.key, val);
+        rawSet(op.key, val);
+        syncMemory(op.key, val);
+      }
+      state.lastError = null;
+      return { ok: true, count: ops.length, bundle: true, outbox: entries.length };
+    } catch (e) {
+      state.lastError = String(e?.message || e);
+      for (const k of keys) restoreLastCommit(k);
+      return { ok: false, error: state.lastError };
+    } finally {
+      keys.forEach((k) => state.pendingKeys.delete(k));
+    }
+  }
+
+  function isBundleActive() {
+    return !!state.bundleActive;
   }
 
   function rememberCommit(key, value) {
@@ -325,6 +460,10 @@
       rawSet(key, value);
       return { ok: true, uiOnly: true };
     }
+    if (state.bundleActive && isBundledOperationalKey(key)) {
+      queueBundleOp(key, value);
+      return { ok: true, queued: true, bundle: true };
+    }
     if (CORE_TABLES.includes(key)) return commitOperational(key, Array.isArray(value) ? value : []);
     if (KV_MIRROR.includes(key) || OPERATIONAL_KEYS.has(key)) return commitKv(key, value);
     rawSet(key, value);
@@ -359,6 +498,10 @@
         return true;
       }
       if (CORE_TABLES.includes(k) || OPERATIONAL_KEYS.has(k) || KV_MIRROR.includes(k)) {
+        if (state.bundleActive) {
+          queueBundleOp(k, v);
+          return false;
+        }
         const run = CORE_TABLES.includes(k)
           ? commitOperational(k, Array.isArray(v) ? v : [])
           : commitKv(k, v);
@@ -383,6 +526,8 @@
     DB.setAuthoritative = setAuthoritative;
     DB.restoreLastCommit = restoreLastCommit;
     DB.readOperational = readOperational;
+    DB.beginBundle = beginBundle;
+    DB.commitBundle = commitBundle;
   }
 
   async function bootFromSQLiteSoT() {
@@ -432,6 +577,9 @@
     commitOperational,
     commitKv,
     setAuthoritative,
+    beginBundle,
+    commitBundle,
+    isBundleActive,
     restoreLastCommit,
     readOperational,
     status,
@@ -445,6 +593,8 @@
       sqlitePrimary: state.sqlitePrimary,
       lastError: state.lastError,
       pending: Array.from(state.pendingKeys),
+      bundleActive: state.bundleActive,
+      bundleQueued: state.bundleOps.length,
       hasLastCommitted: Object.keys(state.lastCommitted),
     }),
     getLastError: () => state.lastError,

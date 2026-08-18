@@ -200,6 +200,32 @@ function ensureSync() {
   return syncPlatform;
 }
 
+const TABLE_PERSIST = {
+  clientsRegistry: (list) => repos.clients.replaceAll(list),
+  cases: (list) => repos.visits.replaceAll(list),
+  bookings: (list) => repos.bookings.replaceAll(list),
+  doctors: (list) => repos.employees.replaceAll(list),
+  attendance: (list) => repos.attendance.replaceAll(list),
+  expenses: (list) => repos.expenses.replaceAll(list),
+};
+
+function applyBundleSteps(steps) {
+  const list = Array.isArray(steps) ? steps : [];
+  for (const step of list) {
+    if (!step || typeof step !== 'object') continue;
+    if (step.type === 'table') {
+      const tableKey = String(step.tableKey || '');
+      const fn = TABLE_PERSIST[tableKey];
+      if (!fn) throw Object.assign(new Error('unknown_table'), { code: 'unknown_table' });
+      fn(Array.isArray(step.records) ? step.records : []);
+    } else if (step.type === 'kv') {
+      const key = String(step.key || '');
+      if (!key) throw Object.assign(new Error('kv_key_required'), { code: 'kv_key_required' });
+      repos.kv.set(key, step.value);
+    }
+  }
+}
+
 function syncOp(request) {
   const sp = ensureSync();
   const req = request || {};
@@ -228,6 +254,17 @@ function syncOp(request) {
       return sp.enqueueAtomic(req.entry || {}, () => {
         map[tableKey]();
       });
+    }
+    case 'enqueueAtomicBundle': {
+      const steps = Array.isArray(req.steps) ? req.steps : [];
+      const entries = Array.isArray(req.entries) ? req.entries : [];
+      if (!steps.length) return { ok: false, error: 'bundle_steps_required' };
+      return sp.enqueueAtomicBundle(() => applyBundleSteps(steps), entries);
+    }
+    case 'persistBundle': {
+      const steps = Array.isArray(req.steps) ? req.steps : [];
+      if (!steps.length) return { ok: false, error: 'bundle_steps_required' };
+      return sp.persistAtomic(() => applyBundleSteps(steps));
     }
     case 'claimPending':
       return { ok: true, rows: sp.claimPending(req.options || {}) };

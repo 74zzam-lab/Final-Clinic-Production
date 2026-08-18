@@ -171,6 +171,38 @@ function createSyncPlatform(db) {
     return tx();
   }
 
+  /**
+   * Phase 2 — multiple mutations + optional outbox events in one SQLite transaction.
+   * On failure the entire bundle rolls back (no partial table/kv/outbox state).
+   */
+  function enqueueAtomicBundle(mutateFn, entries) {
+    const tx = db.transaction(() => {
+      if (typeof mutateFn === 'function') mutateFn();
+      const results = [];
+      for (const entry of entries || []) {
+        results.push(enqueue(entry));
+      }
+      return { ok: true, results };
+    });
+    try {
+      return tx();
+    } catch (err) {
+      return { ok: false, error: err.code || 'bundle_atomic_failed', message: err.message };
+    }
+  }
+
+  function persistAtomic(mutateFn) {
+    const tx = db.transaction(() => {
+      if (typeof mutateFn === 'function') mutateFn();
+      return { ok: true };
+    });
+    try {
+      return tx();
+    } catch (err) {
+      return { ok: false, error: err.code || 'persist_atomic_failed', message: err.message };
+    }
+  }
+
   function claimPending(options = {}) {
     const limit = Math.min(500, Number(options.limit || 50));
     const branchId = options.branch_id || null;
@@ -369,6 +401,8 @@ function createSyncPlatform(db) {
   return {
     enqueue,
     enqueueAtomic,
+    enqueueAtomicBundle,
+    persistAtomic,
     claimPending,
     ack,
     fail,
