@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const { openDatabase } = require('./connection');
 const { createSyncPlatform } = require('./sync-outbox');
 const pushGuards = require('./sync-push-guards');
+const tombstonePolicy = require('./tombstone-policy');
 const { classify } = require('./sync-error-classify');
 
 function sha256(s) {
@@ -274,11 +275,7 @@ function createDevice(options) {
     const list = getAll(table);
     const idx = list.findIndex((r) => r && r.id === recordId);
     if (idx < 0) return { ok: false, error: 'not_found' };
-    list[idx] = {
-      ...list[idx],
-      deletedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    list[idx] = tombstonePolicy.applyTombstone(list[idx], list[idx], { branchId: state.branchId });
     return setAll(table, list, actorId);
   }
 
@@ -317,9 +314,7 @@ function createDevice(options) {
             if (!localRec?.id) continue;
             const rr = remoteRecords.find((x) => x && x.id === localRec.id);
             if (!rr) continue; // full-table snapshots may omit peers' unrelated rows; not a conflict by itself
-            const localDeleted = !!localRec.deletedAt;
-            const remoteDeleted = !!rr.deletedAt;
-            if (localDeleted !== remoteDeleted || JSON.stringify(rr) !== JSON.stringify(localRec)) {
+            if (tombstonePolicy.recordsConflict(localRec, rr)) {
               sync.openConflict({
                 center_id: state.centerId,
                 branch_id: state.branchId,
@@ -499,7 +494,7 @@ function createDevice(options) {
         for (const lr of localRecords) {
           const rr = remoteRecords.find((x) => x && x.id === lr.id);
           if (!rr) continue;
-          if (!!lr.deletedAt !== !!rr.deletedAt || JSON.stringify(lr) !== JSON.stringify(rr)) {
+          if (tombstonePolicy.recordsConflict(lr, rr)) {
             sync.openConflict({
               center_id: state.centerId,
               branch_id: state.branchId,

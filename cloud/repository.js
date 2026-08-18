@@ -216,10 +216,16 @@
         if (idx < 0) return false;
         // Soft delete / tombstone for synced tables (V2-4)
         if (isSyncedTable(table) && options.hard !== true) {
-          const row = { ...data[idx], deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-          if (global.RecordMetadata?.stamp) {
-            try { Object.assign(row, global.RecordMetadata.stamp(row, options)); } catch { /* empty */ }
-          }
+          const prev = data[idx];
+          const row = global.TombstonePolicy?.applyTombstone
+            ? global.TombstonePolicy.applyTombstone(prev, prev, options)
+            : (() => {
+              let r = { ...prev, deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+              if (global.RecordMetadata?.stampUpdate) {
+                try { r = global.RecordMetadata.stampUpdate(r, prev, options); } catch { /* empty */ }
+              }
+              return r;
+            })();
           data = data.slice();
           data[idx] = row;
           adapter.set(key, data);
@@ -285,19 +291,19 @@
               'unknown-device';
             if (centerId) {
               const payload = options.payload != null ? options.payload : this.get(table);
-              Promise.resolve(
-                global.SqliteOutboxBridge.enqueue({
-                  center_id: centerId,
-                  branch_id: branchId,
-                  table_name: table,
-                  record_id: options.recordId || null,
-                  operation: options.operation || 'TABLE_BUMP',
-                  base_revision: base,
-                  new_revision: n,
-                  device_id: deviceId,
-                  payload_json: typeof payload === 'string' ? payload : JSON.stringify(payload ?? null),
-                })
-              ).catch(() => {});
+              const payloadJson = typeof payload === 'string' ? payload : JSON.stringify(payload ?? null);
+              const entry = {
+                center_id: centerId,
+                branch_id: branchId,
+                table_name: table,
+                record_id: options.recordId || null,
+                operation: options.operation || 'TABLE_BUMP',
+                base_revision: base,
+                new_revision: n,
+                device_id: deviceId,
+                payload_json: payloadJson,
+              };
+              Promise.resolve(global.SqliteOutboxBridge.enqueue(entry)).catch(() => {});
             }
           } catch { /* empty */ }
         }

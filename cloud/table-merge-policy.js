@@ -68,6 +68,12 @@
       SKIP: 'skip', PUSH: 'push', PULL: 'pull', MERGE: 'merge', CONFLICT: 'conflict'
     };
 
+    const tombDecision = global.TombstonePolicy?.decideTombstone?.(local, remote, table);
+    if (tombDecision) {
+      const mapped = global.TombstonePolicy?.tombstoneToMergeAction?.(tombDecision);
+      if (mapped) return mapped;
+    }
+
     if (!local && !remote) return { action: ACTIONS.SKIP };
     if (local && !remote) return { action: ACTIONS.PUSH, reason: 'local_only' };
     if (!local && remote) return { action: ACTIONS.PULL, reason: 'cloud_only' };

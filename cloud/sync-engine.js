@@ -176,18 +176,18 @@
         try {
           payload = global.Repository?.get?.(table);
         } catch { /* empty */ }
-        Promise.resolve(
-          global.SqliteOutboxBridge.enqueue({
-            center_id: centerId,
-            branch_id: branchId,
-            table_name: table,
-            operation: 'TABLE_BUMP',
-            base_revision: Math.max(0, rev - 1),
-            new_revision: rev,
-            device_id: deviceId,
-            payload_json: payload == null ? JSON.stringify([]) : JSON.stringify(payload),
-          })
-        ).catch(() => { /* never throw into UI */ });
+        const payloadJson = payload == null ? JSON.stringify([]) : JSON.stringify(payload);
+        const entry = {
+          center_id: centerId,
+          branch_id: branchId,
+          table_name: table,
+          operation: 'TABLE_BUMP',
+          base_revision: Math.max(0, rev - 1),
+          new_revision: rev,
+          device_id: deviceId,
+          payload_json: payloadJson,
+        };
+        Promise.resolve(global.SqliteOutboxBridge.enqueue(entry)).catch(() => { /* never throw into UI */ });
       }
     } catch { /* empty */ }
 
