@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { openDatabase } = require('./connection');
 const { createSyncPlatform } = require('./sync-outbox');
+const pushGuards = require('./sync-push-guards');
 const { classify } = require('./sync-error-classify');
 
 function sha256(s) {
@@ -351,6 +352,31 @@ function createDevice(options) {
           records = [...byId.values()];
           state.tables[row.table_name] = records;
           persistTableState(row.table_name);
+        }
+        const localRev = Number(state.revisions[row.table_name] || row.base_revision || 0);
+        const pushGuard = pushGuards.evaluatePushGuard({
+          localRevision: localRev,
+          remoteRevision: remoteRev,
+          recordCount: records.length,
+        });
+        if (!pushGuard.ok) {
+          sync.fail(row.event_id, pushGuard.code, { maxAttempts: 99 });
+          sync.audit({
+            action: 'sync.push.blocked',
+            center_id: state.centerId,
+            branch_id: state.branchId,
+            device_id: state.deviceId,
+            entity: row.table_name,
+            result: 'blocked',
+            metadata_json: { reason: pushGuard.code, localRev, remoteRev },
+          });
+          results.push({
+            eventId: row.event_id,
+            ok: false,
+            blocked: true,
+            reason: pushGuard.code,
+          });
+          continue;
         }
         const putRev = Math.max(Number(row.new_revision || 0), remoteRev + 1);
         const put = await Promise.resolve(
