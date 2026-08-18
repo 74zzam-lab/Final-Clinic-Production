@@ -237,6 +237,11 @@
   }
 
   function requireOwnerManage(actionLabel) {
+    const gate = global.OperationalRbacGuard?.requireOwner?.({
+      action: actionLabel,
+      notify: true,
+    });
+    if (gate) return gate.ok;
     const user = global.currentUser;
     if (!user || !global.RolePolicy?.canManageOrganization?.(user)) {
       global.notify?.(`⛔ صلاحية المالك مطلوبة — ${actionLabel || ''}`.trim(), 'danger');
@@ -245,8 +250,12 @@
     return true;
   }
 
-  /** Managers may bootstrap Owner Profile when none exists yet (first activation / legacy). */
   function requireOwnerBootstrap(actionLabel) {
+    const gate = global.OperationalRbacGuard?.requireOwnerOrBootstrap?.({
+      action: actionLabel,
+      notify: true,
+    });
+    if (gate?.ok) return true;
     const user = global.currentUser;
     if (global.RolePolicy?.canManageOrganization?.(user)) return true;
     if (global.RolePolicy?.canBootstrapOwner?.(user)) return true;
@@ -256,8 +265,14 @@
   }
 
   async function pushLicenseToDriveNow() {
+    const gate = global.OperationalRbacGuard?.requireOwnerOrBootstrap?.({
+      action: 'رفع الترخيص إلى Drive',
+      notify: true,
+    });
+    if (gate && !gate.ok) return { ok: false, error: gate.error || 'owner_required' };
     const user = global.currentUser;
-    const allowed = global.RolePolicy?.canManageOrganization?.(user)
+    const allowed = gate?.ok
+      || global.RolePolicy?.canManageOrganization?.(user)
       || global.RolePolicy?.canBootstrapOwner?.(user)
       || (global.RolePolicy?.isManager?.(user) && !global.OwnerProfile?.hasProfile?.());
     if (!allowed) {

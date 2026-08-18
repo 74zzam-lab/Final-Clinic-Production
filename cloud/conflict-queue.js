@@ -295,9 +295,12 @@
     if (idx < 0) return { ok: false, error: 'not_found' };
     const item = list[idx];
     if (item.status !== 'pending') return { ok: false, error: 'already_resolved' };
-    if (!global.RolePolicy?.canResolveConflicts?.()) {
+    if (!global.OperationalRbacGuard?.canResolveConflicts?.()
+      && !global.RolePolicy?.canResolveConflicts?.()) {
       return { ok: false, error: 'manager_only' };
     }
+    const mgrGate = global.OperationalRbacGuard?.requireConflictResolve?.({ notify: false });
+    if (mgrGate && !mgrGate.ok) return { ok: false, error: mgrGate.error || 'manager_only' };
     if (item.branchId && global.BranchScope?.userCanAccessBranch
       && !global.BranchScope.userCanAccessBranch(global.currentUser, item.branchId)) {
       return { ok: false, error: 'branch_access_denied', branchId: item.branchId };
