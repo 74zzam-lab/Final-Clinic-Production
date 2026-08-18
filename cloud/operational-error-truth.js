@@ -1,0 +1,118 @@
+/**
+ * Operational error truth — leak-safe, actionable messages for sync/RBAC/SQLite failures.
+ */
+(function (global) {
+  'use strict';
+
+  const CATALOG_JSON = '{"generic":{"category":"generic","severity":"error","userMessageAr":"تعذّر إكمال العملية. البيانات المحلية محفوظة.","userMessageEn":"Operation could not complete. Local data is preserved."},"offline":{"category":"network","severity":"warning","userMessageAr":"لا يوجد اتصال بالإنترنت — ستُستأنف المزامنة عند عودة الاتصال.","userMessageEn":"You are offline — sync resumes when connectivity returns."},"drive_quota":{"category":"drive","severity":"error","userMessageAr":"مساحة Google Drive ممتلئة — تم إيقاف المزامنة مؤقتاً.","userMessageEn":"Google Drive quota exceeded — sync paused."},"oauth_error":{"category":"drive","severity":"error","userMessageAr":"انتهت صلاحية ربط Google — أعد الربط من الإعدادات.","userMessageEn":"Google sign-in expired — re-link from Settings."},"google_identity_transfer":{"category":"drive","severity":"error","userMessageAr":"حساب Google مختلف عن حساب المركز المصرّح.","userMessageEn":"Google account does not match the licensed center account."},"empty_push_blocked":{"category":"sync_guard","severity":"warning","userMessageAr":"رفض رفع نسخة فارغة — اسحب من السحابة أولاً.","userMessageEn":"Empty push blocked — pull cloud data first."},"local_rev_zero_pull_required":{"category":"sync_guard","severity":"warning","userMessageAr":"الجهاز جديد محلياً — اسحب البيانات قبل الرفع.","userMessageEn":"Local revision is zero — pull before push."},"stale_remote_skipped":{"category":"sync_guard","severity":"info","userMessageAr":"نسخة سحابية أقدم من المحلي — تم تخطيها.","userMessageEn":"Stale remote snapshot skipped."},"stale_overwrite_blocked":{"category":"sync_guard","severity":"warning","userMessageAr":"رفض استبدال محلي أحدث — أفرغ قائمة الانتظار أو ادمج التعارضات.","userMessageEn":"Stale overwrite blocked — clear outbox or resolve conflicts."},"sync_blocked_conflict":{"category":"sync","severity":"warning","userMessageAr":"تعارض بيانات — راجع قائمة التعارضات قبل المزامنة.","userMessageEn":"Data conflict — resolve conflicts before sync."},"sync_guard_blocked":{"category":"sync","severity":"warning","userMessageAr":"حارس المزامنة موقوف — اضغط استئناف المزامنة.","userMessageEn":"Sync guard paused — resume sync."},"manager_only":{"category":"rbac","severity":"denied","userMessageAr":"هذه العملية للمدير فقط.","userMessageEn":"Manager permission required."},"owner_required":{"category":"rbac","severity":"denied","userMessageAr":"صلاحية المالك مطلوبة لهذه العملية.","userMessageEn":"Organization owner permission required."},"tampered_role":{"category":"rbac","severity":"denied","userMessageAr":"تم رفض محاولة تلاعب بالصلاحية — أُعيدت الصلاحية من السجل.","userMessageEn":"Tampered role rejected — permissions restored from record."},"rbac_rank_denied":{"category":"rbac","severity":"denied","userMessageAr":"صلاحية الحساب لا تسمح بهذه العملية.","userMessageEn":"Account rank insufficient for this operation."},"permission_denied":{"category":"rbac","severity":"denied","userMessageAr":"ليس لديك صلاحية لإكمال هذه العملية.","userMessageEn":"Permission denied."},"branch_access_denied":{"category":"rbac","severity":"denied","userMessageAr":"لا يمكنك الوصول إلى هذا الفرع.","userMessageEn":"Branch access denied."},"sqlite_primary_required":{"category":"sqlite","severity":"error","userMessageAr":"فشل الحفظ — SQLite غير جاهز كمصدر معتمد.","userMessageEn":"Save failed — SQLite primary not ready."},"commit_failed":{"category":"sqlite","severity":"error","userMessageAr":"فشل الحفظ في SQLite — أُعيدت آخر حالة معتمدة.","userMessageEn":"SQLite commit failed — last committed state restored."},"legacy_branch_migration_required":{"category":"migration","severity":"warning","userMessageAr":"يلزم إكمال ترحيل الفروع قبل المزامنة.","userMessageEn":"Complete branch migration before sync."},"cloud_v2_disabled":{"category":"config","severity":"info","userMessageAr":"تفعيل Cloud V2 مطلوب للمزامنة.","userMessageEn":"Enable Cloud V2 for sync."},"google_not_connected":{"category":"config","severity":"warning","userMessageAr":"ربط حساب Google مطلوب.","userMessageEn":"Connect Google account."},"device_sync_blocked":{"category":"device","severity":"error","userMessageAr":"هذا الجهاز محظور من المزامنة — راجع المدير.","userMessageEn":"This device is blocked from sync."}}';
+
+  const CATALOG = Object.freeze(JSON.parse(CATALOG_JSON));
+
+  function redactString(s) {
+    if (global.OpsLogRedact?.redactString) return global.OpsLogRedact.redactString(s);
+    if (s == null) return '';
+    let out = String(s);
+    out = out.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[REDACTED_EMAIL]');
+    out = out.replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]');
+    out = out.replace(/\bya29\.[A-Za-z0-9\-._~+/]+/gi, '[REDACTED_TOKEN]');
+    out = out.replace(/(password|api[_-]?key|token|secret)\s*([:=])\s*([^\s,;|&"']+)/gi, '$1$2[REDACTED]');
+    return out;
+  }
+
+  function extractCode(input) {
+    if (input == null || input === '') return 'generic';
+    if (typeof input === 'string') return String(input).trim() || 'generic';
+    if (input.code) return String(input.code);
+    if (input.error) return String(input.error);
+    if (input.reason) return String(input.reason);
+    return 'generic';
+  }
+
+  function present(input, options) {
+    options = options || {};
+    const code = extractCode(input);
+    const entry = CATALOG[code] || CATALOG.generic;
+    const raw = typeof input === 'object'
+      ? (input.message || input.error || input.reason || '')
+      : String(input || '');
+    const technical = redactString(raw);
+    let userMessageAr = options.userMessageAr || entry.userMessageAr;
+    let userMessageEn = entry.userMessageEn;
+    let recoveryAr;
+    let recoveryEn;
+    if (global.ErrorRecoveryUx?.fromClassify && !CATALOG[code]) {
+      const ux = global.ErrorRecoveryUx.fromClassify(code);
+      if (ux?.bodyAr) {
+        userMessageAr = options.userMessageAr || ux.bodyAr;
+        userMessageEn = ux.bodyEn || userMessageEn;
+        recoveryAr = ux.recoveryAr;
+        recoveryEn = ux.recoveryEn;
+      }
+    }
+    return {
+      ok: false,
+      code,
+      category: entry.category,
+      severity: entry.severity,
+      userMessageAr,
+      userMessageEn,
+      recoveryAr,
+      recoveryEn,
+      technical: technical && technical !== code ? technical : null,
+      leakSafe: true,
+    };
+  }
+
+  function enrichResult(result) {
+    if (!result || result.ok !== false) return result;
+    const truth = present(result);
+    return { ...result, ...truth, error: result.error || truth.code };
+  }
+
+  function labelsForCodes(codes) {
+    return (codes || []).map((c) => (CATALOG[c] && CATALOG[c].userMessageAr) || String(c));
+  }
+
+  function notifyTruthful(input, options) {
+    options = options || {};
+    const truth = present(input, options);
+    if (!options.silent && typeof global.notify === 'function') {
+      const prefix = truth.severity === 'denied' ? '⛔ ' : (truth.severity === 'info' ? 'ℹ️ ' : '⚠️ ');
+      const tone = truth.severity === 'denied' ? 'danger' : (truth.severity === 'error' ? 'danger' : 'warning');
+      global.notify(prefix + truth.userMessageAr, tone);
+    }
+    try {
+      global.AuditLogger?.logSyncEvent?.('OPERATIONAL_ERROR', {
+        entity: truth.category,
+        entityId: truth.code,
+        summary: truth.userMessageAr,
+        meta: { severity: truth.severity, technical: truth.technical },
+      });
+    } catch { /* empty */ }
+    return truth;
+  }
+
+  function enrichSyncStatus(status) {
+    status = status || {};
+    const code = status.lastError;
+    if (!code) return status;
+    const truth = present(code);
+    return {
+      ...status,
+      lastErrorCode: code,
+      lastErrorMessageAr: truth.userMessageAr,
+      lastErrorCategory: truth.category,
+    };
+  }
+
+  global.OperationalErrorTruth = {
+    CATALOG,
+    redactString,
+    extractCode,
+    present,
+    enrichResult,
+    labelsForCodes,
+    notifyTruthful,
+    enrichSyncStatus,
+  };
+})(typeof window !== 'undefined' ? window : globalThis);

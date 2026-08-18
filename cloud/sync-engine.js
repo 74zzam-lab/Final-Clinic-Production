@@ -609,7 +609,12 @@
     return !!_pollTimer;
   }
 
-  const READINESS_LABELS_AR = Object.freeze({
+  const READINESS_LABELS_AR = Object.freeze(
+    global.OperationalErrorTruth?.CATALOG
+      ? Object.fromEntries(
+        Object.entries(global.OperationalErrorTruth.CATALOG).map(([k, v]) => [k, v.userMessageAr])
+      )
+      : {
     cloud_v2_disabled: 'تفعيل Cloud V2',
     google_not_connected: 'ربط حساب Google',
     center_id: 'Center ID / تفعيل الترخيص',
@@ -627,7 +632,8 @@
     sync_paused: 'المزامنة موقوفة مؤقتاً',
     conflict: 'يوجد تعارض بيانات يحتاج قراراً',
     no_analysis: 'لا يوجد تحليل بيانات معتمد بعد',
-  });
+      }
+  );
 
   function normalizeMissingCode(code) {
     const raw = String(code || '').trim();
@@ -676,7 +682,8 @@
     }
 
     const missingNorm = missing.map(normalizeMissingCode);
-    const missingLabelsAr = missingNorm.map((code) => READINESS_LABELS_AR[code] || code);
+    const missingLabelsAr = global.OperationalErrorTruth?.labelsForCodes?.(missingNorm)
+      || missingNorm.map((code) => READINESS_LABELS_AR[code] || code);
     const hardMissing = missingNorm.filter((c) => !['unsafe', 'UNSAFE', 'sync_paused', 'analysis_required', 'sync_guard_blocked', 'no_analysis'].includes(c));
     // Guard pause alone is recoverable — expose resume hint but allow force paths.
     const ready = hardMissing.length === 0 && !guardPaused && cloudV2 && googleOk && !!centerId;
@@ -759,12 +766,13 @@
   }
 
   function getStatus() {
-    return {
+    const base = {
       enabled: isEnabled(),
       running: isRunning(),
       readiness: getReadiness(),
       ...global.SyncState?.getStatus?.()
     };
+    return global.OperationalErrorTruth?.enrichSyncStatus?.(base) || base;
   }
 
   const _events = {};

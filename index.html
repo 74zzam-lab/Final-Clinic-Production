@@ -16173,6 +16173,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/danger-confirm.js"></script>
 <script src="cloud/error-recovery-ux.js"></script>
 <script src="cloud/ops-log-redact.js"></script>
+<script src="cloud/operational-error-truth.js"></script>
 <script src="cloud/ux-i18n.js"></script>
 <script src="cloud/ux-a11y.js"></script>
 <script src="cloud/ops-ux-bridge.js"></script>
@@ -18467,7 +18468,8 @@ function renderCloudV2BackupStatus() {
   const lastSync = sync?.lastPushAt || sync?.lastPollAt;
   set('bk-cv2-sync', lastSync ? formatBackupDateTime(lastSync) : (enabled ? 'لم تتم بعد' : '—'));
   if (sync?.lastError && enabled && !/no_remote_versions|no_versions_path|not_found|offline|no_center_id|drive_not_connected/i.test(String(sync.lastError))) {
-    set('bk-cv2-sync', (lastSync ? formatBackupDateTime(lastSync) + ' · ' : '') + '⚠️ ' + sync.lastError);
+    const errLabel = sync.lastErrorMessageAr || sync.lastError;
+    set('bk-cv2-sync', (lastSync ? formatBackupDateTime(lastSync) + ' · ' : '') + '⚠️ ' + errLabel);
   }
   const autoDate = settings?.cloudV2?.lastAutoBackupDate;
   set('bk-cv2-autobackup', autoDate || (enabled ? 'لم تُنشأ بعد' : '—'));

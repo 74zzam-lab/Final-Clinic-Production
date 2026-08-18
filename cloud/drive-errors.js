@@ -42,6 +42,8 @@
   }
 
   function userMessage(type) {
+    const truth = global.OperationalErrorTruth?.present?.(type);
+    if (truth?.userMessageAr) return truth.userMessageAr;
     return USER_MESSAGES[type] || USER_MESSAGES.unknown;
   }
 
@@ -49,6 +51,7 @@
     context = context || {};
     const c = classify(input);
     const summary = userMessage(c.type);
+    const truth = global.OperationalErrorTruth?.present?.(c.type) || { userMessageAr: summary };
 
     if (c.pauseSync) {
       global.SyncGuard?.pause?.(c.type, { error: input, context });
@@ -63,15 +66,22 @@
 
     global.AuditLogger?.logSyncEvent?.('SYSTEM_ERROR', {
       entity: 'drive',
-      summary,
-      meta: { type: c.type, context, raw: String(input?.message || input?.error || input || '').slice(0, 200) }
+      summary: truth.userMessageAr || summary,
+      meta: {
+        type: c.type,
+        code: truth.code || c.type,
+        context,
+        raw: global.OperationalErrorTruth?.redactString?.(
+          String(input?.message || input?.error || input || '')
+        ).slice(0, 200) || String(input?.message || input?.error || input || '').slice(0, 200),
+      }
     });
 
     if (c.notifyUser && typeof global.notify === 'function') {
-      global.notify('⚠️ ' + summary, 'danger');
+      global.notify('⚠️ ' + (truth.userMessageAr || summary), 'danger');
     }
 
-    return { ok: false, classified: c, userMessage: summary };
+    return { ok: false, classified: c, userMessage: truth.userMessageAr || summary, code: truth.code || c.type };
   }
 
   function wrapResult(result) {

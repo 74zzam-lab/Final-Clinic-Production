@@ -18,7 +18,13 @@
 
   function deny(error, entry) {
     auditDenial(entry);
-    return { ok: false, error: error || 'rbac_denied' };
+    const truth = global.OperationalErrorTruth?.present?.(error);
+    return {
+      ok: false,
+      error: error || 'rbac_denied',
+      userMessageAr: truth?.userMessageAr,
+      code: truth?.code || error,
+    };
   }
 
   function requireAuthenticated(options) {
