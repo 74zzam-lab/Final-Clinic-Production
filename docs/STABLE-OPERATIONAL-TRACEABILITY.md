@@ -9,6 +9,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-2-transactions-crash-7c71` | 2 — Atomic transactions | DONE (code) | Required after merge |
 | `cursor/phase-3-remove-backup-encryption-7c71` | 3 — Backup V2 plaintext | DONE (code) | Required after merge |
 | `cursor/phase-4-branch-sql-isolation-7c71` | 4 — Branch SQL isolation | DONE (code) | Required after merge |
+| `cursor/phase-5-branch-switch-hardening-7c71` | 5 — Branch switch re-hydrate | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -58,6 +59,14 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 1. Clients on BR-A and BR-B — save on A → B rows remain in DB
 2. Cross-branch id read via IPC → denied
 
-## Deferred phases (5–14)
+## Phase 5 — Branch switch hardening
+
+**Goal:** Switch branch re-hydrates from SQLite; UI shows active branch only; writes merge without cross-branch memory corruption.
+
+**Operator UAT (you):**
+1. Data on BR-A and BR-B — switch branches → correct lists
+2. No stale rows from previous branch in operational forms
+
+## Deferred phases (6–14)
 
 See planning doc in agent conversation — not started on this branch.
