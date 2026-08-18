@@ -14,6 +14,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-7-conflict-tombstone-idempotency-7c71` | 7 — Tombstone / idempotency | DONE (code) | Required after merge |
 | `cursor/phase-8-attachments-authority-7c71` | 8 — Attachments authority | DONE (code) | Required after merge |
 | `cursor/phase-9-owner-rbac-hardening-7c71` | 9 — Owner/RBAC hardening | DONE (code) | Required after merge |
+| `cursor/phase-10-error-truthfulness-7c71` | 10 — Error truthfulness | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -106,6 +107,15 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Forged `currentUser.role` does not elevate privileges
 3. Owner-only hub actions blocked for non-owner
 
-## Deferred phases (10–14)
+## Phase 10 — Error truthfulness
+
+**Goal:** Actionable Arabic messages for sync/RBAC/SQLite errors; redacted secrets in UI/audit.
+
+**Operator UAT (you):**
+1. Empty push blocked → pull-first message (not raw code)
+2. Drive quota → quota-specific message
+3. No tokens/passwords in sync status bar text
+
+## Deferred phases (11–14)
 
 See planning doc in agent conversation — not started on this branch.

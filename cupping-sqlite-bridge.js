@@ -633,10 +633,14 @@
         Promise.resolve(run).then((res) => {
           if (!res?.ok) {
             try {
-              global.notify?.(
-                '⚠️ فشل الحفظ في SQLite — أُعيدت آخر حالة معتمدة (' + (res?.error || 'commit_failed') + ')',
-                'danger'
-              );
+              if (global.OperationalErrorTruth?.notifyTruthful) {
+                global.OperationalErrorTruth.notifyTruthful(res?.error || 'commit_failed');
+              } else {
+                global.notify?.(
+                  '⚠️ فشل الحفظ في SQLite — أُعيدت آخر حالة معتمدة (' + (res?.error || 'commit_failed') + ')',
+                  'danger'
+                );
+              }
             } catch { /* empty */ }
           }
         });
