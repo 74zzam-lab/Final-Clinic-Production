@@ -1,6 +1,6 @@
 /**
- * Branch Switcher — topbar selector for multi-branch admin/accountant (Cloud V2).
- * V2-5.10: confirmed work-branch switch + BranchContexts operational write branch.
+ * Branch Switcher — topbar selector for organization owners (Cloud V2).
+ * Non-owner accounts see a read-only branch label (device-bound at license pull).
  */
 (function (global) {
   'use strict';
@@ -23,7 +23,45 @@
   }
 
   function branchName(bid) {
+    if (!bid || bid === '*' || bid === ALL_BRANCHES_VALUE) return 'كل الفروع';
     return getBranches().find(b => b.id === bid)?.name || bid;
+  }
+
+  function getDisplayBranchId() {
+    const bid = global.BranchContexts?.getOperationalWriteBranch?.()
+      || global.BranchScope?.getActiveBranchId?.()
+      || global.DeviceConfig?.getLockedBranchId?.()
+      || global.DeviceConfig?.load?.()?.lockedBranchId
+      || 'BR-MAIN';
+    return bid;
+  }
+
+  function shouldShowBranchLabel() {
+    if (!global.CloudMeta?.isCloudV2Enabled?.()) return false;
+    if (!global.currentUser) return false;
+    if (shouldShow()) return false;
+    return !!getDisplayBranchId();
+  }
+
+  function updateBranchLabel() {
+    const el = document.getElementById('topbar-branch-label');
+    if (!el) return;
+    const bid = getDisplayBranchId();
+    el.textContent = branchName(bid);
+    el.title = bid;
+  }
+
+  function ensureBranchLabelDOM() {
+    if (document.getElementById('topbar-branch-label-wrap')) return;
+    const actions = document.querySelector('.topbar-actions');
+    if (!actions) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'topbar-branch-label-wrap';
+    wrap.style.cssText = 'display:none;align-items:center;gap:6px';
+    wrap.innerHTML = `
+      <span style="font-size:11px;font-weight:700;color:var(--text-muted);white-space:nowrap">🌿 الفرع</span>
+      <span id="topbar-branch-label" style="font-size:12px;font-weight:800;color:var(--primary);white-space:nowrap;padding:6px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border)"></span>`;
+    actions.insertBefore(wrap, actions.firstChild);
   }
 
   function refreshSurfaces() {
@@ -55,6 +93,7 @@
       } catch { /* empty */ }
     }
     if (typeof global.BranchSwitcher?.populate === 'function') global.BranchSwitcher.populate();
+    if (typeof global.BranchSwitcher?.updateBranchLabel === 'function') global.BranchSwitcher.updateBranchLabel();
   }
 
   function applyBranchSwitch(bid) {
@@ -169,18 +208,24 @@
 
   function applyVisibility() {
     ensureDOM();
+    ensureBranchLabelDOM();
     const wrap = document.getElementById('topbar-branch-switch-wrap');
-    if (!wrap) return;
-    const show = shouldShow();
-    wrap.style.display = show ? 'flex' : 'none';
-    if (show) populate();
+    const labelWrap = document.getElementById('topbar-branch-label-wrap');
+    const showSwitcher = shouldShow();
+    if (wrap) wrap.style.display = showSwitcher ? 'flex' : 'none';
+    const showLabel = shouldShowBranchLabel();
+    if (labelWrap) labelWrap.style.display = showLabel ? 'flex' : 'none';
+    if (showLabel) updateBranchLabel();
+    if (showSwitcher) populate();
   }
 
   global.BranchSwitcher = {
     shouldShow,
+    shouldShowBranchLabel,
     applyVisibility,
     populate,
     applyBranchSwitch,
+    updateBranchLabel,
     ALL_BRANCHES_VALUE,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

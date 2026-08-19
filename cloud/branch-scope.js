@@ -12,9 +12,10 @@
     reception: { branchScope: null, canSwitchBranch: false },
     employee: { branchScope: null, canSwitchBranch: false },
     doctor: { branchScope: null, canSwitchBranch: false },
-    accountant: { branchScope: ['*'], canSwitchBranch: true },
+    accountant: { branchScope: null, canSwitchBranch: false },
     branch_manager: { branchScope: null, canSwitchBranch: false },
-    admin: { branchScope: ['*'], canSwitchBranch: true },
+    admin: { branchScope: null, canSwitchBranch: false },
+    custom: { branchScope: null, canSwitchBranch: false },
     owner: { branchScope: ['*'], canSwitchBranch: true },
     hq_admin: { branchScope: ['*'], canSwitchBranch: true }
   };
@@ -67,18 +68,26 @@
     return users.map(u => applyDefaultScopeToUser({ ...u }));
   }
 
+  function isOrganizationBranchSwitcher(user) {
+    if (!user) return false;
+    if (user.isDev) return true;
+    return !!(global.RolePolicy?.isOrganizationOwner?.(user));
+  }
+
   function getUserBranchScope(user) {
     if (!user) return [];
+    if (!isOrganizationBranchSwitcher(user)) {
+      return [getDeviceBranchId() || DEFAULT_BRANCH_ID];
+    }
     applyDefaultScopeToUser(user);
     const scope = Array.isArray(user.branchScope) ? user.branchScope : [];
     if (scope.length) return scope;
     return defaultScopeForRole(user.role).branchScope;
   }
 
+  /** Only Owner / HQ Admin (and dev) may switch branches in the UI. */
   function canUserSwitchBranch(user) {
-    if (!user) return false;
-    applyDefaultScopeToUser(user);
-    return !!user.canSwitchBranch;
+    return isOrganizationBranchSwitcher(user);
   }
 
   function userCanAccessBranch(user, branchId) {
@@ -248,14 +257,19 @@
       global.activeBranchId = getActiveBranchId();
       return;
     }
+    if (!canUserSwitchBranch(user)) {
+      try { sessionStorage.removeItem('__tdw_branch_drawer_pref__'); } catch { /* empty */ }
+      const deviceBranch = getDeviceBranchId() || DEFAULT_BRANCH_ID;
+      setActiveBranchId(deviceBranch);
+      try {
+        global.BranchContexts?.setOperationalWriteBranch?.(deviceBranch, { bindDevice: false });
+      } catch { /* empty */ }
+      return;
+    }
     const scope = getUserBranchScope(user);
     const preferred = scope.includes('*')
       ? (getDeviceBranchId() || DEFAULT_BRANCH_ID)
       : (scope[0] || DEFAULT_BRANCH_ID);
-    if (!canUserSwitchBranch(user)) {
-      setActiveBranchId(preferred);
-      return;
-    }
     const current = getActiveBranchId();
     if (!userCanAccessBranch(user, current)) {
       setActiveBranchId(preferred);
@@ -276,6 +290,7 @@
     applyDefaultScopeToUser,
     migrateUsersScope,
     getUserBranchScope,
+    isOrganizationBranchSwitcher,
     canUserSwitchBranch,
     userCanAccessBranch,
     filterByBranch,

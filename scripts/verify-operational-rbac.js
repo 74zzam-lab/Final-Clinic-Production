@@ -131,6 +131,35 @@ assert(!recPerms['ledger.view'], 'reception preset excludes employee ledger');
 const truth = require('../database/operational-error-truth');
 assert(truth.CATALOG.rbac_session_required, 'rbac_session_required catalog entry');
 
+const branchCtx = {
+  window: {},
+  globalThis: {},
+  console,
+  DeviceConfig: {
+    getLockedBranchId: () => 'BR-RYD',
+    load: () => ({ lockedBranchId: 'BR-RYD' }),
+    isBranchLocked: () => true,
+  },
+  RolePolicy: null,
+  BranchContexts: { setOperationalWriteBranch: () => ({ ok: true }) },
+  sessionStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = v; }, removeItem(k) { delete this._d[k]; } },
+};
+branchCtx.window = branchCtx;
+branchCtx.globalThis = branchCtx;
+vm.createContext(branchCtx);
+vm.runInContext(fs.readFileSync(path.join(root, 'cloud/role-policy.js'), 'utf8'), branchCtx);
+vm.runInContext(fs.readFileSync(path.join(root, 'cloud/branch-scope.js'), 'utf8'), branchCtx);
+
+const adminUser = { id: '2', role: 'admin', branchScope: ['*'], canSwitchBranch: true };
+const ownerUser = { id: '1', role: 'owner', branchScope: ['*'], canSwitchBranch: true };
+assert(!branchCtx.BranchScope.canUserSwitchBranch(adminUser), 'admin cannot switch branches');
+assert(branchCtx.BranchScope.canUserSwitchBranch(ownerUser), 'owner can switch branches');
+assert(branchCtx.BranchScope.getUserBranchScope(adminUser).join(',') === 'BR-RYD', 'admin scoped to device branch');
+assert(branchCtx.BranchScope.getUserBranchScope(ownerUser).includes('*'), 'owner keeps wildcard scope');
+
+const switcherSrc = fs.readFileSync(path.join(root, 'cloud/branch-switcher.js'), 'utf8');
+assert(switcherSrc.includes('topbar-branch-label'), 'read-only branch label for device-bound users');
+
 if (errors.length) {
   console.error('FAIL verify-operational-rbac:');
   errors.forEach((e) => console.error(' -', e));
