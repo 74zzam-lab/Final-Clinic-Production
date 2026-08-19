@@ -2223,7 +2223,7 @@ tbody tr:nth-child(even) { background: transparent; }
   flex: 1 1 0; min-width: 0; margin-top: 0; padding: 9px 10px; font-size: clamp(11px, 2.4vw, 12px);
   min-height: 44px; white-space: normal; line-height: 1.25; overflow-wrap: anywhere;
 }
-#settings-bootflow-cta, #settings-centersetup-cta, #btn-cloud-v2-sync-now,
+#settings-bootflow-cta, #settings-centersetup-cta, #btn-bk-sync-now-top,
 [data-ss-surface="google_connect"] {
   min-height: 40px; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
 }
@@ -3942,6 +3942,11 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
 .backup-role-badge--local { background: #fff8e1; color: #8a6520; }
 .backup-role-badge--auto { background: #f3e5f5; color: #6a1b9a; }
 .backup-card-desc { font-size: 11px; color: var(--text-muted); line-height: 1.7; margin: 0 0 10px; }
+.backup-advanced-details { margin-top: 12px; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+.backup-advanced-details > summary { cursor: pointer; font-size: 12px; font-weight: 700; padding: 10px 12px; list-style: none; }
+.backup-advanced-details > summary::-webkit-details-marker { display: none; }
+.backup-advanced-details[open] > summary { border-bottom: 1px solid var(--border); }
+.backup-advanced-details__body { padding: 10px 12px; display: grid; gap: 10px; }
 
 @media (max-width: 1100px) {
   #page-packages .packages-layout { grid-template-columns: 1fr; }
@@ -6335,17 +6340,20 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <div style="font-size:12px;line-height:1.85;color:var(--text-muted);display:grid;gap:6px">
           <div><span class="backup-role-badge backup-role-badge--oauth">① Google OAuth</span> ربط الحساب فقط — مطلوب لـ Cloud V2 والترخيص. <strong>لا يستخدم لنسخ LevelDB القديم.</strong></div>
           <div><span class="backup-role-badge backup-role-badge--sync">② Cloud V2</span> مزامنة تشغيلية لحظية بين الأجهزة — ليست بديلاً عن استعادة الكوارث.</div>
-          <div><span class="backup-role-badge backup-role-badge--local">③ Backup V2</span> المسار الرسمي الوحيد لاستعادة كوارث SQLite.</div>
-          <div><span class="backup-role-badge backup-role-badge--auto">④ جدولة V2</span> النسخ التلقائي عبر Backup V2 فقط.</div>
-          <p style="margin:8px 0 0;font-size:11px;color:var(--danger,#b00020)">Backup V1 (LevelDB / Cloud DB المشفر) معطّل في واجهة العميل — لا يظهر ولا يُستدعى.</p>
-          <p style="margin:0;font-size:11px">إدارة الفروع/الأجهزة من <strong>Owner Hub</strong> — ليست من هذه الصفحة.</p>
+          <div><span class="backup-role-badge backup-role-badge--local">③ Backup V2</span> المسار الرسمي الوحيد لاستعادة كوارث SQLite (ZIP غير مشفّر).</div>
+          <div><span class="backup-role-badge backup-role-badge--auto">④ النسخ المحلي</span> نسخ على قرص هذا الجهاز + جدولة محلية — مستقل عن Google.</div>
+          <p style="margin:8px 0 0;font-size:11px;color:var(--danger,#b00020)">Backup V1 (LevelDB / Cloud DB المشفر) معطّل في واجهة العميل.</p>
+          <p style="margin:0;font-size:11px">إدارة الفروع والأجهزة من <strong>Owner Hub</strong> — وليس من هذه الصفحة.</p>
         </div>
       </div>
 
       <div class="card" id="bk-status-summary" style="margin-bottom:16px;padding:14px;border:1.5px solid var(--primary-light)">
         <div class="card-title" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <span>📊 ملخص النسخ والمزامنة</span>
-          <button type="button" class="btn btn-accent btn-sm" id="btn-bk-sync-now-top" data-ss-surface="sync_manual" onclick="runCloudV2SyncNow()">🔄 مزامنة الآن</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="showPage('owner-hub')">🏠 Owner Hub</button>
+            <button type="button" class="btn btn-accent btn-sm" id="btn-bk-sync-now-top" data-ss-surface="sync_manual" onclick="runCloudV2SyncNow()">🔄 مزامنة الآن</button>
+          </div>
         </div>
         <div class="backup-status-card">
           <div class="backup-status-item"><label>حساب Google</label><strong id="bk-sum-google" style="font-size:11px;word-break:break-all" dir="ltr">—</strong></div>
@@ -6365,13 +6373,9 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" id="btn-cdb-oauth" onclick="startCloudDbOAuth()">🔗 تسجيل الدخول إلى Google</button>
             <button class="btn btn-ghost btn-sm" id="btn-cdb-disconnect" onclick="disconnectCloudDbAccount()" style="display:none">🚪 خروج</button>
-            <!-- V2-5.10: Backup V1 customer controls removed (LevelDB DR disabled) -->
-            <button class="btn btn-accent btn-sm" id="btn-cdb-backup" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>💾 نسخ الآن</button>
-            <button class="btn btn-ghost btn-sm" id="btn-cdb-restore" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>♻️ استعادة</button>
-            <button class="btn btn-ghost btn-sm" id="btn-cdb-sync" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>🔄 مزامنة</button>
           </div>
         </div>
-        <p class="backup-card-desc">ربط Google الرسمي لـ Cloud V2 والترخيص فقط. استعادة الكوارث تتم عبر <strong>Backup V2</strong> أدناه — وليس عبر نسخ LevelDB القديمة.</p>
+        <p class="backup-card-desc">ربط Google الرسمي لـ Cloud V2 والترخيص. استعادة الكوارث تتم عبر <strong>Backup V2</strong> — وليس عبر نسخ LevelDB القديمة.</p>
         <div class="backup-status-card" id="cloud-db-status">
           <div class="backup-status-item"><label>الاتصال</label><strong id="cdb-status-text">🔴 غير متصل</strong></div>
           <div class="backup-status-item"><label>الحساب</label><strong id="cdb-email">—</strong></div>
@@ -6390,6 +6394,10 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
           </label>
         </div>
         <div id="cloud-db-backup-list" style="display:none !important" aria-hidden="true"></div>
+        <!-- legacy V1 hooks (hidden) -->
+        <button class="btn btn-accent btn-sm" id="btn-cdb-backup" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>💾 نسخ الآن</button>
+        <button class="btn btn-ghost btn-sm" id="btn-cdb-restore" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>♻️ استعادة</button>
+        <button class="btn btn-ghost btn-sm" id="btn-cdb-sync" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>🔄 مزامنة</button>
       </div>
 
       <div class="card" id="bk-cloudv2-card" style="border:1.5px solid var(--primary-light)">
@@ -6397,7 +6405,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-top:0">
           <div class="card-title">☁️ Cloud V2 — حالة المزامنة</div>
         </div>
-        <p class="backup-card-desc">مزامنة <strong>تشغيلية لحظية</strong> بين الأجهزة (Push + Poll). بعد استعادة محلية يُرفع تلقائياً إلى السحابة عند توفر Google + جلسة دخول.</p>
+        <p class="backup-card-desc">مزامنة <strong>تشغيلية لحظية</strong> بين الأجهزة (Push + Poll). «مزامنة الآن» و«ربط Google» من الملخص وبطاقة OAuth أعلاه.</p>
         <div class="backup-status-card">
           <div class="backup-status-item"><label>Cloud V2</label><strong id="bk-cv2-enabled">—</strong></div>
           <div class="backup-status-item"><label>Center ID</label><strong id="bk-cv2-center" style="font-size:11px;word-break:break-all" dir="ltr">—</strong></div>
@@ -6416,14 +6424,14 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         </div>
         <div id="bk-cv2-setup-hint" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;background:rgba(255,193,7,0.12);border:1px solid rgba(255,193,7,0.35);font-size:12px;line-height:1.7;color:var(--text-muted)"></div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="btn btn-primary btn-sm" onclick="showPage('owner-hub')">🏠 Owner Hub — الفروع والأجهزة</button>
           <button type="button" class="btn btn-secondary btn-sm" id="settings-bootflow-cta" onclick="typeof openBootWizardFromLogin==='function'&&openBootWizardFromLogin()">🚀 معالج الإعداد (BootFlow)</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-ss-surface="google_connect" onclick="startCloudDbOAuth()">🔗 ربط Google</button>
-          <button type="button" class="btn btn-accent btn-sm" id="btn-cloud-v2-sync-now" data-ss-surface="sync_manual" onclick="runCloudV2SyncNow()">🔄 مزامنة الآن</button>
           <button type="button" class="btn btn-ghost btn-sm" id="btn-cloud-v2-resume" onclick="resumeCloudV2Sync()" style="display:none">▶️ استئناف المزامنة</button>
           <button type="button" class="btn btn-ghost btn-sm" id="settings-centersetup-cta" onclick="CenterSetupUI.open('manage')" title="دعم متقدم فقط">⚙️ إعداد المركز (دعم)</button>
         </div>
-        <div id="bk-cv2-migration-wrap" style="margin-top:12px;padding:10px;background:var(--surface);border-radius:8px;border:1px dashed var(--border)">
+        <details class="backup-advanced-details">
+          <summary>🛠️ أدوات ترحيل (دعم متقدم — مرة واحدة)</summary>
+          <div class="backup-advanced-details__body">
+        <div id="bk-cv2-migration-wrap" style="padding:10px;background:var(--surface);border-radius:8px;border:1px dashed var(--border)">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
             <strong style="font-size:12px">📁 ترحيل مجلدات Drive</strong>
             <div style="display:flex;gap:6px">
@@ -6439,12 +6447,14 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
             <button type="button" class="btn btn-accent btn-sm" onclick="LegacyBranchMigrationUI.openWizard({force:true})">🧭 معالج الترحيل</button>
           </div>
           <div id="bk-cv2-legacy-branch-status" style="font-size:11px;color:var(--text-muted);line-height:1.65">—</div>
-          <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted);line-height:1.65">يُستخدم مرة واحدة عند ترقية من إصدار قديم: يضيف <code dir="ltr">branchId</code> للسجلات التي لا تحمل فرعاً (عملاء، حالات، …) حتى لا تظهر في كل الفروع ولا تُحظر المزامنة.</p>
+          <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted);line-height:1.65">يُستخدم عند الترقية من إصدار قديم: يضيف <code dir="ltr">branchId</code> للسجلات بلا فرع حتى لا تظهر في كل الفروع.</p>
         </div>
+          </div>
+        </details>
       </div>
 
-      <div class="card" style="border:1.5px solid var(--success, #2e7d32)">
-        <span class="backup-role-badge backup-role-badge--local">③ نسخ احتياطي — استعادة كوارث</span>
+      <div class="card" style="border:1.5px solid var(--success, #2e7d32);grid-column:1/-1">
+        <span class="backup-role-badge backup-role-badge--local">③ نسخ احتياطي — استعادة كوارث (Backup V2)</span>
         <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-top:0">
           <div class="card-title">🗄️ النسخ الاحتياطي واستعادة الكوارث</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -6465,7 +6475,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
             <input class="form-control" type="password" id="bk-v2-pass" placeholder="تلقائي" autocomplete="new-password" tabindex="-1">
           </div>
           <div class="form-group" style="margin:0">
-            <label class="form-label">جدولة النسخ التلقائي</label>
+            <label class="form-label">جدولة النسخ التلقائي (Backup V2)</label>
             <select class="form-control" id="bk-v2-schedule-interval" onchange="saveBackupV2ScheduleFromUI()">
               <option value="0">معطّل</option>
               <option value="15" selected>كل 15 دقيقة</option>
@@ -6483,47 +6493,47 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         </div>
       </div>
 
-      <div class="card">
-        <span class="backup-role-badge backup-role-badge--local">③ نسخ محلي</span>
-        <div class="card-header" style="padding-top:0">
-          <div class="card-title">💾 النسخ المحلي</div>
+      <div class="card" style="grid-column:1/-1">
+        <span class="backup-role-badge backup-role-badge--auto">④ النسخ المحلي والجدولة</span>
+        <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-top:0">
+          <div class="card-title">💾 النسخ على قرص الجهاز</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="runBackupNow('manual')">💾 نسخ الآن</button>
             <button class="btn btn-accent btn-sm" onclick="openRestoreBackupModal()">♻️ استعادة</button>
           </div>
         </div>
         <p class="backup-card-desc">نسخ على <strong>قرص هذا الجهاز</strong> — مستقل عن Google. مفيد عند انقطاع الإنترنت.</p>
-        <label style="display:flex;align-items:center;gap:10px;font-weight:700;cursor:pointer;margin-bottom:10px;font-size:13px">
-          <input type="checkbox" id="bk-local-enabled" checked onchange="saveBackupSettingsFromUI()"> حفظ على الجهاز
-        </label>
-        <div class="form-group" style="margin:0">
-          <label class="form-label">مسار النسخ</label>
-          <select class="form-control" id="bk-local-path" onchange="saveBackupSettingsFromUI()"></select>
-        </div>
-        <input class="form-control" id="bk-local-path-custom" placeholder="مسار مخصص" style="display:none;margin-top:8px" onchange="saveBackupSettingsFromUI()">
-        <p id="bk-local-path-hint" class="backup-card-desc" style="margin:8px 0 0;font-size:12px;color:var(--text-muted)"></p>
-      </div>
-
-      <div class="card">
-        <span class="backup-role-badge backup-role-badge--auto">④ جدولة — محلي</span>
-        <div class="card-header" style="padding-top:0"><div class="card-title">⏱️ النسخ التلقائي والمحفزات</div></div>
-        <p class="backup-card-desc">جدولة النسخ <strong>المحلي</strong> — منفصلة عن نسخ Google Drive أعلاه.</p>
-        <div class="form-group" style="margin-bottom:10px">
-          <label class="form-label">فترة النسخ التلقائي</label>
-          <select class="form-control" id="bk-auto-interval" onchange="saveBackupSettingsFromUI()">
-            <option value="0">معطّل</option>
-            <option value="15">كل 15 دقيقة</option>
-            <option value="30">كل 30 دقيقة</option>
-            <option value="60">كل ساعة</option>
-            <option value="360">كل 6 ساعات</option>
-            <option value="1440">يومياً</option>
-          </select>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600">
-          <label><input type="checkbox" id="bk-trig-close" onchange="saveBackupSettingsFromUI()"> عند إغلاق البرنامج</label>
-          <label><input type="checkbox" id="bk-trig-update" onchange="saveBackupSettingsFromUI()"> قبل تحديث النظام</label>
-          <label><input type="checkbox" id="bk-trig-restore" onchange="saveBackupSettingsFromUI()"> قبل استعادة نسخة</label>
-          <label><input type="checkbox" id="bk-trig-ops" onchange="saveBackupSettingsFromUI()"> بعد 50 عملية</label>
+        <div class="form-grid form-grid-2" style="gap:12px;margin-top:8px">
+          <div>
+            <label style="display:flex;align-items:center;gap:10px;font-weight:700;cursor:pointer;margin-bottom:10px;font-size:13px">
+              <input type="checkbox" id="bk-local-enabled" checked onchange="saveBackupSettingsFromUI()"> حفظ على الجهاز
+            </label>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">مسار النسخ</label>
+              <select class="form-control" id="bk-local-path" onchange="saveBackupSettingsFromUI()"></select>
+            </div>
+            <input class="form-control" id="bk-local-path-custom" placeholder="مسار مخصص" style="display:none;margin-top:8px" onchange="saveBackupSettingsFromUI()">
+            <p id="bk-local-path-hint" class="backup-card-desc" style="margin:8px 0 0;font-size:12px;color:var(--text-muted)"></p>
+          </div>
+          <div>
+            <div class="form-group" style="margin-bottom:10px">
+              <label class="form-label">فترة النسخ التلقائي (محلي)</label>
+              <select class="form-control" id="bk-auto-interval" onchange="saveBackupSettingsFromUI()">
+                <option value="0">معطّل</option>
+                <option value="15">كل 15 دقيقة</option>
+                <option value="30">كل 30 دقيقة</option>
+                <option value="60">كل ساعة</option>
+                <option value="360">كل 6 ساعات</option>
+                <option value="1440">يومياً</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600">
+              <label><input type="checkbox" id="bk-trig-close" onchange="saveBackupSettingsFromUI()"> عند إغلاق البرنامج</label>
+              <label><input type="checkbox" id="bk-trig-update" onchange="saveBackupSettingsFromUI()"> قبل تحديث النظام</label>
+              <label><input type="checkbox" id="bk-trig-restore" onchange="saveBackupSettingsFromUI()"> قبل استعادة نسخة</label>
+              <label><input type="checkbox" id="bk-trig-ops" onchange="saveBackupSettingsFromUI()"> بعد 50 عملية</label>
+            </div>
+          </div>
         </div>
       </div>
       </div><!-- /backup-stack-grid -->
@@ -6539,7 +6549,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
             <input class="form-control" type="password" id="bk-encrypt-pass" placeholder="للاستعادة — لا تُنسَ">
           </div>
         </div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:8px">حتى مع الوصول لملف النسخة، لا يمكن قراءة البيانات بدون كلمة المرور.</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:8px">ينطبق على النسخ المحلي فقط — Backup V2 (استعادة الكوارث) غير مشفّر.</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="saveBackupEncryptionPassword()">💾 حفظ كلمة التشفير</button>
       </div>
 
@@ -7802,8 +7812,8 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
   <!-- ═══════════════ OWNER HUB (Cloud V2) ═══════════════ -->
   <div class="page" id="page-owner-hub">
     <header class="dash-hero-glass page-hero compact-hero">
-      <h2>Owner Hub</h2>
-      <p>نظرة مركزية على الترخيص، الأجهزة، المزامنة، والنسخ الاحتياطي (Cloud V2)</p>
+      <h2>مركز المالك — Owner Hub</h2>
+      <p>نظرة مركزية على الترخيص، الفروع، الأجهزة، والمزامنة (Cloud V2)</p>
     </header>
     <div id="owner-hub-body"></div>
   </div>
