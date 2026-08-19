@@ -8,5 +8,8 @@ Thumbs.db
 .env
 .env.*
 electron/cloud-oauth.config.local.json
+electron/cloud-oauth.config.json
+electron/cloud-oauth.embedded.json
+vendor/cloud-oauth.embedded.json
 *.tdw
 Final Stage-Clinic-Production.zip

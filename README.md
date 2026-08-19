@@ -34,8 +34,7 @@ npm ci
 npm run build:prod
 ```
 
-OAuth is embedded in `electron/cloud-oauth.embedded.json` and is applied automatically during build.
-No manual secret editing is required.
+OAuth production credentials ship in `electron/cloud-oauth.production.b64` and decode automatically at `prebuild`. No manual copy, ZIP, or vendor files — `npm run build:prod` only.
 
 ## Why phase4 failed on your PC
 

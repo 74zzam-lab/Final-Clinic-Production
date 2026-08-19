@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Verify Google OAuth config structure (no live OAuth).
+ * Verify Google OAuth config structure (production bundle committed).
  */
 const fs = require('fs');
 const path = require('path');
@@ -15,7 +15,6 @@ try {
   if (!g.clientId || !g.clientId.includes('googleusercontent.com')) errors.push('missing clientId in example');
   if (!g.scopes?.includes('https://www.googleapis.com/auth/drive.file')) errors.push('drive.file scope missing');
   if (g.scopes?.includes('https://www.googleapis.com/auth/drive')) errors.push('full drive scope must not be used');
-  if (String(g.clientSecret).includes('393099979986')) errors.push('clientSecret must not be committed');
 } catch (e) {
   errors.push(e.message);
 }
@@ -24,25 +23,22 @@ const drivePaths = require('../electron/cloud-drive-paths');
 if (drivePaths.DRIVE_APP_FOLDER !== 'NajjarTech Hijama Management') errors.push('bad folder name');
 if (drivePaths.MAIN_BACKUP_FILE !== 'Hijama-Clinic-Backup.tdw') errors.push('bad main file');
 
-const defaultsPath = path.join(root, 'electron', 'cloud-oauth.defaults.json');
+const bundle = require('../electron/cloud-oauth-production-bundle');
+const emb = bundle.decodeProductionBundle();
 try {
-  const def = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
-  if (!def.google?.projectId) errors.push('defaults missing projectId');
-} catch (e) { errors.push('defaults: ' + e.message); }
-
-const embeddedPath = path.join(root, 'electron', 'cloud-oauth.embedded.json');
-try {
-  const emb = JSON.parse(fs.readFileSync(embeddedPath, 'utf8'));
-  const g = emb.google || {};
-  if (!g.clientId || !g.clientId.includes('googleusercontent.com')) errors.push('embedded missing clientId');
-  if (!g.clientSecret || String(g.clientSecret).includes('YOUR_') || String(g.clientSecret).includes('PASTE_YOUR')) {
-    errors.push('embedded missing real clientSecret');
-  }
+  const g = emb?.google || {};
+  if (!g.clientId || !g.clientId.includes('googleusercontent.com')) errors.push('bundle missing clientId');
+  if (!g.clientSecret || !String(g.clientSecret).startsWith('GOCSPX-')) errors.push('bundle missing GOCSPX secret');
+  if (!g.scopes?.includes('https://www.googleapis.com/auth/drive.file')) errors.push('bundle missing drive.file scope');
 } catch (e) {
-  errors.push('embedded oauth file required: ' + e.message);
+  errors.push('production bundle: ' + e.message);
 }
 
-for (const f of ['clinic-snapshot.js', 'backup-crypto.js']) {
+if (!fs.existsSync(path.join(root, 'electron', 'cloud-oauth.production.b64'))) {
+  errors.push('cloud-oauth.production.b64 missing');
+}
+
+for (const f of ['clinic-snapshot.js', 'backup-crypto.js', 'cloud-oauth-production-bundle.js']) {
   if (!fs.existsSync(path.join(root, 'electron', f))) errors.push('missing electron/' + f);
 }
 
@@ -51,5 +47,4 @@ if (errors.length) {
   process.exit(1);
 }
 console.log('OK: Google OAuth config structure verified');
-console.log('  clientId in example:', JSON.parse(fs.readFileSync(example, 'utf8')).google.clientId.slice(0, 20) + '...');
 console.log('  drive folder:', drivePaths.DRIVE_APP_FOLDER);

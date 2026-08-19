@@ -41,7 +41,8 @@ function parseGoogleSection(raw) {
   const google = raw.google || raw;
   if (!google?.clientId || !google?.clientSecret) return null;
   if (String(google.clientId).includes('YOUR_') || String(google.clientSecret).includes('YOUR_')) return null;
-  if (String(google.clientSecret).includes('PASTE_YOUR')) return null;
+  if (String(google.clientSecret).includes('PASTE_YOUR') || String(google.clientSecret).includes('REPLACE_ME') || String(google.clientSecret).includes('BOOTSTRAP_AT_BUILD')) return null;
+  if (String(google.clientId).includes('REPLACE_ME')) return null;
   return google;
 }
 
