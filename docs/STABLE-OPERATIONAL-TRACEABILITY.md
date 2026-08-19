@@ -17,6 +17,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-10-error-truthfulness-7c71` | 10 — Error truthfulness | DONE (code) | Required after merge |
 | `cursor/phase-11-migration-safety-7c71` | 11 — Migration safety | DONE (code) | Required after merge |
 | `cursor/phase-12-operational-db-health-7c71` | 12 — DB health gates | DONE (code) | Required after merge |
+| `cursor/phase-13-operational-readiness-7c71` | 13 — Operational readiness | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -136,6 +137,15 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Healthy clinic → `operationalHealth.ok` in status
 3. Blocked save shows Arabic backup-restore guidance
 
-## Deferred phases (13–14)
+## Phase 13 — Operational readiness
+
+**Goal:** Single readiness signal for save/sync/restore/diagnostics.
+
+**Operator UAT (you):**
+1. Healthy boot → `operationalReadiness.ok: true`
+2. Legacy migration pending → sync blocked with Arabic message
+3. Owner Hub diagnostics shows `operational` blockers when unhealthy
+
+## Deferred phase (14)
 
 See planning doc in agent conversation — not started on this branch.

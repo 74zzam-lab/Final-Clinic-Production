@@ -324,14 +324,20 @@ function collectDirectory(sourceRoot, archiveRoot, entries) {
 
 function databaseHealth(databasePath) {
   if (!fs.existsSync(databasePath)) throw new Error('backup_database_not_found');
+  const operationalDbHealth = require('../database/operational-db-health');
   let db;
   try {
     db = new Database(databasePath, { readonly: true, fileMustExist: true, timeout: 5000 });
-    const quickCheck = db.pragma('quick_check', { simple: true });
-    if (quickCheck !== 'ok') throw new Error('backup_database_integrity_failed');
+    const assessment = operationalDbHealth.assessHealth(db);
+    if (!assessment.ok) throw new Error('backup_database_integrity_failed');
     const { readSchemaVersion } = require('../database/hybrid-schema');
-    const schemaVersion = readSchemaVersion(db);
-    return { ok: true, quickCheck, schemaVersion, size: fs.statSync(databasePath).size };
+    return {
+      ok: true,
+      quickCheck: 'ok',
+      schemaVersion: readSchemaVersion(db),
+      operationalHealth: assessment,
+      size: fs.statSync(databasePath).size,
+    };
   } finally {
     try { db?.close(); } catch { /* best effort */ }
   }
@@ -739,7 +745,15 @@ function migrateStagedDatabase(databasePath, now = new Date()) {
     const quickCheck = db.pragma('quick_check', { simple: true });
     const foreignKeyViolations = db.pragma('foreign_key_check');
     if (quickCheck !== 'ok' || foreignKeyViolations.length) throw new Error('restored_sqlite_integrity_failed');
-    return { before, after: Math.max(0, ...migrations.map((item) => Number(item.version) || 0)), quickCheck };
+    const operationalDbHealth = require('../database/operational-db-health');
+    const operationalHealth = operationalDbHealth.assessHealth(db);
+    if (!operationalHealth.ok) throw new Error('restored_sqlite_integrity_failed');
+    return {
+      before,
+      after: Math.max(0, ...migrations.map((item) => Number(item.version) || 0)),
+      quickCheck,
+      operationalHealth,
+    };
   } finally {
     try { db?.close(); } catch { /* best effort */ }
   }

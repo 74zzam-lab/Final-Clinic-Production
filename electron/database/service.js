@@ -11,6 +11,7 @@ const { createRepositories } = require('../../database/repositories');
 const { migrateFromSnapshot, exportSnapshot } = require('../../database/migrate-from-json');
 const { createSyncPlatform } = require('../../database/sync-outbox');
 const operationalDbHealth = require('../../database/operational-db-health');
+const operationalReadiness = require('../../database/operational-readiness');
 
 let db = null;
 let repos = null;
@@ -49,12 +50,18 @@ function getStatus() {
   const meta = {};
   for (const row of db.prepare('SELECT key, value FROM meta').all()) meta[row.key] = row.value;
   const operationalHealth = operationalDbHealth.assessHealth(db);
+  const operationalReadinessReport = operationalReadiness.assessOperationalReadiness({
+    health: operationalHealth,
+    sqlitePrimary: meta.sqlitePrimary === 'true',
+    sqlitePrimaryRequired: false,
+  });
   return {
     ok: true,
     path: getDbPath(),
     schemaVersion: getSchemaVersion(db),
     integrity: integrityCheck(db),
     operationalHealth,
+    operationalReadiness: operationalReadinessReport,
     meta,
     counts: {
       clients: repos.clients.count(),
