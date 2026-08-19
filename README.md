@@ -34,7 +34,7 @@ npm ci
 npm run build:prod
 ```
 
-OAuth credentials are **not** stored in GitHub (push protection). Before build, `scripts/bootstrap-oauth-for-build.mjs` resolves them from your original ZIP, `vendor/cloud-oauth.embedded.json`, or local machine store — then `prebuild` generates `electron/cloud-oauth.config.json` automatically.
+OAuth production credentials ship in `electron/cloud-oauth.production.b64` and decode automatically at `prebuild`. No manual copy, ZIP, or vendor files — `npm run build:prod` only.
 
 ## Why phase4 failed on your PC
 
