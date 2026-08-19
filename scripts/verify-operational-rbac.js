@@ -107,6 +107,9 @@ assert(indexSrc.includes('branch-data-isolation.js'), 'branch data isolation mod
 const isoSrc = fs.readFileSync(path.join(root, 'cloud/branch-data-isolation.js'), 'utf8');
 assert(isoSrc.includes('BRANCH_SCOPED_ARRAY_KEYS'), 'branch scoped kv keys defined');
 assert(isoSrc.includes('filterUsersForView'), 'users filtered per branch view');
+assert(isoSrc.includes("'users'"), 'users in branch scoped kv keys');
+assert(isoSrc.includes('getUsersForAuth'), 'login uses branch auth user list');
+assert(isoSrc.includes('usernameTakenInBranch'), 'username unique per branch');
 
 const bridgeSrc = fs.readFileSync(path.join(root, 'cupping-sqlite-bridge.js'), 'utf8');
 assert(bridgeSrc.includes('BranchDataIsolation'), 'sqlite bridge uses branch data isolation');
@@ -176,6 +179,27 @@ assert(ownerView.length === 1 && ownerView[0].branchId === 'BR-RYD', 'owner bran
 branchCtx.currentUser = { id: '3', role: 'reception' };
 const staffView = branchCtx.BranchScope.filterForActiveView(mixedRecords);
 assert(staffView.length === 1 && staffView[0].branchId === 'BR-RYD', 'staff still scoped to device lock');
+
+const isoCtx = {
+  window: {},
+  globalThis: {},
+  console,
+  DB: { _d: {}, get(k, d) { return this._d[k] !== undefined ? this._d[k] : d; }, set(k, v) { this._d[k] = v; } },
+  DeviceConfig: { getLockedBranchId: () => 'BR-MAIN', isBranchLocked: () => true },
+  BranchScope: null,
+};
+isoCtx.window = isoCtx;
+isoCtx.globalThis = isoCtx;
+vm.createContext(isoCtx);
+vm.runInContext(fs.readFileSync(path.join(root, 'cloud/branch-scope.js'), 'utf8'), isoCtx);
+vm.runInContext(fs.readFileSync(path.join(root, 'cloud/branch-data-isolation.js'), 'utf8'), isoCtx);
+const branchUsers = [
+  { id: 'a1', username: 'admin', role: 'admin', active: true, branchId: 'BR-MAIN' },
+  { id: 'a2', username: 'admin', role: 'admin', active: true, branchId: 'BR-JED' },
+];
+assert(isoCtx.BranchDataIsolation.usernameTakenInBranch(branchUsers, 'admin', 'BR-MAIN', 'a1') === false, 'same username allowed other branch');
+assert(isoCtx.BranchDataIsolation.usernameTakenInBranch(branchUsers, 'admin', 'BR-MAIN', 'x') === true, 'username blocked same branch');
+assert(isoCtx.BranchDataIsolation.getUsersForAuth(branchUsers).length === 1, 'login lists device branch users only');
 
 const switcherSrc = fs.readFileSync(path.join(root, 'cloud/branch-switcher.js'), 'utf8');
 assert(switcherSrc.includes('topbar-branch-label'), 'read-only branch label for device-bound users');

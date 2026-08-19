@@ -662,6 +662,20 @@
       }
       const db = api();
       if (!db || !state.sqlitePrimary) {
+        const branchScopedKv = global.BranchDataIsolation?.BRANCH_SCOPED_ARRAY_KEYS?.has?.(k);
+        if (Array.isArray(v) && branchScopedKv) {
+          const branchId = getOperationalWriteBranchId();
+          const slice = filterRecordsForWriteBranch(v.map((r) => {
+            if (r && typeof r === 'object' && !r.branchId && global.BranchDataIsolation?.stampBranchId) {
+              return global.BranchDataIsolation.stampBranchId({ ...r });
+            }
+            return r;
+          }));
+          mergeBranchSliceIntoCommitted(k, slice, branchId);
+          baseRaw(k, state.lastCommitted[k] || v);
+          syncMemory(k, filterForActiveViewIfNeeded(k, state.lastCommitted[k]));
+          return true;
+        }
         baseRaw(k, v);
         rememberCommit(k, v);
         return true;
@@ -753,6 +767,16 @@
     };
   }
 
+  function getCommittedRaw(key) {
+    if (!Object.prototype.hasOwnProperty.call(state.lastCommitted, key)) return undefined;
+    const raw = state.lastCommitted[key];
+    try {
+      return typeof structuredClone === 'function' ? structuredClone(raw) : JSON.parse(JSON.stringify(raw));
+    } catch {
+      return raw;
+    }
+  }
+
   global.SqliteBridge = {
     migrateAndEnable,
     hydrateIntoMemory,
@@ -785,6 +809,7 @@
       hasLastCommitted: Object.keys(state.lastCommitted),
     }),
     getLastError: () => state.lastError,
+    getCommittedRaw,
   };
 
   if (typeof document !== 'undefined') {

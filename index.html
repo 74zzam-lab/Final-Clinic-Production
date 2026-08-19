@@ -9483,12 +9483,19 @@ const DEV_ACCOUNT = {
 const OWNER_SEED_PASSWORD_HASH = 'pbkdf2:owner:f28c4134eec2cebf7631ab559ec0eb794280730d728919f259438a3441f5266b';
 
 const defaultUsers = [
-  { id:'1', fullName:'مدير النظام',     username:'admin',     password:'pbkdf2:admin:cbde2e147f40d0cf48ae4a9b093ef0fe459bf6f6e554b57d5348be21aee54a89', role:'admin',     empNum:'001', active:true },
-  { id:'2', fullName:'موظف الاستقبال', username:'reception', password:'pbkdf2:reception:54f155e640fc70b9fb5959af0459ccba1bba552c11afe44540236f3c92d43bf3', role:'reception', empNum:'002', active:true },
+  { id:'1', fullName:'مدير النظام',     username:'admin',     password:'pbkdf2:admin:cbde2e147f40d0cf48ae4a9b093ef0fe459bf6f6e554b57d5348be21aee54a89', role:'admin',     empNum:'001', active:true, branchId:'BR-MAIN', isBranchPrimary:true, branchScope:['BR-MAIN'], canSwitchBranch:false },
+  { id:'2', fullName:'موظف الاستقبال', username:'reception', password:'pbkdf2:reception:54f155e640fc70b9fb5959af0459ccba1bba552c11afe44540236f3c92d43bf3', role:'reception', empNum:'002', active:true, branchId:'BR-MAIN', branchScope:['BR-MAIN'], canSwitchBranch:false },
   /* V2-5.9: seeded Owner (local auth). Google never implies Owner. mustChangePassword forced until changed. */
-  { id:'3', fullName:'مالك المركز', username:'owner', password: OWNER_SEED_PASSWORD_HASH, role:'owner', empNum:'000', active:true, branchScope:['*'], canSwitchBranch:true, mustChangePassword:true, seedDefaultPassword:true }
+  { id:'3', fullName:'مالك المركز', username:'owner', password: OWNER_SEED_PASSWORD_HASH, role:'owner', empNum:'000', active:true, branchId:'BR-MAIN', branchScope:['*'], canSwitchBranch:true, mustChangePassword:true, seedDefaultPassword:true }
 ];
 let users = DB.get('users', defaultUsers);
+if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.migrateUsersBranchIds) {
+  const migrated = BranchDataIsolation.migrateUsersBranchIds(users);
+  if (migrated !== users) {
+    users = migrated;
+    DB.set('users', users);
+  }
+}
 // V2-5.9: seed Owner only when none exists (active or inactive). Never duplicate after restore/migration.
 try {
   users = ensureOwnerSeedAccount(users);
@@ -9500,22 +9507,31 @@ let _pendingForcedPwChange = false;
 
 function ensureOwnerSeedAccount(list) {
   if (!Array.isArray(list)) list = defaultUsers.slice();
-  const owners = list.filter((u) => u && String(u.role || '').toLowerCase() === 'owner');
-  if (owners.length) {
-    // Deduplicate exact seed username clones; keep first.
+  const branchId = (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getLoginBranchId)
+    ? BranchDataIsolation.getLoginBranchId()
+    : (typeof DeviceConfig !== 'undefined' ? DeviceConfig.getLockedBranchId?.() : null) || 'BR-MAIN';
+  const ownersInBranch = list.filter((u) => u
+    && String(u.role || '').toLowerCase() === 'owner'
+    && (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
+      ? BranchDataIsolation.userBelongsToBranch(u, branchId)
+      : (!u.branchId || u.branchId === branchId)));
+  if (ownersInBranch.length) {
     const seen = new Set();
     const out = [];
     for (const u of list) {
       if (!u) continue;
-      if (String(u.role || '').toLowerCase() === 'owner' && String(u.username || '').toLowerCase() === 'owner') {
-        const key = 'owner:' + String(u.username || '').toLowerCase();
+      const inBranch = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
+        ? BranchDataIsolation.userBelongsToBranch(u, branchId)
+        : (!u.branchId || u.branchId === branchId);
+      if (String(u.role || '').toLowerCase() === 'owner' && inBranch && String(u.username || '').toLowerCase() === 'owner') {
+        const key = 'owner:' + String(u.username || '').toLowerCase() + ':' + branchId;
         if (seen.has(key)) continue;
         seen.add(key);
-        // Preserve mustChangePassword if still on seed hash
         if (u.password === OWNER_SEED_PASSWORD_HASH) {
           u.mustChangePassword = true;
           u.seedDefaultPassword = true;
         }
+        if (!u.branchId) u.branchId = branchId;
       }
       out.push(u);
     }
@@ -9524,7 +9540,13 @@ function ensureOwnerSeedAccount(list) {
   }
   const seed = defaultUsers.find((u) => u.role === 'owner');
   if (!seed) return list;
-  const next = list.concat([{ ...seed, id: String(seed.id || ('owner-' + Date.now())) }]);
+  const next = list.concat([{
+    ...seed,
+    id: 'owner-' + branchId.replace(/[^a-zA-Z0-9-]/g, '') + '-' + Date.now(),
+    branchId,
+    branchScope: ['*'],
+    canSwitchBranch: true
+  }]);
   DB.set('users', next);
   return next;
 }
@@ -9680,14 +9702,64 @@ async function upgradeUserPassword(user, pw) {
   user.password = await hashPW(pw, user.username);
   const idx = users.findIndex(u => u.id === user.id);
   if (idx !== -1) users[idx].password = user.password;
-  DB.set('users', users);
+  persistUsersBranchSlice(users);
+}
+
+function getAuthUserList() {
+  const all = DB.get('users', users);
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getUsersForAuth) {
+    return BranchDataIsolation.getUsersForAuth(all);
+  }
+  return all.filter(u => u && u.active);
+}
+
+function isBranchPrimaryUser(u) {
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.isBranchPrimaryUser) {
+    return BranchDataIsolation.isBranchPrimaryUser(u);
+  }
+  return !!(u && String(u.id) === '1');
+}
+
+function getAllUsersStore() {
+  if (typeof SqliteBridge !== 'undefined' && SqliteBridge.getCommittedRaw) {
+    const raw = SqliteBridge.getCommittedRaw('users');
+    if (Array.isArray(raw) && raw.length) return raw;
+  }
+  const fromDb = DB.get('users', null);
+  if (Array.isArray(fromDb) && fromDb.length) return fromDb;
+  return Array.isArray(users) ? users.slice() : [];
+}
+
+function mergeUsersBranchSlice(branchSlice, branchId) {
+  const all = getAllUsersStore();
+  branchId = branchId
+    || (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getViewBranchId
+      ? (BranchDataIsolation.getViewBranchId() || BranchDataIsolation.getLoginBranchId())
+      : null)
+    || (typeof BranchScope !== 'undefined' ? BranchScope.getActiveBranchId?.() : null)
+    || 'BR-MAIN';
+  const belongs = (u, bid) => (
+    typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
+      ? BranchDataIsolation.userBelongsToBranch(u, bid)
+      : String(u?.branchId || 'BR-MAIN') === String(bid)
+  );
+  const others = all.filter((u) => u && (u.isDev || !belongs(u, branchId)));
+  const slice = (Array.isArray(branchSlice) ? branchSlice : []).filter((u) => u && !u.isDev && belongs(u, branchId));
+  const devs = all.filter((u) => u?.isDev);
+  const merged = [...others, ...slice];
+  devs.forEach((d) => { if (!merged.some((m) => m && String(m.id) === String(d.id))) merged.push(d); });
+  return merged;
+}
+
+function persistUsersBranchSlice(branchSlice, branchId) {
+  DB.set('users', mergeUsersBranchSlice(branchSlice, branchId));
 }
 
 function filterLoginUsers() {
   const role = document.getElementById('login-role')?.value;
   const sel  = document.getElementById('login-username');
   if (!sel) return;
-  const list = users.filter(u => u.role === role && u.active);
+  const list = getAuthUserList().filter(u => u.role === role && u.active);
   sel.innerHTML = '<option value="">-- اختر المستخدم --</option>' +
     list.map(u => `<option value="${u.id}">${u.fullName}</option>`).join('');
 }
@@ -9722,7 +9794,7 @@ async function doLogin() {
   }
 
   if (!userId) { errEl.style.display='block'; errEl.textContent='❌ يرجى اختيار المستخدم'; return; }
-  const u = users.find(x => x.id === userId && x.active);
+  const u = getAuthUserList().find(x => x.id === userId && x.active);
   if (!u || u.role !== role || !(await verifyPW(pw, u.password, u.username))) {
     errEl.style.display='block'; errEl.textContent='❌ كلمة المرور غير صحيحة'; return;
   }
@@ -9845,11 +9917,16 @@ async function ensureRbacSessionBound() {
     };
 
     // Authoritative path: seed main KV if empty (public one-time), then bind against KV — never trust claim alone.
-    if (!currentUser.isDev && api.database?.seedUsersIfEmpty && Array.isArray(users) && users.length) {
+    if (!currentUser.isDev && api.database?.seedUsersIfEmpty) {
+      const seedUsers = (typeof SqliteBridge !== 'undefined' && SqliteBridge.getCommittedRaw)
+        ? (SqliteBridge.getCommittedRaw('users') || users)
+        : users;
+      if (Array.isArray(seedUsers) && seedUsers.length) {
       try {
-        await api.database.seedUsersIfEmpty(users);
+        await api.database.seedUsersIfEmpty(seedUsers);
       } catch (seedErr) {
         console.warn('ensureRbacSessionBound: seedUsersIfEmpty', seedErr);
+      }
       }
     }
 
@@ -9870,9 +9947,14 @@ async function ensureRbacSessionBound() {
 
     // After session exists, keep KV in sync for subsequent authoritative checks.
     try {
-      if (api.database?.persistKv && Array.isArray(users) && users.length && !currentUser.isDev) {
-        await api.database.persistKv('users', users);
-        await api.rbac.bindSession(payload);
+      if (api.database?.persistKv && !currentUser.isDev) {
+        const persistUsers = (typeof SqliteBridge !== 'undefined' && SqliteBridge.getCommittedRaw)
+          ? (SqliteBridge.getCommittedRaw('users') || users)
+          : users;
+        if (Array.isArray(persistUsers) && persistUsers.length) {
+          await api.database.persistKv('users', persistUsers);
+          await api.rbac.bindSession(payload);
+        }
       }
     } catch (flushErr) {
       console.warn('ensureRbacSessionBound: users flush failed', flushErr);
@@ -10313,7 +10395,8 @@ let editUserId = null;
 
 function deleteUser(id) {
   if (!checkAdmin('حذف المستخدم')) return;
-  if (id === '1') { notify('⚠️ لا يمكن حذف حساب المدير الرئيسي', 'danger'); return; }
+  const target = users.find(u => u.id === id);
+  if (target && isBranchPrimaryUser(target)) { notify('⚠️ لا يمكن حذف حساب المدير الرئيسي لهذا الفرع', 'danger'); return; }
   const gate = (typeof OwnerManagement !== 'undefined' && OwnerManagement.canRemoveOwnerUser)
     ? OwnerManagement.canRemoveOwnerUser(id, users)
     : (typeof RolePolicy !== 'undefined' && RolePolicy.canRemoveOwnerUser
@@ -10325,7 +10408,8 @@ function deleteUser(id) {
   }
   if (!confirm('حذف هذا المستخدم؟')) return;
   const removed = users.find(u => u.id === id);
-  users = users.filter(u=>u.id!==id); DB.set('users', users);
+  users = users.filter(u=>u.id!==id);
+  persistUsersBranchSlice(users);
   if (removed && typeof logAudit === 'function') logAudit('USER_DELETED', `حذف مستخدم: ${removed.fullName}`, { user: removed.fullName });
   renderUsersList();
   notify('🗑️ تم حذف المستخدم', 'danger');
@@ -10355,7 +10439,7 @@ function renderUsersList() {
       </div>
       <div>${actionBtnRow(
         actionBtn('✏️', 'تعديل', { onclick: `openUserModal('${u.id}')` }) +
-        (u.id !== '1' ? actionBtn('🗑️', 'حذف', { cls: 'btn-danger', extraClass: 'admin-delete', onclick: `deleteUser('${u.id}')` }) : '')
+        (!isBranchPrimaryUser(u) ? actionBtn('🗑️', 'حذف', { cls: 'btn-danger', extraClass: 'admin-delete', onclick: `deleteUser('${u.id}')` }) : '')
       )}</div>
     </div>`).join('');
 }
@@ -10409,8 +10493,13 @@ async function saveUserAsync() {
   if (!fullName || !username) { notify('⚠️ الاسم واسم المستخدم مطلوبان', 'danger'); return; }
   if (!editUserId && !pw) { notify('⚠️ كلمة المرور مطلوبة للمستخدم الجديد', 'danger'); return; }
   const usernameKey = username.toLowerCase();
-  const duplicate = users.find(u => u.username?.toLowerCase() === usernameKey && u.id !== editUserId);
-  if (duplicate) { notify('⚠️ اسم المستخدم مستخدم بالفعل', 'danger'); return; }
+  const userBranchId = (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getViewBranchId)
+    ? (BranchDataIsolation.getViewBranchId() || BranchDataIsolation.getLoginBranchId())
+    : (BranchScope?.getActiveBranchId?.() || 'BR-MAIN');
+  const duplicate = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.usernameTakenInBranch
+    ? BranchDataIsolation.usernameTakenInBranch(getAllUsersStore(), username, userBranchId, editUserId)
+    : users.find(u => u.username?.toLowerCase() === usernameKey && u.id !== editUserId);
+  if (duplicate) { notify('⚠️ اسم المستخدم مستخدم بالفعل في هذا الفرع', 'danger'); return; }
   if (!editUserId && typeof LicenseLimits !== 'undefined' && LicenseLimits.canCreateUser) {
     const licDoc = (typeof LicenseCloud !== 'undefined' && LicenseCloud.loadLocal) ? LicenseCloud.loadLocal() : null;
     const gate = LicenseLimits.canCreateUser(licDoc, { users, isNew: true });
@@ -10432,7 +10521,7 @@ async function saveUserAsync() {
   if (editUserId) {
     const idx = users.findIndex(u=>u.id===editUserId);
     if (idx===-1) return;
-    if (users[idx].id === '1') {
+    if (isBranchPrimaryUser(users[idx])) {
       // Primary account may be Owner (highest) or Admin (operational); only Owner may assign Owner.
       if (role === 'owner' && !actorIsOwner) {
         notify('⚠️ فقط المالك يمكنه تعيين دور Owner للحساب الرئيسي', 'danger');
@@ -10477,6 +10566,9 @@ async function saveUserAsync() {
     users[idx].role = role; users[idx].empNum = document.getElementById('um-empnum').value;
     users[idx].active = nextActive;
     users[idx].customTitle = customTitle || undefined;
+    if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampUserBranch) {
+      BranchDataIsolation.stampUserBranch(users[idx]);
+    }
     if (permissions) users[idx].permissions = permissions;
     else delete users[idx].permissions;
     if (docId) users[idx].doctorId = docId;
@@ -10491,7 +10583,21 @@ async function saveUserAsync() {
       notify('⚠️ فقط المالك يمكنه إنشاء حساب Owner', 'danger');
       return;
     }
-    const newUser = { id: Date.now().toString(), fullName, username, password: await hashPW(pw, username), role, empNum: document.getElementById('um-empnum').value, doctorId: docId, active: true, customTitle: customTitle || undefined, permissions: permissions || undefined };
+    const newUser = {
+      id: Date.now().toString(),
+      fullName, username,
+      password: await hashPW(pw, username),
+      role,
+      empNum: document.getElementById('um-empnum').value,
+      doctorId: docId,
+      active: true,
+      customTitle: customTitle || undefined,
+      permissions: permissions || undefined,
+      branchId: userBranchId
+    };
+    if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampUserBranch) {
+      BranchDataIsolation.stampUserBranch(newUser);
+    }
     if (role === 'owner' || role === 'hq_admin') {
       if (typeof OwnerManagement !== 'undefined' && OwnerManagement.bindOwnerToCurrentContext) {
         OwnerManagement.bindOwnerToCurrentContext(newUser);
@@ -10499,8 +10605,16 @@ async function saveUserAsync() {
     }
     users.push(newUser);
   }
-  if (typeof BranchScope !== 'undefined') users.forEach(u => BranchScope.applyDefaultScopeToUser(u));
-  DB.set('users', users);
+  if (typeof BranchScope !== 'undefined') {
+    users.forEach(u => {
+      if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampUserBranch) {
+        BranchDataIsolation.stampUserBranch(u);
+      } else {
+        BranchScope.applyDefaultScopeToUser(u);
+      }
+    });
+  }
+  persistUsersBranchSlice(users, userBranchId);
   filterLoginUsers();
   document.getElementById('userModal').classList.remove('open');
   renderUsersList();
@@ -14924,6 +15038,8 @@ function refreshAllBranchScopedViews(options) {
   if (typeof loadSettings === 'function') loadSettings();
   if (typeof loadPackagesPricing === 'function') loadPackagesPricing();
   if (typeof refreshSystemLogsPage === 'function') refreshSystemLogsPage(false);
+  if (typeof renderUsersList === 'function') renderUsersList();
+  if (typeof filterLoginUsers === 'function') filterLoginUsers();
   if (typeof applyBranchViewModeUi === 'function') applyBranchViewModeUi();
   if (options.fromBranchSwitch !== true && typeof showPage === 'function') {
     const active = document.querySelector('.page.active')?.id?.replace('page-', '');
@@ -27376,7 +27492,9 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
       await completeAuthenticatedLogin();
       return;
     }
-    const u = users.find(x => x.id === session.userId && x.active);
+    const u = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.findUserInBranch
+      ? BranchDataIsolation.findUserInBranch(DB.get('users', users), session.userId)
+      : users.find(x => x.id === session.userId && x.active);
     if (u) {
       if (_licStatus === 'blocked') {
         clearUserSession();

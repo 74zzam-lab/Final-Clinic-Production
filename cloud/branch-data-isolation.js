@@ -1,7 +1,7 @@
 /**
  * Branch data isolation — literal per-branch runtime view for owners.
- * Org-wide: license, device, backup tokens, user directory (filtered by branchScope).
- * Branch-scoped: settings/prices, counters, packages, services, workforce, inventory, logs.
+ * Org-wide: license, device, backup tokens.
+ * Branch-scoped: users (separate accounts per branch), settings, prices, workforce, inventory, logs.
  */
 (function (global) {
   'use strict';
@@ -10,6 +10,7 @@
   const BRANCH_COUNTERS_STORE = '__tdw_branch_counters_store__';
 
   const BRANCH_SCOPED_ARRAY_KEYS = new Set([
+    'users',
     'packages', 'services', 'otRecords', 'nextSessions', 'employeeLeaveRequests',
     'employeeLedgerAccruals', 'employeeLedgerPayments', 'employeeLedgerEntries',
     'inventoryItems', 'inventorySuppliers', 'inventoryMovements',
@@ -31,6 +32,13 @@
       'simplifiedTaxInvoice', 'invoiceSystem', 'clientOverdueDays'
     ];
     return [...new Set(base.concat(BRANCH_PRICE_KEYS))];
+  }
+
+  function getLoginBranchId() {
+    return global.DeviceConfig?.getLockedBranchId?.()
+      || global.BranchScope?.getDeviceBranchId?.()
+      || global.BranchScope?.DEFAULT_BRANCH_ID
+      || 'BR-MAIN';
   }
 
   function getViewBranchId() {
@@ -131,10 +139,74 @@
     if (!Array.isArray(users)) return [];
     if (isAggregateView()) return users.slice();
     const bid = getViewBranchId();
-    if (global.SettingsSplit?.filterUsersForBranch) {
-      return global.SettingsSplit.filterUsersForBranch(users, bid);
+    return users.filter((u) => userBelongsToBranch(u, bid));
+  }
+
+  function userBelongsToBranch(user, branchId) {
+    if (!user || user.active === false) return false;
+    if (user.isDev) return false;
+    branchId = branchId || getLoginBranchId();
+    if (user.branchId) return String(user.branchId) === String(branchId);
+    return String(branchId) === String(global.BranchScope?.DEFAULT_BRANCH_ID || 'BR-MAIN');
+  }
+
+  /** Login/auth: device-bound branch only — separate credentials per branch. */
+  function getUsersForAuth(allUsers) {
+    if (!Array.isArray(allUsers)) return [];
+    const bid = getLoginBranchId();
+    return allUsers.filter((u) => {
+      if (!u || !u.active) return false;
+      if (u.isDev) return true;
+      return userBelongsToBranch(u, bid);
+    });
+  }
+
+  function isBranchPrimaryUser(user) {
+    return !!(user && (user.isBranchPrimary === true || String(user.id) === '1'));
+  }
+
+  function stampUserBranch(user) {
+    if (!user || user.isDev) return user;
+    const bid = getViewBranchId() || getLoginBranchId();
+    if (!user.branchId) user.branchId = bid;
+    const role = String(user.role || '').toLowerCase();
+    if (role === 'owner' || role === 'hq_admin') {
+      user.branchScope = ['*'];
+      user.canSwitchBranch = user.canSwitchBranch !== false;
+    } else {
+      user.branchScope = [user.branchId];
+      user.canSwitchBranch = false;
     }
-    return users.slice();
+    return user;
+  }
+
+  function migrateUsersBranchIds(allUsers) {
+    if (!Array.isArray(allUsers)) return allUsers;
+    const defaultBid = getLoginBranchId();
+    let changed = false;
+    const out = allUsers.map((u) => {
+      if (!u || u.isDev || u.branchId) return u;
+      changed = true;
+      const next = { ...u, branchId: defaultBid };
+      return stampUserBranch(next);
+    });
+    return changed ? out : allUsers;
+  }
+
+  function findUserInBranch(allUsers, userId, branchId) {
+    branchId = branchId || getLoginBranchId();
+    return getUsersForAuth(allUsers).find((u) => String(u.id) === String(userId) && userBelongsToBranch(u, branchId));
+  }
+
+  function usernameTakenInBranch(allUsers, username, branchId, exceptUserId) {
+    const key = String(username || '').trim().toLowerCase();
+    if (!key) return false;
+    branchId = branchId || getViewBranchId() || getLoginBranchId();
+    return (allUsers || []).some((u) => {
+      if (!u || String(u.id) === String(exceptUserId || '')) return false;
+      if (String(u.username || '').toLowerCase() !== key) return false;
+      return userBelongsToBranch(u, branchId);
+    });
   }
 
   function filterLogsForView(logs) {
@@ -227,11 +299,19 @@
     BRANCH_SCOPED_ARRAY_KEYS,
     BRANCH_PRICE_KEYS,
     branchSettingsKeys,
+    getLoginBranchId,
     getViewBranchId,
     isAggregateView,
     filterKvForView,
     filterArrayForView,
     filterUsersForView,
+    getUsersForAuth,
+    userBelongsToBranch,
+    isBranchPrimaryUser,
+    stampUserBranch,
+    migrateUsersBranchIds,
+    findUserInBranch,
+    usernameTakenInBranch,
     filterLogsForView,
     stampBranchId,
     stampLogEntry,

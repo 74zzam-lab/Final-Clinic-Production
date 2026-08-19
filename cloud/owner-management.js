@@ -314,8 +314,8 @@
     const target = users.find((u) => u && String(u.id) === String(userId));
     if (!target) return { ok: false, error: 'not_found' };
     if (!isOwnerRole(target)) return { ok: true };
-    if (String(target.id) === '1') {
-      return { ok: false, error: 'primary_protected', message: 'لا يمكن حذف الحساب الرئيسي' };
+    if (global.BranchDataIsolation?.isBranchPrimaryUser?.(target) || String(target.id) === '1') {
+      return { ok: false, error: 'primary_protected', message: 'لا يمكن حذف الحساب الرئيسي لهذا الفرع' };
     }
     const active = listActiveOwners(users);
     const isActive = target.active !== false;
@@ -334,8 +334,8 @@
     const target = users.find((u) => u && String(u.id) === String(userId));
     if (!target) return { ok: false, error: 'not_found' };
     if (!isOwnerRole(target)) return { ok: true };
-    if (String(target.id) === '1') {
-      return { ok: false, error: 'primary_protected', message: 'لا يمكن تعطيل الحساب الرئيسي' };
+    if (global.BranchDataIsolation?.isBranchPrimaryUser?.(target) || String(target.id) === '1') {
+      return { ok: false, error: 'primary_protected', message: 'لا يمكن تعطيل الحساب الرئيسي لهذا الفرع' };
     }
     if (target.active === false) return { ok: true };
     const active = listActiveOwners(users);
