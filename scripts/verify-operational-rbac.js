@@ -125,7 +125,8 @@ const ownerPerms = extCtx.getUserPermissions({ role: 'owner' });
 const recPerms = extCtx.getUserPermissions({ role: 'reception' });
 assert(!adminPerms._all, 'admin uses explicit preset not _all');
 assert(ownerPerms._all, 'owner keeps _all permissions');
-assert(!recPerms.cash?.view, 'reception preset excludes cash');
+assert(recPerms.cash?.view, 'reception preset includes cash');
+assert(!recPerms.ledger?.view, 'reception preset excludes employee ledger');
 
 const truth = require('../database/operational-error-truth');
 assert(truth.CATALOG.rbac_session_required, 'rbac_session_required catalog entry');

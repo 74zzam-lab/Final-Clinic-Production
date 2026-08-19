@@ -15640,7 +15640,8 @@ function toggleEmployeeLedgerModule(enabled) {
 function applyEmployeeLedgerModuleUI() {
   const on = typeof isEmployeeLedgerModuleEnabled === 'function' && isEmployeeLedgerModuleEnabled();
   const licOk = typeof isFeatureEnabled !== 'function' || isFeatureEnabled('hr_ledger');
-  const show = on && licOk;
+  const permOk = typeof hasPermission !== 'function' || hasPermission('ledger.view');
+  const show = on && licOk && permOk;
   ['nav-employee-ledger', 'payroll-ledger-link'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = show ? '' : 'none';

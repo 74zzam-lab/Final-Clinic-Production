@@ -68,12 +68,12 @@ const ROLE_PRESETS = {
     'reports.view': true, 'reports.print': true,
     'expenses.view': true, 'expenses.edit': true,
     'attendance.view': true, 'attendance.edit': true,
+    'cash.view': true, 'cash.edit': true,
     'payroll.view': false, 'payroll.edit': false,
     'ledger.view': false, 'ledger.edit': false, 'ledger.pay': false,
     'ledger.partial_pay': false, 'ledger.adjust': false, 'ledger.close': false,
     'ledger.reopen': false, 'ledger.print': false, 'ledger.export': false, 'ledger.view_all': false,
     'inventory.view': false, 'inventory.edit': false,
-    'cash.view': false, 'cash.edit': false,
     'settings.view': false, 'settings.edit': false,
     'users.manage': false, 'logs.view': false, 'core.edit': false
   },
