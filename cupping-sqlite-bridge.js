@@ -75,6 +75,9 @@
   }
 
   function filterForActiveViewIfNeeded(key, value) {
+    if (global.BranchDataIsolation?.filterKvForView) {
+      return global.BranchDataIsolation.filterKvForView(key, value);
+    }
     if (!CORE_TABLES.includes(key) || !Array.isArray(value)) return value;
     if (shouldUseAggregateView()) return value;
     if (global.BranchScope?.filterForActiveView) {
@@ -588,15 +591,28 @@
         messageAr: healthBlock.messageAr,
       };
     }
+    let persistValue = value;
+    const branchScopedKv = global.BranchDataIsolation?.BRANCH_SCOPED_ARRAY_KEYS?.has?.(key);
+    if (Array.isArray(value) && branchScopedKv) {
+      const branchId = getOperationalWriteBranchId();
+      const slice = filterRecordsForWriteBranch(value.map((r) => {
+        if (r && typeof r === 'object' && !r.branchId && global.BranchDataIsolation?.stampBranchId) {
+          return global.BranchDataIsolation.stampBranchId({ ...r });
+        }
+        return r;
+      }));
+      mergeBranchSliceIntoCommitted(key, slice, branchId);
+      persistValue = state.lastCommitted[key] || value;
+    }
     state.pendingKeys.add(key);
     try {
-      const res = await db.persistKv(key, value);
+      const res = await db.persistKv(key, persistValue);
       if (res && res.ok === false) {
         state.lastError = res.error || 'kv_persist_failed';
         restoreLastCommit(key);
         return { ok: false, error: state.lastError };
       }
-      applyCommittedToView(key, value);
+      applyCommittedToView(key, persistValue);
       state.lastError = null;
       return { ok: true, key, authoritative: true };
     } catch (e) {

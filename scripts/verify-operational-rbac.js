@@ -102,6 +102,14 @@ assert(indexSrc.includes('operational-rbac-guard.js'), 'index loads operational 
 assert(indexSrc.includes('await completeAuthenticatedLogin'), 'login awaits RBAC before init');
 assert(indexSrc.includes('value="hq_admin"'), 'hq_admin login role option');
 assert(indexSrc.includes('refreshAllBranchScopedViews'), 'central branch refresh hook');
+assert(indexSrc.includes('branch-data-isolation.js'), 'branch data isolation module loaded');
+
+const isoSrc = fs.readFileSync(path.join(root, 'cloud/branch-data-isolation.js'), 'utf8');
+assert(isoSrc.includes('BRANCH_SCOPED_ARRAY_KEYS'), 'branch scoped kv keys defined');
+assert(isoSrc.includes('filterUsersForView'), 'users filtered per branch view');
+
+const bridgeSrc = fs.readFileSync(path.join(root, 'cupping-sqlite-bridge.js'), 'utf8');
+assert(bridgeSrc.includes('BranchDataIsolation'), 'sqlite bridge uses branch data isolation');
 
 vm.runInContext(fs.readFileSync(path.join(root, 'cloud/owner-hub.js'), 'utf8'), context);
 context.currentUser = { id: '1', role: 'owner', active: true };

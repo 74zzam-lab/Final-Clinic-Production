@@ -362,6 +362,9 @@ function logAudit(opType, description, extra) {
     ip: window.__clientIp || '—',
     ...(extra || {})
   };
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampLogEntry) {
+    BranchDataIsolation.stampLogEntry(entry);
+  }
   systemLogs.unshift(entry);
   if (systemLogs.length > 3000) systemLogs.length = 3000;
   if (extra?.deferPersist) return;
@@ -1495,6 +1498,9 @@ function getFilteredSystemLogs() {
   const search = (document.getElementById('logs-search')?.value || '').trim().toLowerCase();
   const sortOrder = document.getElementById('logs-sort-order')?.value || 'desc';
   let rows = systemLogs.slice();
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.filterLogsForView) {
+    rows = BranchDataIsolation.filterLogsForView(rows);
+  }
   if (catKey) {
     const catAr = LOG_CAT_VALUE_MAP[catKey] || catKey;
     rows = rows.filter(l => l.category === catAr || l.legacyCategory === catKey);

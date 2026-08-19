@@ -9791,6 +9791,10 @@ async function finishLogin() {
 
 async function completeAuthenticatedLogin() {
   if (typeof BranchScope !== 'undefined') BranchScope.initSessionBranch?.();
+  try {
+    const bid = typeof BranchScope !== 'undefined' ? BranchScope.getActiveBranchId?.() : null;
+    if (bid && typeof BranchDataIsolation !== 'undefined') BranchDataIsolation.applyIncoming?.(bid);
+  } catch { /* empty */ }
   try { if (typeof RbacGuard !== 'undefined') RbacGuard.applyAuthoritativeCurrentUser?.(); } catch { /* empty */ }
   const errEl = document.getElementById('login-error');
   if (errEl) errEl.style.display = 'none';
@@ -10330,8 +10334,11 @@ function deleteUser(id) {
 function renderUsersList() {
   const el = document.getElementById('usersListContainer');
   if (!el) return;
+  const scopedUsers = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.filterUsersForView
+    ? BranchDataIsolation.filterUsersForView(users)
+    : users;
   // DEV account is NEVER shown here
-  const visible = users.filter(u => !u.isDev);
+  const visible = scopedUsers.filter(u => !u.isDev);
   const roleLabels = { owner:'المالك', hq_admin:'المالك', admin:'مدير النظام', reception:'استقبال', employee:'موظف', accountant:'محاسب', custom:'مخصص' };
   el.innerHTML = visible.map(u=>`
     <div class="user-card">
@@ -10618,6 +10625,10 @@ function syncAppGlobals() {
   window.doctors = doctors;
   window.attendance = attendance;
   window.expenses = expenses;
+  window.packages = packages;
+  window.services = services;
+  window.otRecords = otRecords;
+  window.activityLog = activityLog;
   window.backupLog = backupLog;
 }
 window.getActiveUser = () => currentUser;
@@ -11459,7 +11470,7 @@ function initServices() {
 }
 
 function getActiveServices() {
-  return [...services].filter(s => s.active !== false).sort((a, b) => (a.sort || 0) - (b.sort || 0));
+  return getUiScopedRecords(services).filter(s => s.active !== false).sort((a, b) => (a.sort || 0) - (b.sort || 0));
 }
 
 function getServiceByName(name) {
@@ -11560,6 +11571,12 @@ function saveService() {
     useGlobalPrice: billing === 'cup' ? useGlobalPrice : false,
     price: billing === 'cup' && useGlobalPrice ? settings.cupPrice : price,
     commissionMode, commission, active,
+    branchId: editServiceId
+      ? (services.find(s => s.id === editServiceId)?.branchId
+        || (typeof BranchDataIsolation !== 'undefined' ? BranchDataIsolation.getViewBranchId?.() : null)
+        || BranchScope?.getActiveBranchId?.() || 'BR-MAIN')
+      : ((typeof BranchDataIsolation !== 'undefined' ? BranchDataIsolation.getViewBranchId?.() : null)
+        || BranchScope?.getActiveBranchId?.() || 'BR-MAIN'),
     sort: editServiceId ? (getServiceByName(name)?.sort || services.length) : services.length + 1
   };
   if (editServiceId) {
@@ -11610,11 +11627,12 @@ function deleteService(id) {
 function refreshServicesTable() {
   const body = document.getElementById('servicesTableBody');
   if (!body) return;
-  if (!services.length) {
+  const scopedServices = getUiScopedRecords(services);
+  if (!scopedServices.length) {
     body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-light)">لا توجد خدمات</td></tr>';
     return;
   }
-  body.innerHTML = [...services].sort((a, b) => (a.sort || 0) - (b.sort || 0)).map(s => `
+  body.innerHTML = [...scopedServices].sort((a, b) => (a.sort || 0) - (b.sort || 0)).map(s => `
     <tr>
       <td><strong>${s.name}</strong>${s.nameEn ? `<div style="font-size:11px;color:var(--text-muted)" dir="ltr">${s.nameEn}</div>` : ''}</td>
       <td>${s.billing === 'session' ? 'جلسة' : 'كأس'}</td>
@@ -12211,13 +12229,17 @@ function onPackageShareModeChange() {
 // PACKAGES (باقات الحجامة)
 // ═══════════════════════════════════════════════
 function logPackageActivity(action, detail) {
-  activityLog.unshift({
+  const entry = {
     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
     action,
     detail: detail || '',
     user: currentUser ? currentUser.fullName : '—',
     at: new Date().toISOString()
-  });
+  };
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampLogEntry) {
+    BranchDataIsolation.stampLogEntry(entry);
+  }
+  activityLog.unshift(entry);
   if (activityLog.length > 200) activityLog = activityLog.slice(0, 200);
   DB.set('activityLog', activityLog);
   if (typeof logAudit === 'function') {
@@ -12238,11 +12260,14 @@ function logPackageActivity(action, detail) {
 function renderPackageActivityLog() {
   const el = document.getElementById('packageActivityLog');
   if (!el) return;
-  if (!activityLog.length) {
+  const scopedLog = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.filterLogsForView
+    ? BranchDataIsolation.filterLogsForView(activityLog)
+    : activityLog;
+  if (!scopedLog.length) {
     el.innerHTML = '<div style="color:var(--text-light);font-size:13px;padding:12px">لا يوجد نشاط بعد</div>';
     return;
   }
-  el.innerHTML = activityLog.slice(0, 50).map(entry => {
+  el.innerHTML = scopedLog.slice(0, 50).map(entry => {
     const dt = new Date(entry.at);
     const when = dt.toLocaleDateString('ar-SA') + ' ' + dt.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
     return `<div class="activity-log-item">
@@ -12255,11 +12280,12 @@ function renderPackageActivityLog() {
 function refreshPackagesTable() {
   const body = document.getElementById('packagesTableBody');
   if (!body) return;
-  if (!packages.length) {
+  const scopedPackages = getUiScopedRecords(packages);
+  if (!scopedPackages.length) {
     body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-light)">لا توجد باقات — أضف أول باقة</td></tr>';
     return;
   }
-  body.innerHTML = packages.map(p => `
+  body.innerHTML = scopedPackages.map(p => `
     <tr>
       <td><strong>${p.name}</strong></td>
       <td dir="ltr">${fmtNum(p.cups, 0)}</td>
@@ -12312,6 +12338,8 @@ function savePackage() {
     packages.push({
       id: Date.now().toString(),
       name, cups, price, active, shareable,
+      branchId: (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getViewBranchId?.())
+        || BranchScope?.getActiveBranchId?.() || 'BR-MAIN',
       createdAt: new Date().toISOString()
     });
     logPackageActivity('إضافة باقة', name);
@@ -12488,6 +12516,9 @@ function saveSetting(key) {
   if (key === 'vat') settings.vatRate = val;
   else settings[key] = val;
   DB.set('settings', settings);
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.persistActiveBranchSettings) {
+    BranchDataIsolation.persistActiveBranchSettings();
+  }
   notify('✅ تم حفظ الإعداد بنجاح');
 }
 
@@ -12941,6 +12972,9 @@ function saveCenterSettings() {
   if (siteEl) settings.siteUrl = siteEl.value.trim();
   DB.set('settings', settings);
   syncUninstallCenterMeta();
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.persistActiveBranchSettings) {
+    BranchDataIsolation.persistActiveBranchSettings();
+  }
   if (typeof DriveFolderRegistry !== 'undefined' && prevCenterName !== settings.centerName) {
     DriveFolderRegistry.renameCenterFolder(settings.centerName).catch(() => {});
     const lic = typeof LicenseCloud !== 'undefined' ? LicenseCloud.loadLocal?.() : null;
@@ -14887,6 +14921,9 @@ function refreshAllBranchScopedViews(options) {
   }
   if (typeof refreshBulkTable === 'function') refreshBulkTable(false);
   if (typeof refreshMessageLog === 'function') refreshMessageLog();
+  if (typeof loadSettings === 'function') loadSettings();
+  if (typeof loadPackagesPricing === 'function') loadPackagesPricing();
+  if (typeof refreshSystemLogsPage === 'function') refreshSystemLogsPage(false);
   if (typeof applyBranchViewModeUi === 'function') applyBranchViewModeUi();
   if (options.fromBranchSwitch !== true && typeof showPage === 'function') {
     const active = document.querySelector('.page.active')?.id?.replace('page-', '');
@@ -15532,11 +15569,15 @@ function generatePayroll() {
     recalcAllAttendancePolicy(attendance, doctors);
     DB.set('attendance', attendance);
   }
-  const monthCases = cases.filter(c => { const d=new Date(c.date); return d.getMonth()+1===month && d.getFullYear()===year; });
-  const monthOT    = otRecords.filter(r => { const d=new Date(r.date); return d.getMonth()+1===month && d.getFullYear()===year; });
-  const monthAtt   = (DB.get('attendance',[])).filter(a => { const d=new Date(a.date); return d.getMonth()+1===month && d.getFullYear()===year; });
+  const scopedCases = getUiScopedRecords(cases);
+  const scopedDoctors = getUiScopedRecords(doctors);
+  const scopedOt = getUiScopedRecords(otRecords);
+  const scopedAtt = getUiScopedRecords(DB.get('attendance', attendance));
+  const monthCases = scopedCases.filter(c => { const d=new Date(c.date); return d.getMonth()+1===month && d.getFullYear()===year; });
+  const monthOT    = scopedOt.filter(r => { const d=new Date(r.date); return d.getMonth()+1===month && d.getFullYear()===year; });
+  const monthAtt   = scopedAtt.filter(a => { const d=new Date(a.date); return d.getMonth()+1===month && d.getFullYear()===year; });
   const container  = document.getElementById('payrollCards');
-  if (!doctors.length) {
+  if (!scopedDoctors.length) {
     container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-light);background:var(--card);border-radius:14px;border:1px solid var(--border)">لا يوجد أطباء مسجلون</div>`;
     return;
   }
@@ -15545,7 +15586,7 @@ function generatePayroll() {
   let grandDeductions = 0;
   let grandNet = 0;
 
-  const cardsHtml = doctors.map(d => {
+  const cardsHtml = scopedDoctors.map(d => {
     const docCases   = monthCases.filter(c => c.doctorId === d.id);
     const commission = docCases.reduce((a,c) => a + c.commission, 0);
     const manualOtH  = monthOT.filter(r => r.doctorId === d.id).reduce((a,r) => a + r.hours, 0);
@@ -16186,6 +16227,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/rbac-guard.js"></script>
 <script src="cloud/owner-branch-mode.js"></script>
 <script src="cloud/settings-split.js"></script>
+<script src="cloud/branch-data-isolation.js"></script>
 <script src="cloud/repository.js"></script>
 <script src="cloud/role-policy.js"></script>
 <script src="cloud/operational-rbac-guard.js"></script>
@@ -22258,6 +22300,11 @@ function reloadClientStoreFromDb() {
   expenses = DB.get('expenses', expenses);
   attendance = DB.get('attendance', attendance);
   nextSessions = DB.get('nextSessions', nextSessions);
+  packages = DB.get('packages', packages);
+  services = DB.get('services', services);
+  otRecords = DB.get('otRecords', otRecords);
+  activityLog = DB.get('activityLog', activityLog);
+  users = DB.get('users', users);
   clientFileCounter = DB.get('clientFileCounter', clientFileCounter);
   invoiceCounter = DB.get('invoiceCounter', invoiceCounter);
   syncAppGlobals();

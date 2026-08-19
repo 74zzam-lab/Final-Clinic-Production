@@ -104,6 +104,7 @@
       || global.BranchScope?.getActiveBranchId?.()
       || global.DeviceConfig?.getLockedBranchId?.()
       || 'BR-MAIN';
+    try { global.BranchDataIsolation?.beforeBranchSwitch?.(from, bid); } catch { /* empty */ }
     try { sessionStorage.setItem('__tdw_branch_drawer_pref__', bid); } catch { /* empty */ }
     if (bid === ALL_BRANCHES_VALUE) {
       try { global.OwnerBranchMode?.exitToOwnerMode?.(); } catch { /* empty */ }
@@ -129,6 +130,9 @@
         meta: { fromBranchId: from, toBranchId: bid, userId: global.currentUser?.id || '', role: global.currentUser?.role || '' }
       });
     }
+    try {
+      if (bid !== ALL_BRANCHES_VALUE) global.BranchDataIsolation?.afterBranchSwitch?.(bid);
+    } catch { /* empty */ }
     refreshSurfaces();
     if (typeof global.applyBranchViewModeUi === 'function') global.applyBranchViewModeUi();
   }

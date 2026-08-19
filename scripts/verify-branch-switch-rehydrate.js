@@ -21,6 +21,8 @@ const checks = [
   { name: 'branch-switcher awaits rehydrate', ok: /rehydrateBranchView/.test(switcher) && /refreshSurfacesAsync/.test(switcher) },
   { name: 'refreshAllBranchScopedViews hook', ok: /refreshAllBranchScopedViews/.test(switcher) },
   { name: 'owner view overrides device lock', ok: /ownerCanSwitch/.test(scopeSrc) },
+  { name: 'branch data isolation module', ok: fs.existsSync(path.join(root, 'cloud/branch-data-isolation.js')) },
+  { name: 'kv branch merge on commit', ok: /branchScopedKv/.test(bridge) },
 ];
 
 let failed = 0;
