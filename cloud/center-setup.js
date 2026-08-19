@@ -109,6 +109,10 @@
     branchId = String(branchId || '').trim();
     if (!branchId) return { ok: false, error: 'branch_id_required' };
 
+    if (!options.skipOwnerCheck && !global.RolePolicy?.isOrganizationOwner?.(global.currentUser)) {
+      return { ok: false, error: 'owner_required', message: 'حذف الفروع وإلغاء ربط الجهاز للمالك فقط' };
+    }
+
     let doc = global.LicenseCloud?.loadLocal?.();
     if (!doc?.centerId) return { ok: false, error: 'no_license' };
 
@@ -143,11 +147,13 @@
 
     const locked = global.DeviceConfig?.getLockedBranchId?.();
     if (locked === branchId) {
-      global.DeviceConfig?.save?.({
-        ...global.DeviceConfig.load(),
-        lockedBranchId: '',
-        branchLocked: false
-      });
+      const unlock = global.DeviceConfig?.trySetBranchLock?.(locked, false, global.DeviceConfig?.load?.()?.deviceName);
+      if (unlock?.ok === false) {
+        return { ok: false, error: unlock.error || 'owner_required', message: 'لا يمكن إلغاء ربط الجهاز إلا للمالك' };
+      }
+      if (!unlock) {
+        global.DeviceConfig?.setBranchLock?.(locked, false, global.DeviceConfig?.load?.()?.deviceName);
+      }
     }
 
     return { ok: true, branchId };

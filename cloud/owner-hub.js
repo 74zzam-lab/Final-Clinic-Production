@@ -1,9 +1,11 @@
 /**
- * Owner Hub — view for managers; mutate (license push, branches, devices, transfer) is Owner-only.
+ * Owner Hub — مركز إدارة المالك: الترخيص، الفروع، الأجهزة، والمزامنة.
  */
 (function (global) {
   'use strict';
 
+  let _ohActiveSection = 'daily';
+  let _ohOutboxRefreshed = false;
   function injectStyles() {
     if (document.getElementById('owner-hub-styles')) return;
     const s = document.createElement('style');
@@ -53,15 +55,8 @@
   function canAccess() {
     const u = global.currentUser;
     if (!u) return false;
-    if (global.RolePolicy?.isManager?.(u)) return true;
     if (u.isDev) return true;
-    const cv2 = global.CloudMeta?.isCloudV2Enabled?.() || global.settings?.cloudV2Enabled;
-    if (!cv2) return false;
-    if (u.role === 'accountant') {
-      const scope = global.BranchScope?.getUserBranchScope?.(u) || [];
-      return scope.includes('*') || scope.length > 1;
-    }
-    return false;
+    return !!global.RolePolicy?.isOrganizationOwner?.(u);
   }
 
   function isCloudV2Ready() {
@@ -164,7 +159,11 @@
     if (global.SqliteOutboxBridge?.counts) {
       Promise.resolve(global.SqliteOutboxBridge.counts(null))
         .then((res) => {
-          if (res?.ok && res.counts) model.outboxCounts = res.counts;
+          if (res?.ok && res.counts && !_ohOutboxRefreshed) {
+            model.outboxCounts = res.counts;
+            _ohOutboxRefreshed = true;
+            if (document.querySelector('#owner-hub-body .oh-workspace')) refresh();
+          }
         })
         .catch(() => {});
     }
@@ -352,10 +351,37 @@
     return global.DeviceRegistry.approveDevice(deviceUuid, options || {});
   }
 
+  async function approveDeviceInteractive(deviceUuid) {
+    const res = await approveDevice(deviceUuid);
+    if (res?.ok) {
+      global.notify?.('✅ تم اعتماد الجهاز', 'success');
+      refresh();
+    } else {
+      const msg = res?.error === 'owner_required' ? 'صلاحية المالك مطلوبة'
+        : res?.error === 'device_not_found' ? 'الجهاز غير موجود'
+        : (res?.error || 'فشل الاعتماد');
+      global.notify?.('⚠️ ' + msg, 'danger');
+    }
+    return res;
+  }
+
   async function revokeDevice(deviceUuid, options) {
     if (!requireOwnerManage('إلغاء ربط جهاز')) return { ok: false, error: 'owner_required' };
     if (!global.DeviceRegistry?.revokeDevice) return { ok: false, error: 'revoke_unavailable' };
     return global.DeviceRegistry.revokeDevice(deviceUuid, options || {});
+  }
+
+  async function revokeDeviceInteractive(deviceUuid) {
+    const ok = await global.confirmAsync?.('رفض / إلغاء طلب هذا الجهاز؟', { title: 'تأكيد' });
+    if (ok === false) return { ok: false, cancelled: true };
+    const res = await revokeDevice(deviceUuid, { reason: 'owner_hub_reject' });
+    if (res?.ok) {
+      global.notify?.('✅ تم رفض الجهاز', 'success');
+      refresh();
+    } else {
+      global.notify?.('⚠️ ' + (res?.error || 'فشل الرفض'), 'danger');
+    }
+    return res;
   }
 
   async function deleteDevice(deviceUuid) {
@@ -624,14 +650,14 @@
 
     try {
       if (!canAccess()) {
-        host.innerHTML = '<div class="card" style="padding:20px"><p style="margin:0;color:var(--text-muted)">Owner Hub متاح للمدير أو المحاسب (بصلاحية كل الفروع).</p></div>';
+        host.innerHTML = '<div class="card" style="padding:20px"><p style="margin:0;color:var(--text-muted)">Owner Hub متاح لحساب المالك (Owner / HQ Admin) فقط.</p></div>';
         return;
       }
       if (!isCloudV2Ready()) {
         host.innerHTML = renderSetupGuideHtml(global.LicenseCloud?.loadLocal?.() || {}) +
           '<div class="card" style="padding:16px;margin-top:12px"><p style="margin:0;color:var(--text-muted)">Cloud V2 غير مفعّل بعد — اتبع الخطوات أعلاه أو فعّله من الإعدادات ← تفعيل الأنظمة.</p>' +
           '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
-          '<button type="button" class="btn btn-primary btn-sm" id="ownerhub-bootflow-cta" onclick="typeof openBootWizardFromLogin===\'function\'&&openBootWizardFromLogin()">🚀 معالج الإعداد (BootFlow)</button>' +
+          '<button type="button" class="btn btn-primary btn-sm" id="ownerhub-bootflow-cta-v2" onclick="typeof openBootWizardFromLogin===\'function\'&&openBootWizardFromLogin()">🚀 معالج الإعداد (BootFlow)</button>' +
           '<button type="button" class="btn btn-secondary btn-sm" onclick="showPage(\'settings\');setTimeout(function(){document.getElementById(\'set-panel-systems\')?.scrollIntoView({behavior:\'smooth\'})},300)">تفعيل Cloud V2</button>' +
           '<button type="button" class="btn btn-ghost btn-sm" id="ownerhub-centersetup-cta" onclick="CenterSetupUI.open(\'overview\')" title="دعم متقدم">⚙️ إعداد المركز (دعم)</button></div></div>';
         try { global.SetupStateDom?.applyDomVisibility?.({ reason: 'owner-hub-not-ready' }); } catch { /* empty */ }
@@ -642,7 +668,7 @@
       const setupHtml = renderSetupGuideHtml(m.license);
     const migration = global.OwnerMigration?.getStatus?.() || {};
     const lastSync = m.sync.lastPushAt || m.sync.lastPollAt;
-    const syncLabel = lastSync ? formatAgo(lastSync) + ' ago' : '—';
+    const syncLabel = lastSync ? formatAgo(lastSync) : '—';
     const canSwitch = global.BranchScope?.canUserSwitchBranch?.(global.currentUser);
     const id = m.identity || {};
     const a = m.analytics || {};
@@ -650,6 +676,11 @@
       : a.health === 'paused' ? '⏸️ متوقفة'
       : a.health === 'offline' ? '🟠 بدون اتصال'
       : '⚠️ متدهورة';
+    const backupAt = m.backup?.lastAutoBackupAt || m.backup?.lastBackupAt || null;
+    const backupLabel = backupAt ? formatAgo(backupAt) : (m.backup?.due ? '⚠️ مستحق' : '—');
+    const showSetupGuide = !!(global.SetupStateService?.getState?.({ ignoreRestart: true })?.showLoginBootCta);
+    const sessionBranchId = global.BranchScope?.getActiveBranchId?.() || m.lockedBranch;
+    const sessionBranchName = global.BranchDisplay?.resolveBranchName?.(sessionBranchId) || sessionBranchId || '—';
     const idStateLabel = id.state === 'ok' ? '✅ متطابق'
       : id.state === 'mismatch' ? '⛔ حساب مختلف'
       : id.state === 'bound_offline' ? '🟡 غير متصل'
@@ -666,15 +697,17 @@
       const devs = m.devices.filter(d => d.branchId === b.id);
       const path = branchDrivePath(m.centerId, b);
       const isLocked = m.lockedBranch === b.id;
+      const bName = escapeHtml(b.name || global.BranchDisplay?.resolveBranchName?.(b.id) || b.id);
+      const bIdSafe = escapeHtml(b.id);
       return `<div class="oh-branch-card">
-        <h5>${b.name || b.id}${isLocked ? ' 🔒' : ''}</h5>
-        <div class="oh-muted">${devs.length} جهاز · ${b.id}</div>
-        <div class="oh-path">${path}</div>
+        <h5>${bName}${isLocked ? ' 🔒' : ''}</h5>
+        <div class="oh-muted">${devs.length} جهاز${b.city ? ' · ' + escapeHtml(b.city) : ''}</div>
+        <div class="oh-path">${escapeHtml(path)}</div>
         ${ownerCanManage ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
-          <button type="button" class="btn btn-secondary btn-sm" onclick="OwnerHub.enterBranchMode('${b.id}')">🧭 Branch Mode</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptRenameBranch('${b.id}','${String(b.name || '').replace(/'/g, "\\'")}')">✏️ Rename</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptDisableBranch('${b.id}')">⏸️ Disable</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptDeleteBranch('${b.id}')">🗑️ Delete</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="OwnerHub.enterBranchMode('${bIdSafe}')">🧭 وضع الفرع</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptRenameBranch('${bIdSafe}','${String(b.name || '').replace(/'/g, "\\'")}')">✏️ تسمية</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptDisableBranch('${bIdSafe}')">⏸️ تعطيل</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptDeleteBranch('${bIdSafe}')">🗑️ حذف</button>
         </div>` : ''}
       </div>`;
     }).join('') || '<div class="oh-muted">—</div>';
@@ -684,8 +717,7 @@
       ? (ownerState === 'NO_OWNER' || ownerState === 'OWNER_CORRUPTED' || ownerState === 'OWNER_RECOVERY_REQUIRED')
       : (ownerSetupRequired || migration.needsMigration || !global.OwnerProfile?.hasProfile?.()
         || global.OwnerManagement?.needsOwnerBootstrap?.());
-    const pendingDevices = (global.DeviceRegistry?.listPendingDevices?.()
-      || (m.devices || []).filter((d) => d && (d.status === 'pending' || d.pending === true))) || [];
+    const pendingDevices = m.pendingDevices || [];
     const ownerSetupCard = needsOwnerUi ? `<div class="card" style="margin-bottom:14px;padding:16px;border-color:var(--warning)">
         <div class="card-title" style="margin-bottom:10px">👤 حساب المالك (Owner)</div>
         <p class="oh-muted" style="margin:0 0 10px">ترخيصك الحالي (بما فيه V5) ما زال صالحاً ولم يُعطَّل. V2-5.9: ربط Google لا يمنح Owner ولا يفتح Bootstrap تلقائياً. سجّل الدخول بحساب <code dir="ltr">owner</code> أو أنشئ Owner من هنا. حالة: <strong dir="ltr">${ownerState || 'NO_OWNER'}</strong>.</p>
@@ -695,7 +727,7 @@
           <button type="button" class="btn btn-secondary btn-sm" onclick="OwnerHub.resetOwnerPasswordInteractive()">🔑 إعادة تعيين كلمة المرور</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.emergencyRecoverInteractive()">🆘 استعادة طارئة (دعم)</button>
           ${canBootstrapOwner ? '<button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.skipLegacyOwnerMigration()">تخطي حالياً</button>' : ''}
-          ${(ownerCanManage || canBootstrapOwner) ? '<button type="button" class="btn btn-secondary btn-sm" onclick="OwnerHub.pushLicenseToDriveNow()">☁️ رفع license.json الآن</button>' : ''}
+          ${(ownerCanManage || canBootstrapOwner) ? '<button type="button" class="btn btn-secondary btn-sm" onclick="OwnerHub.pushLicenseToDriveNow()">☁️ رفع الترخيص إلى Drive</button>' : ''}
         </div>
       </div>` : `<div class="card" style="margin-bottom:14px;padding:16px">
         <div class="card-title" style="margin-bottom:10px">👤 ملكية المنظمة — Owner Hub</div>
@@ -707,27 +739,26 @@
           <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.transferOwnershipInteractive()">🔄 نقل الملكية</button>
         </div>` : '<p class="oh-muted" style="margin:0">عرض فقط — الإدارة للمالك (Owner).</p>'}
       </div>`;
-    const approvalsCard = `<div class="card" style="margin-bottom:14px;padding:16px">
-        <div class="card-title" style="margin-bottom:10px">✅ الطلبات والموافقات — أجهزة معلّقة</div>
-        ${pendingDevices.length ? `<div class="oh-devices">${pendingDevices.map((d) => {
-          const id = String(d.id || d.deviceId || '').replace(/'/g, "\\'");
-          return `<div class="oh-device"><div><div class="oh-device-name">${d.deviceName || d.name || id || '—'}</div>
-            <div class="oh-muted" dir="ltr">${d.branchId || '—'} · ${d.lastSeenAt || d.requestedAt || ''}</div></div>
+    const approvalsCard = pendingDevices.length ? `<div class="card" style="margin-bottom:14px;padding:16px;border-color:var(--warning)">
+        <div class="card-title" style="margin-bottom:10px">✅ أجهزة بانتظار الموافقة (${pendingDevices.length})</div>
+        <div class="oh-devices">${pendingDevices.map((d) => {
+          const uuid = String(d.deviceUuid || d.id || '').replace(/'/g, "\\'");
+          const bLabel = global.BranchDisplay?.resolveBranchName?.(d.branchId) || d.branchId || '—';
+          return `<div class="oh-device"><div><div class="oh-device-name">${escapeHtml(d.deviceName || d.name || uuid || '—')}</div>
+            <div class="oh-muted">${escapeHtml(bLabel)} · ${formatAgo(d.requestedAt || d.lastSeenAt)}</div></div>
             <div style="display:flex;gap:6px">
-              <button type="button" class="btn btn-primary btn-sm" onclick="OwnerHub.approveDevice('${id}')">Approve</button>
-              <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.revokeDevice('${id}')">Revoke</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="OwnerHub.approveDeviceInteractive('${uuid}')">✔️ اعتماد</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.revokeDeviceInteractive('${uuid}')">✖️ رفض</button>
             </div></div>`;
-        }).join('')}</div>` : '<p class="oh-muted" style="margin:0">لا توجد أجهزة بانتظار الموافقة.</p>'}
-      </div>`;
+        }).join('')}</div>
+      </div>` : '';
 
     const dailyKpis = `
       <div class="oh-grid">
-        <div class="oh-card"><h4>الأجهزة</h4><div class="oh-val">${m.deviceCount}</div><div class="oh-muted">🟢 ${a.onlineDevices || 0} · 🔴 ${a.staleDevices || 0}</div></div>
-        <div class="oh-card"><h4>صحة المزامنة</h4><div class="oh-val" style="font-size:16px">${healthLabel}</div><div class="oh-muted">Pending: ${global.OpsStatus?.formatLargeCount?.(a.pendingPushes || 0) || (a.pendingPushes || 0)} · Dead-letter: ${global.OpsStatus?.formatLargeCount?.(a.deadLetters || 0) || (a.deadLetters || 0)} · Conflicts: ${global.OpsStatus?.formatLargeCount?.(a.conflictsPending || 0) || (a.conflictsPending || 0)}</div></div>
-        <div class="oh-card"><h4>آخر مزامنة</h4><div class="oh-val" style="font-size:16px">${syncLabel}</div><div class="oh-muted">Poll: ${m.pollSec}ث · Pending: ${global.OpsStatus?.formatLargeCount?.(m.sync.pending ?? 0) || (m.sync.pending ?? 0)}</div></div>
-        <div class="oh-card"><h4>فرع الجلسة</h4><div class="oh-val" style="font-size:15px">${global.BranchScope?.getActiveBranchId?.() || m.lockedBranch}</div><div class="oh-muted">${canSwitch ? 'حسب صلاحيات حسابك — يمكنك التبديل' : 'محدد بصلاحيات حسابك'}</div></div>
-        <div class="oh-card"><h4>Mode</h4><div class="oh-val" style="font-size:14px">${modeLabel}</div><div class="oh-muted">${ownerCanManage ? 'Owner Mode = نظرة عامة · Branch Mode = كتابة داخل فرع' : 'عرض فقط'}</div></div>
-        <div class="oh-card"><h4>مستخدمون نشطون</h4><div class="oh-val">${m.activeUsers}</div></div>
+        <div class="oh-card"><h4>الأجهزة</h4><div class="oh-val">${m.deviceCount}</div><div class="oh-muted">🟢 متصل ${a.onlineDevices || 0} · 🔴 قديم ${a.staleDevices || 0}</div></div>
+        <div class="oh-card"><h4>المزامنة</h4><div class="oh-val" style="font-size:16px">${healthLabel}</div><div class="oh-muted">آخر: ${syncLabel} · Poll ${m.pollSec}ث</div><div class="oh-muted">قيد الإرسال: ${global.OpsStatus?.formatLargeCount?.(a.pendingPushes || 0) || (a.pendingPushes || 0)} · تعارضات: ${global.OpsStatus?.formatLargeCount?.(a.conflictsPending || 0) || (a.conflictsPending || 0)}</div></div>
+        <div class="oh-card"><h4>فرع الجلسة</h4><div class="oh-val" style="font-size:15px">${escapeHtml(sessionBranchName)}</div><div class="oh-muted">${canSwitch ? 'يمكنك التبديل من قائمة الفروع أعلاه' : 'فرع هذا الجهاز — محدد عند التفعيل'}</div><div class="oh-muted">${escapeHtml(modeLabel)}</div></div>
+        <div class="oh-card"><h4>النسخ الاحتياطي</h4><div class="oh-val" style="font-size:16px">${backupLabel}</div><div class="oh-muted">مستخدمون نشطون: ${m.activeUsers}</div></div>
       </div>`;
     const branchSummariesCard = `<div class="card" style="margin-bottom:14px;padding:16px">
         <div class="card-title" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -752,11 +783,13 @@
         </div>
         <div class="oh-devices">${m.devices.length ? m.devices.map(d => {
           const st = deviceStatus(d.lastSeenAt);
-          const bName = m.branches.find(b => b.id === d.branchId)?.name || d.branchId || '';
-          return `<div class="oh-device"><div><div class="oh-device-name">${d.deviceName || d.deviceUuid?.slice(0, 8)}</div><div class="oh-muted">${bName}</div></div><div>${st.icon} ${st.label}</div>${ownerCanManage ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptRenameDevice('${d.deviceUuid}','${String(d.deviceName || '').replace(/'/g, "\\'")}')">✏️</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptDisableDevice('${d.deviceUuid}')">⏸️</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.promptDeleteDevice('${d.deviceUuid}')">🗑️</button>
+          const bName = m.branches.find(b => b.id === d.branchId)?.name
+            || global.BranchDisplay?.resolveBranchName?.(d.branchId) || d.branchId || '';
+          const uuid = String(d.deviceUuid || '').replace(/'/g, "\\'");
+          return `<div class="oh-device"><div><div class="oh-device-name">${escapeHtml(d.deviceName || d.deviceUuid?.slice(0, 8))}</div><div class="oh-muted">${escapeHtml(bName)}</div></div><div>${st.icon} ${st.label}</div>${ownerCanManage ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="btn btn-ghost btn-sm" title="تسمية" onclick="OwnerHub.promptRenameDevice('${uuid}','${String(d.deviceName || '').replace(/'/g, "\\'")}')">✏️</button>
+            <button type="button" class="btn btn-ghost btn-sm" title="تعطيل" onclick="OwnerHub.promptDisableDevice('${uuid}')">⏸️</button>
+            <button type="button" class="btn btn-ghost btn-sm" title="حذف" onclick="OwnerHub.promptDeleteDevice('${uuid}')">🗑️</button>
           </div>` : ''}</div>`;
         }).join('') : '<div class="oh-muted">لا أجهزة مسجّلة بعد</div>'}
         </div>
@@ -764,26 +797,24 @@
     const licenseCard = `<div class="card" style="margin-bottom:14px;padding:16px">
         <div class="card-title" style="margin-bottom:10px">📦 الاشتراك والترخيص</div>
         <div class="oh-grid" style="margin-bottom:0">
-          <div class="oh-card"><h4>الترخيص</h4><div class="oh-val" style="font-size:15px">${m.licLabel}</div><div class="oh-muted" style="margin-top:6px">${m.license.centerName || ''}</div></div>
-          <div class="oh-card"><h4>Center ID</h4><div class="oh-val" style="font-size:13px;word-break:break-all" dir="ltr">${m.centerId}</div></div>
-          <div class="oh-card"><h4>Package</h4><div class="oh-val" style="font-size:14px">${m.license?.packageId || '—'}</div></div>
-          <div class="oh-card"><h4>Subscription</h4><div class="oh-val" style="font-size:14px">${m.license?.subscriptionId || '—'}</div></div>
-          <div class="oh-card"><h4>Expiry</h4><div class="oh-val" style="font-size:14px">${m.license?.expiresAt || '—'}</div></div>
-          <div class="oh-card"><h4>Activation</h4><div class="oh-val" style="font-size:14px">${activationLabel}</div></div>
-          <div class="oh-card"><h4>Google المركز</h4><div class="oh-val" style="font-size:14px;word-break:break-all" dir="ltr">${id.boundGoogleEmail || id.authorizedEmail || '—'}</div><div class="oh-muted">${idStateLabel}</div></div>
-          <div class="oh-card"><h4>Owner Profile</h4><div class="oh-val" style="font-size:14px">${(global.OwnerManagement?.getOwnerState?.()?.state === 'OWNER_EXISTS') ? '✅ جاهز' : '⚠️ مطلوب'}</div><div class="oh-muted" dir="ltr">${global.OwnerManagement?.getOwnerState?.()?.state || '—'}</div></div>
-          <div class="oh-card"><h4>تدقيق حديث</h4><div class="oh-val">${a.auditRecentCount || 0}</div><div class="oh-muted">${a.lastAuditAt ? formatAgo(a.lastAuditAt) : '—'}</div></div>
+          <div class="oh-card"><h4>الترخيص</h4><div class="oh-val" style="font-size:15px">${m.licLabel}</div><div class="oh-muted">${escapeHtml(m.license.centerName || '')}</div></div>
+          <div class="oh-card"><h4>معرّف المركز</h4><div class="oh-val" style="font-size:13px;word-break:break-all" dir="ltr">${escapeHtml(m.centerId)}</div></div>
+          <div class="oh-card"><h4>الباقة / الاشتراك</h4><div class="oh-val" style="font-size:14px">${escapeHtml(m.license?.packageId || '—')}</div><div class="oh-muted" dir="ltr">${escapeHtml(m.license?.subscriptionId || '—')}</div></div>
+          <div class="oh-card"><h4>الانتهاء / التفعيل</h4><div class="oh-val" style="font-size:14px">${escapeHtml(m.license?.expiresAt || '—')}</div><div class="oh-muted">${escapeHtml(activationLabel)}</div></div>
+          <div class="oh-card"><h4>Google المركز</h4><div class="oh-val" style="font-size:13px;word-break:break-all" dir="ltr">${escapeHtml(id.boundGoogleEmail || id.authorizedEmail || '—')}</div><div class="oh-muted">${idStateLabel}</div></div>
+          <div class="oh-card"><h4>ملف المالك</h4><div class="oh-val" style="font-size:14px">${(global.OwnerManagement?.getOwnerState?.()?.state === 'OWNER_EXISTS') ? '✅ جاهز' : '⚠️ مطلوب'}</div></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
           <button type="button" class="btn btn-secondary btn-sm" onclick="openLicenseScreen('licensing')">🔑 إدارة الترخيص</button>
-          ${(ownerCanManage || canBootstrapOwner) ? '<button type="button" class="btn btn-primary btn-sm" onclick="OwnerHub.pushLicenseToDriveNow()">☁️ رفع license.json</button>' : ''}
-          <button type="button" class="btn btn-ghost btn-sm" onclick="openLicenseScreen('developer')">👤 تواصل/تجديد</button>
+          ${(ownerCanManage || canBootstrapOwner) ? '<button type="button" class="btn btn-primary btn-sm" onclick="OwnerHub.pushLicenseToDriveNow()">☁️ رفع الترخيص إلى Drive</button>' : ''}
+          <button type="button" class="btn btn-ghost btn-sm" onclick="showPage(\'settings\');setTimeout(function(){switchSettingsTab(\'backup\')},200)">☁️ النسخ والمزامنة</button>
         </div>
       </div>`;
     const advancedSupport = `
-      ${setupHtml}
+      ${showSetupGuide ? setupHtml : ''}
       ${ownerSetupCard}
       ${licenseCard}
+      ${branchSummariesCard}
       <div class="card" style="margin-bottom:14px;padding:16px">
         <div class="card-title" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <span>تشخيص المزامنة</span>
@@ -802,7 +833,7 @@
           <span>🌿 إدارة الفروع</span>
           ${ownerCanManage ? '<button type="button" class="btn btn-secondary btn-sm" onclick="OwnerHub.promptAddBranch()">➕ إضافة فرع</button><button type="button" class="btn btn-ghost btn-sm" onclick="OwnerHub.exitToOwnerMode()">↩️ Owner Mode</button>' : ''}
         </div>
-        <p class="oh-muted" style="margin:0 0 10px"><strong>Owner Mode</strong> = نظرة عامة لكل الفروع (قراءة). <strong>Branch Mode</strong> = الدخول لفرع للكتابة اليومية. إنشاء الفروع للمالك فقط.</p>
+        <p class="oh-muted" style="margin:0 0 10px"><strong>وضع المالك</strong> = نظرة عامة لكل الفروع. <strong>وضع الفرع</strong> = الكتابة داخل فرع محدد.</p>
         <div class="oh-branch-grid">${branchCards}</div>
       </div>`;
 
@@ -815,7 +846,6 @@
         <div id="oh-panel-daily" class="oh-section-panel" data-oh-panel="daily">
           ${approvalsCard}
           ${dailyKpis}
-          ${branchSummariesCard}
           ${devicesCard}
         </div>
         <div id="oh-panel-advanced" class="oh-section-panel" data-oh-panel="advanced" hidden>
@@ -910,7 +940,10 @@
   }
 
   function refresh() {
+    const root = document.querySelector('#owner-hub-body .oh-workspace');
+    if (root) _ohActiveSection = root.getAttribute('data-oh-section') || _ohActiveSection;
     renderOwnerHubPage();
+    showSection(_ohActiveSection);
   }
 
   function showDiagnosticsSnapshot() {
@@ -946,9 +979,7 @@
     const nav = document.getElementById('nav-owner-hub');
     if (!nav) return;
     const u = global.currentUser;
-    const show = !!u && (global.RolePolicy?.isManager?.(u) || u.isDev ||
-      (u.role === 'accountant' && ((global.BranchScope?.getUserBranchScope?.(u) || []).includes('*') ||
-        (global.BranchScope?.getUserBranchScope?.(u) || []).length > 1)));
+    const show = !!u && (u.isDev || !!global.RolePolicy?.isOrganizationOwner?.(u));
     nav.style.display = show ? '' : 'none';
     if (show) nav.classList.remove('admin-only');
   }
@@ -956,6 +987,7 @@
   /** V2-5.10 Category B: Daily Operations vs Advanced Support */
   function showSection(section) {
     const name = section === 'advanced' ? 'advanced' : 'daily';
+    _ohActiveSection = name;
     const root = typeof document !== 'undefined' ? document.querySelector('.oh-workspace') : null;
     if (!root) return;
     root.setAttribute('data-oh-section', name);
@@ -984,7 +1016,9 @@
     disableDevice,
     deleteDevice,
     approveDevice,
+    approveDeviceInteractive,
     revokeDevice,
+    revokeDeviceInteractive,
     addBranch,
     renameBranch,
     disableBranch,
@@ -997,6 +1031,18 @@
     promptDisableDevice,
     promptDeleteDevice,
     enterBranchMode(branchId) {
+      branchId = String(branchId || '').trim();
+      if (!branchId) return { ok: false, error: 'branch_required' };
+      if (!global.RolePolicy?.isOrganizationOwner?.(global.currentUser)) {
+        return { ok: false, error: 'owner_required' };
+      }
+      if (global.BranchSwitcher?.applyBranchSwitch) {
+        global.BranchSwitcher.applyBranchSwitch(branchId);
+        const sel = document.getElementById('topbar-branch-switcher');
+        if (sel && [...sel.options].some((o) => o.value === branchId)) sel.value = branchId;
+        refresh();
+        return { ok: true, mode: 'branch', branchId };
+      }
       const res = global.OwnerBranchMode?.enterBranchMode?.(branchId);
       if (!res?.ok) {
         global.notify?.('⚠️ تعذّر تفعيل Branch Mode: ' + (res?.error || 'unknown'), 'warning');
@@ -1004,18 +1050,26 @@
       }
       global.notify?.('✅ تم تفعيل Branch Mode — تُعرض بيانات هذا الفرع فقط', 'success');
       try {
-        if (typeof global.refreshClientsView === 'function') global.refreshClientsView(true);
-        if (typeof global.syncAppGlobals === 'function') global.syncAppGlobals();
+        if (typeof global.refreshAllBranchScopedViews === 'function') global.refreshAllBranchScopedViews();
+        else if (typeof global.refreshClientsView === 'function') global.refreshClientsView(true);
       } catch { /* empty */ }
       refresh();
       return res;
     },
     exitToOwnerMode() {
+      if (global.BranchSwitcher?.applyBranchSwitch && global.BranchSwitcher.ALL_BRANCHES_VALUE) {
+        global.BranchSwitcher.applyBranchSwitch(global.BranchSwitcher.ALL_BRANCHES_VALUE);
+        const sel = document.getElementById('topbar-branch-switcher');
+        if (sel) sel.value = global.BranchSwitcher.ALL_BRANCHES_VALUE;
+        refresh();
+        return { ok: true, mode: 'owner' };
+      }
       const res = global.OwnerBranchMode?.exitToOwnerMode?.();
       if (!res?.ok) return res;
       global.notify?.('✅ العودة إلى Owner Mode (نظرة عامة لكل الفروع)', 'success');
       try {
-        if (typeof global.refreshClientsView === 'function') global.refreshClientsView(true);
+        if (typeof global.refreshAllBranchScopedViews === 'function') global.refreshAllBranchScopedViews();
+        else if (typeof global.refreshClientsView === 'function') global.refreshClientsView(true);
       } catch { /* empty */ }
       refresh();
       return res;

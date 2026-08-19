@@ -2223,7 +2223,7 @@ tbody tr:nth-child(even) { background: transparent; }
   flex: 1 1 0; min-width: 0; margin-top: 0; padding: 9px 10px; font-size: clamp(11px, 2.4vw, 12px);
   min-height: 44px; white-space: normal; line-height: 1.25; overflow-wrap: anywhere;
 }
-#settings-bootflow-cta, #settings-centersetup-cta, #btn-cloud-v2-sync-now,
+#settings-bootflow-cta, #settings-centersetup-cta, #btn-bk-sync-now-top,
 [data-ss-surface="google_connect"] {
   min-height: 40px; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
 }
@@ -3942,6 +3942,11 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
 .backup-role-badge--local { background: #fff8e1; color: #8a6520; }
 .backup-role-badge--auto { background: #f3e5f5; color: #6a1b9a; }
 .backup-card-desc { font-size: 11px; color: var(--text-muted); line-height: 1.7; margin: 0 0 10px; }
+.backup-advanced-details { margin-top: 12px; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+.backup-advanced-details > summary { cursor: pointer; font-size: 12px; font-weight: 700; padding: 10px 12px; list-style: none; }
+.backup-advanced-details > summary::-webkit-details-marker { display: none; }
+.backup-advanced-details[open] > summary { border-bottom: 1px solid var(--border); }
+.backup-advanced-details__body { padding: 10px 12px; display: grid; gap: 10px; }
 
 @media (max-width: 1100px) {
   #page-packages .packages-layout { grid-template-columns: 1fr; }
@@ -4037,6 +4042,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <label>نوع الحساب</label>
         <select id="login-role" onchange="filterLoginUsers()">
           <option value="owner">المالك (Owner)</option>
+          <option value="hq_admin">إدارة المركز (HQ Admin)</option>
           <option value="admin">مدير النظام</option>
           <option value="reception">موظف الاستقبال</option>
           <option value="accountant">محاسب</option>
@@ -6334,17 +6340,20 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <div style="font-size:12px;line-height:1.85;color:var(--text-muted);display:grid;gap:6px">
           <div><span class="backup-role-badge backup-role-badge--oauth">① Google OAuth</span> ربط الحساب فقط — مطلوب لـ Cloud V2 والترخيص. <strong>لا يستخدم لنسخ LevelDB القديم.</strong></div>
           <div><span class="backup-role-badge backup-role-badge--sync">② Cloud V2</span> مزامنة تشغيلية لحظية بين الأجهزة — ليست بديلاً عن استعادة الكوارث.</div>
-          <div><span class="backup-role-badge backup-role-badge--local">③ Backup V2</span> المسار الرسمي الوحيد لاستعادة كوارث SQLite.</div>
-          <div><span class="backup-role-badge backup-role-badge--auto">④ جدولة V2</span> النسخ التلقائي عبر Backup V2 فقط.</div>
-          <p style="margin:8px 0 0;font-size:11px;color:var(--danger,#b00020)">Backup V1 (LevelDB / Cloud DB المشفر) معطّل في واجهة العميل — لا يظهر ولا يُستدعى.</p>
-          <p style="margin:0;font-size:11px">إدارة الفروع/الأجهزة من <strong>Owner Hub</strong> — ليست من هذه الصفحة.</p>
+          <div><span class="backup-role-badge backup-role-badge--local">③ Backup V2</span> المسار الرسمي الوحيد لاستعادة كوارث SQLite (ZIP غير مشفّر).</div>
+          <div><span class="backup-role-badge backup-role-badge--auto">④ النسخ المحلي</span> نسخ على قرص هذا الجهاز + جدولة محلية — مستقل عن Google.</div>
+          <p style="margin:8px 0 0;font-size:11px;color:var(--danger,#b00020)">Backup V1 (LevelDB / Cloud DB المشفر) معطّل في واجهة العميل.</p>
+          <p style="margin:0;font-size:11px">إدارة الفروع والأجهزة من <strong>Owner Hub</strong> — وليس من هذه الصفحة.</p>
         </div>
       </div>
 
       <div class="card" id="bk-status-summary" style="margin-bottom:16px;padding:14px;border:1.5px solid var(--primary-light)">
         <div class="card-title" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <span>📊 ملخص النسخ والمزامنة</span>
-          <button type="button" class="btn btn-accent btn-sm" id="btn-bk-sync-now-top" data-ss-surface="sync_manual" onclick="runCloudV2SyncNow()">🔄 مزامنة الآن</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="showPage('owner-hub')">🏠 Owner Hub</button>
+            <button type="button" class="btn btn-accent btn-sm" id="btn-bk-sync-now-top" data-ss-surface="sync_manual" onclick="runCloudV2SyncNow()">🔄 مزامنة الآن</button>
+          </div>
         </div>
         <div class="backup-status-card">
           <div class="backup-status-item"><label>حساب Google</label><strong id="bk-sum-google" style="font-size:11px;word-break:break-all" dir="ltr">—</strong></div>
@@ -6364,13 +6373,9 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" id="btn-cdb-oauth" onclick="startCloudDbOAuth()">🔗 تسجيل الدخول إلى Google</button>
             <button class="btn btn-ghost btn-sm" id="btn-cdb-disconnect" onclick="disconnectCloudDbAccount()" style="display:none">🚪 خروج</button>
-            <!-- V2-5.10: Backup V1 customer controls removed (LevelDB DR disabled) -->
-            <button class="btn btn-accent btn-sm" id="btn-cdb-backup" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>💾 نسخ الآن</button>
-            <button class="btn btn-ghost btn-sm" id="btn-cdb-restore" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>♻️ استعادة</button>
-            <button class="btn btn-ghost btn-sm" id="btn-cdb-sync" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>🔄 مزامنة</button>
           </div>
         </div>
-        <p class="backup-card-desc">ربط Google الرسمي لـ Cloud V2 والترخيص فقط. استعادة الكوارث تتم عبر <strong>Backup V2</strong> أدناه — وليس عبر نسخ LevelDB القديمة.</p>
+        <p class="backup-card-desc">ربط Google الرسمي لـ Cloud V2 والترخيص. استعادة الكوارث تتم عبر <strong>Backup V2</strong> — وليس عبر نسخ LevelDB القديمة.</p>
         <div class="backup-status-card" id="cloud-db-status">
           <div class="backup-status-item"><label>الاتصال</label><strong id="cdb-status-text">🔴 غير متصل</strong></div>
           <div class="backup-status-item"><label>الحساب</label><strong id="cdb-email">—</strong></div>
@@ -6389,6 +6394,10 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
           </label>
         </div>
         <div id="cloud-db-backup-list" style="display:none !important" aria-hidden="true"></div>
+        <!-- legacy V1 hooks (hidden) -->
+        <button class="btn btn-accent btn-sm" id="btn-cdb-backup" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>💾 نسخ الآن</button>
+        <button class="btn btn-ghost btn-sm" id="btn-cdb-restore" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>♻️ استعادة</button>
+        <button class="btn btn-ghost btn-sm" id="btn-cdb-sync" type="button" style="display:none !important" aria-hidden="true" tabindex="-1" disabled>🔄 مزامنة</button>
       </div>
 
       <div class="card" id="bk-cloudv2-card" style="border:1.5px solid var(--primary-light)">
@@ -6396,7 +6405,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-top:0">
           <div class="card-title">☁️ Cloud V2 — حالة المزامنة</div>
         </div>
-        <p class="backup-card-desc">مزامنة <strong>تشغيلية لحظية</strong> بين الأجهزة (Push + Poll). بعد استعادة محلية يُرفع تلقائياً إلى السحابة عند توفر Google + جلسة دخول.</p>
+        <p class="backup-card-desc">مزامنة <strong>تشغيلية لحظية</strong> بين الأجهزة (Push + Poll). «مزامنة الآن» و«ربط Google» من الملخص وبطاقة OAuth أعلاه.</p>
         <div class="backup-status-card">
           <div class="backup-status-item"><label>Cloud V2</label><strong id="bk-cv2-enabled">—</strong></div>
           <div class="backup-status-item"><label>Center ID</label><strong id="bk-cv2-center" style="font-size:11px;word-break:break-all" dir="ltr">—</strong></div>
@@ -6415,14 +6424,14 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         </div>
         <div id="bk-cv2-setup-hint" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;background:rgba(255,193,7,0.12);border:1px solid rgba(255,193,7,0.35);font-size:12px;line-height:1.7;color:var(--text-muted)"></div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="btn btn-primary btn-sm" onclick="showPage('owner-hub')">🏠 Owner Hub — الفروع والأجهزة</button>
           <button type="button" class="btn btn-secondary btn-sm" id="settings-bootflow-cta" onclick="typeof openBootWizardFromLogin==='function'&&openBootWizardFromLogin()">🚀 معالج الإعداد (BootFlow)</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-ss-surface="google_connect" onclick="startCloudDbOAuth()">🔗 ربط Google</button>
-          <button type="button" class="btn btn-accent btn-sm" id="btn-cloud-v2-sync-now" data-ss-surface="sync_manual" onclick="runCloudV2SyncNow()">🔄 مزامنة الآن</button>
           <button type="button" class="btn btn-ghost btn-sm" id="btn-cloud-v2-resume" onclick="resumeCloudV2Sync()" style="display:none">▶️ استئناف المزامنة</button>
           <button type="button" class="btn btn-ghost btn-sm" id="settings-centersetup-cta" onclick="CenterSetupUI.open('manage')" title="دعم متقدم فقط">⚙️ إعداد المركز (دعم)</button>
         </div>
-        <div id="bk-cv2-migration-wrap" style="margin-top:12px;padding:10px;background:var(--surface);border-radius:8px;border:1px dashed var(--border)">
+        <details class="backup-advanced-details">
+          <summary>🛠️ أدوات ترحيل (دعم متقدم — مرة واحدة)</summary>
+          <div class="backup-advanced-details__body">
+        <div id="bk-cv2-migration-wrap" style="padding:10px;background:var(--surface);border-radius:8px;border:1px dashed var(--border)">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
             <strong style="font-size:12px">📁 ترحيل مجلدات Drive</strong>
             <div style="display:flex;gap:6px">
@@ -6438,12 +6447,14 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
             <button type="button" class="btn btn-accent btn-sm" onclick="LegacyBranchMigrationUI.openWizard({force:true})">🧭 معالج الترحيل</button>
           </div>
           <div id="bk-cv2-legacy-branch-status" style="font-size:11px;color:var(--text-muted);line-height:1.65">—</div>
-          <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted);line-height:1.65">يُستخدم مرة واحدة عند ترقية من إصدار قديم: يضيف <code dir="ltr">branchId</code> للسجلات التي لا تحمل فرعاً (عملاء، حالات، …) حتى لا تظهر في كل الفروع ولا تُحظر المزامنة.</p>
+          <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted);line-height:1.65">يُستخدم عند الترقية من إصدار قديم: يضيف <code dir="ltr">branchId</code> للسجلات بلا فرع حتى لا تظهر في كل الفروع.</p>
         </div>
+          </div>
+        </details>
       </div>
 
-      <div class="card" style="border:1.5px solid var(--success, #2e7d32)">
-        <span class="backup-role-badge backup-role-badge--local">③ نسخ احتياطي — استعادة كوارث</span>
+      <div class="card" style="border:1.5px solid var(--success, #2e7d32);grid-column:1/-1">
+        <span class="backup-role-badge backup-role-badge--local">③ نسخ احتياطي — استعادة كوارث (Backup V2)</span>
         <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-top:0">
           <div class="card-title">🗄️ النسخ الاحتياطي واستعادة الكوارث</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -6464,7 +6475,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
             <input class="form-control" type="password" id="bk-v2-pass" placeholder="تلقائي" autocomplete="new-password" tabindex="-1">
           </div>
           <div class="form-group" style="margin:0">
-            <label class="form-label">جدولة النسخ التلقائي</label>
+            <label class="form-label">جدولة النسخ التلقائي (Backup V2)</label>
             <select class="form-control" id="bk-v2-schedule-interval" onchange="saveBackupV2ScheduleFromUI()">
               <option value="0">معطّل</option>
               <option value="15" selected>كل 15 دقيقة</option>
@@ -6482,47 +6493,47 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         </div>
       </div>
 
-      <div class="card">
-        <span class="backup-role-badge backup-role-badge--local">③ نسخ محلي</span>
-        <div class="card-header" style="padding-top:0">
-          <div class="card-title">💾 النسخ المحلي</div>
+      <div class="card" style="grid-column:1/-1">
+        <span class="backup-role-badge backup-role-badge--auto">④ النسخ المحلي والجدولة</span>
+        <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-top:0">
+          <div class="card-title">💾 النسخ على قرص الجهاز</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="runBackupNow('manual')">💾 نسخ الآن</button>
             <button class="btn btn-accent btn-sm" onclick="openRestoreBackupModal()">♻️ استعادة</button>
           </div>
         </div>
         <p class="backup-card-desc">نسخ على <strong>قرص هذا الجهاز</strong> — مستقل عن Google. مفيد عند انقطاع الإنترنت.</p>
-        <label style="display:flex;align-items:center;gap:10px;font-weight:700;cursor:pointer;margin-bottom:10px;font-size:13px">
-          <input type="checkbox" id="bk-local-enabled" checked onchange="saveBackupSettingsFromUI()"> حفظ على الجهاز
-        </label>
-        <div class="form-group" style="margin:0">
-          <label class="form-label">مسار النسخ</label>
-          <select class="form-control" id="bk-local-path" onchange="saveBackupSettingsFromUI()"></select>
-        </div>
-        <input class="form-control" id="bk-local-path-custom" placeholder="مسار مخصص" style="display:none;margin-top:8px" onchange="saveBackupSettingsFromUI()">
-        <p id="bk-local-path-hint" class="backup-card-desc" style="margin:8px 0 0;font-size:12px;color:var(--text-muted)"></p>
-      </div>
-
-      <div class="card">
-        <span class="backup-role-badge backup-role-badge--auto">④ جدولة — محلي</span>
-        <div class="card-header" style="padding-top:0"><div class="card-title">⏱️ النسخ التلقائي والمحفزات</div></div>
-        <p class="backup-card-desc">جدولة النسخ <strong>المحلي</strong> — منفصلة عن نسخ Google Drive أعلاه.</p>
-        <div class="form-group" style="margin-bottom:10px">
-          <label class="form-label">فترة النسخ التلقائي</label>
-          <select class="form-control" id="bk-auto-interval" onchange="saveBackupSettingsFromUI()">
-            <option value="0">معطّل</option>
-            <option value="15">كل 15 دقيقة</option>
-            <option value="30">كل 30 دقيقة</option>
-            <option value="60">كل ساعة</option>
-            <option value="360">كل 6 ساعات</option>
-            <option value="1440">يومياً</option>
-          </select>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600">
-          <label><input type="checkbox" id="bk-trig-close" onchange="saveBackupSettingsFromUI()"> عند إغلاق البرنامج</label>
-          <label><input type="checkbox" id="bk-trig-update" onchange="saveBackupSettingsFromUI()"> قبل تحديث النظام</label>
-          <label><input type="checkbox" id="bk-trig-restore" onchange="saveBackupSettingsFromUI()"> قبل استعادة نسخة</label>
-          <label><input type="checkbox" id="bk-trig-ops" onchange="saveBackupSettingsFromUI()"> بعد 50 عملية</label>
+        <div class="form-grid form-grid-2" style="gap:12px;margin-top:8px">
+          <div>
+            <label style="display:flex;align-items:center;gap:10px;font-weight:700;cursor:pointer;margin-bottom:10px;font-size:13px">
+              <input type="checkbox" id="bk-local-enabled" checked onchange="saveBackupSettingsFromUI()"> حفظ على الجهاز
+            </label>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">مسار النسخ</label>
+              <select class="form-control" id="bk-local-path" onchange="saveBackupSettingsFromUI()"></select>
+            </div>
+            <input class="form-control" id="bk-local-path-custom" placeholder="مسار مخصص" style="display:none;margin-top:8px" onchange="saveBackupSettingsFromUI()">
+            <p id="bk-local-path-hint" class="backup-card-desc" style="margin:8px 0 0;font-size:12px;color:var(--text-muted)"></p>
+          </div>
+          <div>
+            <div class="form-group" style="margin-bottom:10px">
+              <label class="form-label">فترة النسخ التلقائي (محلي)</label>
+              <select class="form-control" id="bk-auto-interval" onchange="saveBackupSettingsFromUI()">
+                <option value="0">معطّل</option>
+                <option value="15">كل 15 دقيقة</option>
+                <option value="30">كل 30 دقيقة</option>
+                <option value="60">كل ساعة</option>
+                <option value="360">كل 6 ساعات</option>
+                <option value="1440">يومياً</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600">
+              <label><input type="checkbox" id="bk-trig-close" onchange="saveBackupSettingsFromUI()"> عند إغلاق البرنامج</label>
+              <label><input type="checkbox" id="bk-trig-update" onchange="saveBackupSettingsFromUI()"> قبل تحديث النظام</label>
+              <label><input type="checkbox" id="bk-trig-restore" onchange="saveBackupSettingsFromUI()"> قبل استعادة نسخة</label>
+              <label><input type="checkbox" id="bk-trig-ops" onchange="saveBackupSettingsFromUI()"> بعد 50 عملية</label>
+            </div>
+          </div>
         </div>
       </div>
       </div><!-- /backup-stack-grid -->
@@ -6538,7 +6549,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
             <input class="form-control" type="password" id="bk-encrypt-pass" placeholder="للاستعادة — لا تُنسَ">
           </div>
         </div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:8px">حتى مع الوصول لملف النسخة، لا يمكن قراءة البيانات بدون كلمة المرور.</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:8px">ينطبق على النسخ المحلي فقط — Backup V2 (استعادة الكوارث) غير مشفّر.</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="saveBackupEncryptionPassword()">💾 حفظ كلمة التشفير</button>
       </div>
 
@@ -7801,8 +7812,8 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
   <!-- ═══════════════ OWNER HUB (Cloud V2) ═══════════════ -->
   <div class="page" id="page-owner-hub">
     <header class="dash-hero-glass page-hero compact-hero">
-      <h2>Owner Hub</h2>
-      <p>نظرة مركزية على الترخيص، الأجهزة، المزامنة، والنسخ الاحتياطي (Cloud V2)</p>
+      <h2>مركز المالك — Owner Hub</h2>
+      <p>نظرة مركزية على الترخيص، الفروع، الأجهزة، والمزامنة (Cloud V2)</p>
     </header>
     <div id="owner-hub-body"></div>
   </div>
@@ -8549,6 +8560,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <label class="form-label">نوع الصلاحية</label>
         <select class="form-control" id="um-role" onchange="toggleCustomPermissionsRow()">
           <option value="owner">المالك (Owner) — أعلى صلاحية</option>
+          <option value="hq_admin">إدارة المركز (HQ Admin)</option>
           <option value="admin">مدير النظام (تشغيلي)</option>
           <option value="reception">موظف استقبال</option>
           <option value="accountant">محاسب (قراءة فقط)</option>
@@ -9481,12 +9493,19 @@ const DEV_ACCOUNT = {
 const OWNER_SEED_PASSWORD_HASH = 'pbkdf2:owner:f28c4134eec2cebf7631ab559ec0eb794280730d728919f259438a3441f5266b';
 
 const defaultUsers = [
-  { id:'1', fullName:'مدير النظام',     username:'admin',     password:'pbkdf2:admin:cbde2e147f40d0cf48ae4a9b093ef0fe459bf6f6e554b57d5348be21aee54a89', role:'admin',     empNum:'001', active:true },
-  { id:'2', fullName:'موظف الاستقبال', username:'reception', password:'pbkdf2:reception:54f155e640fc70b9fb5959af0459ccba1bba552c11afe44540236f3c92d43bf3', role:'reception', empNum:'002', active:true },
+  { id:'1', fullName:'مدير النظام',     username:'admin',     password:'pbkdf2:admin:cbde2e147f40d0cf48ae4a9b093ef0fe459bf6f6e554b57d5348be21aee54a89', role:'admin',     empNum:'001', active:true, branchId:'BR-MAIN', isBranchPrimary:true, branchScope:['BR-MAIN'], canSwitchBranch:false },
+  { id:'2', fullName:'موظف الاستقبال', username:'reception', password:'pbkdf2:reception:54f155e640fc70b9fb5959af0459ccba1bba552c11afe44540236f3c92d43bf3', role:'reception', empNum:'002', active:true, branchId:'BR-MAIN', branchScope:['BR-MAIN'], canSwitchBranch:false },
   /* V2-5.9: seeded Owner (local auth). Google never implies Owner. mustChangePassword forced until changed. */
-  { id:'3', fullName:'مالك المركز', username:'owner', password: OWNER_SEED_PASSWORD_HASH, role:'owner', empNum:'000', active:true, branchScope:['*'], canSwitchBranch:true, mustChangePassword:true, seedDefaultPassword:true }
+  { id:'3', fullName:'مالك المركز', username:'owner', password: OWNER_SEED_PASSWORD_HASH, role:'owner', empNum:'000', active:true, branchId:'BR-MAIN', branchScope:['*'], canSwitchBranch:true, mustChangePassword:true, seedDefaultPassword:true }
 ];
 let users = DB.get('users', defaultUsers);
+if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.migrateUsersBranchIds) {
+  const migrated = BranchDataIsolation.migrateUsersBranchIds(users);
+  if (migrated !== users) {
+    users = migrated;
+    DB.set('users', users);
+  }
+}
 // V2-5.9: seed Owner only when none exists (active or inactive). Never duplicate after restore/migration.
 try {
   users = ensureOwnerSeedAccount(users);
@@ -9498,22 +9517,31 @@ let _pendingForcedPwChange = false;
 
 function ensureOwnerSeedAccount(list) {
   if (!Array.isArray(list)) list = defaultUsers.slice();
-  const owners = list.filter((u) => u && String(u.role || '').toLowerCase() === 'owner');
-  if (owners.length) {
-    // Deduplicate exact seed username clones; keep first.
+  const branchId = (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getLoginBranchId)
+    ? BranchDataIsolation.getLoginBranchId()
+    : (typeof DeviceConfig !== 'undefined' ? DeviceConfig.getLockedBranchId?.() : null) || 'BR-MAIN';
+  const ownersInBranch = list.filter((u) => u
+    && String(u.role || '').toLowerCase() === 'owner'
+    && (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
+      ? BranchDataIsolation.userBelongsToBranch(u, branchId)
+      : (!u.branchId || u.branchId === branchId)));
+  if (ownersInBranch.length) {
     const seen = new Set();
     const out = [];
     for (const u of list) {
       if (!u) continue;
-      if (String(u.role || '').toLowerCase() === 'owner' && String(u.username || '').toLowerCase() === 'owner') {
-        const key = 'owner:' + String(u.username || '').toLowerCase();
+      const inBranch = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
+        ? BranchDataIsolation.userBelongsToBranch(u, branchId)
+        : (!u.branchId || u.branchId === branchId);
+      if (String(u.role || '').toLowerCase() === 'owner' && inBranch && String(u.username || '').toLowerCase() === 'owner') {
+        const key = 'owner:' + String(u.username || '').toLowerCase() + ':' + branchId;
         if (seen.has(key)) continue;
         seen.add(key);
-        // Preserve mustChangePassword if still on seed hash
         if (u.password === OWNER_SEED_PASSWORD_HASH) {
           u.mustChangePassword = true;
           u.seedDefaultPassword = true;
         }
+        if (!u.branchId) u.branchId = branchId;
       }
       out.push(u);
     }
@@ -9522,10 +9550,80 @@ function ensureOwnerSeedAccount(list) {
   }
   const seed = defaultUsers.find((u) => u.role === 'owner');
   if (!seed) return list;
-  const next = list.concat([{ ...seed, id: String(seed.id || ('owner-' + Date.now())) }]);
+  const next = list.concat([{
+    ...seed,
+    id: 'owner-' + branchId.replace(/[^a-zA-Z0-9-]/g, '') + '-' + Date.now(),
+    branchId,
+    branchScope: ['*'],
+    canSwitchBranch: true
+  }]);
   DB.set('users', next);
   return next;
 }
+
+function branchStaffRolePresent(list, branchId, role) {
+  return (list || []).some((u) => u
+    && String(u.role || '').toLowerCase() === role
+    && u.active !== false
+    && (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
+      ? BranchDataIsolation.userBelongsToBranch(u, branchId)
+      : String(u.branchId || 'BR-MAIN') === String(branchId)));
+}
+
+function ensureBranchStaffAccounts(list, branchId) {
+  if (!Array.isArray(list)) list = (typeof getAllUsersStore === 'function' ? getAllUsersStore() : DB.get('users', defaultUsers)) || [];
+  branchId = branchId
+    || (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getLoginBranchId
+      ? BranchDataIsolation.getLoginBranchId()
+      : (typeof DeviceConfig !== 'undefined' ? DeviceConfig.getLockedBranchId?.() : null) || 'BR-MAIN');
+  if (!branchId || branchId === '*' || branchId === '__ALL__') return list;
+
+  let out = list.slice();
+  let changed = false;
+  const stampStaff = (user) => {
+    const next = { ...user, branchId, isBranchPrimary: user.role === 'admin' };
+    if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampUserBranch) {
+      return BranchDataIsolation.stampUserBranch(next);
+    }
+    next.branchScope = [branchId];
+    next.canSwitchBranch = false;
+    return next;
+  };
+
+  if (!branchStaffRolePresent(out, branchId, 'admin')) {
+    const seed = defaultUsers.find((u) => u.role === 'admin');
+    if (seed) {
+      out.push(stampStaff({
+        ...seed,
+        id: 'admin-' + branchId.replace(/[^a-zA-Z0-9-]/g, '') + '-' + Date.now(),
+      }));
+      changed = true;
+    }
+  }
+
+  if (!branchStaffRolePresent(out, branchId, 'reception')) {
+    const seed = defaultUsers.find((u) => u.role === 'reception');
+    if (seed) {
+      out.push(stampStaff({
+        ...seed,
+        id: 'reception-' + branchId.replace(/[^a-zA-Z0-9-]/g, '') + '-' + Date.now(),
+        isBranchPrimary: false,
+      }));
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    if (typeof persistUsersBranchSlice === 'function') {
+      persistUsersBranchSlice(out, branchId);
+    } else {
+      DB.set('users', out);
+    }
+    return (typeof getAllUsersStore === 'function' ? getAllUsersStore() : out);
+  }
+  return list;
+}
+window.ensureBranchStaffAccounts = ensureBranchStaffAccounts;
 
 function userMustChangePassword(u) {
   if (!u || u.isDev) return false;
@@ -9678,14 +9776,68 @@ async function upgradeUserPassword(user, pw) {
   user.password = await hashPW(pw, user.username);
   const idx = users.findIndex(u => u.id === user.id);
   if (idx !== -1) users[idx].password = user.password;
-  DB.set('users', users);
+  persistUsersBranchSlice(users);
 }
+
+function getAuthUserList() {
+  const all = DB.get('users', users);
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getUsersForAuth) {
+    return BranchDataIsolation.getUsersForAuth(all);
+  }
+  return all.filter(u => u && u.active);
+}
+
+function isBranchPrimaryUser(u) {
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.isBranchPrimaryUser) {
+    return BranchDataIsolation.isBranchPrimaryUser(u);
+  }
+  return !!(u && String(u.id) === '1');
+}
+
+function getAllUsersStore() {
+  if (typeof SqliteBridge !== 'undefined' && SqliteBridge.getCommittedRaw) {
+    const raw = SqliteBridge.getCommittedRaw('users');
+    if (Array.isArray(raw) && raw.length) return raw;
+  }
+  const fromDb = DB.get('users', null);
+  if (Array.isArray(fromDb) && fromDb.length) return fromDb;
+  return Array.isArray(users) ? users.slice() : [];
+}
+
+function mergeUsersBranchSlice(branchSlice, branchId) {
+  const all = getAllUsersStore();
+  branchId = branchId
+    || (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getViewBranchId
+      ? (BranchDataIsolation.getViewBranchId() || BranchDataIsolation.getLoginBranchId())
+      : null)
+    || (typeof BranchScope !== 'undefined' ? BranchScope.getActiveBranchId?.() : null)
+    || 'BR-MAIN';
+  const belongs = (u, bid) => (
+    typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
+      ? BranchDataIsolation.userBelongsToBranch(u, bid)
+      : String(u?.branchId || 'BR-MAIN') === String(bid)
+  );
+  const others = all.filter((u) => u && (u.isDev || !belongs(u, branchId)));
+  const slice = (Array.isArray(branchSlice) ? branchSlice : []).filter((u) => u && !u.isDev && belongs(u, branchId));
+  const devs = all.filter((u) => u?.isDev);
+  const merged = [...others, ...slice];
+  devs.forEach((d) => { if (!merged.some((m) => m && String(m.id) === String(d.id))) merged.push(d); });
+  return merged;
+}
+
+function persistUsersBranchSlice(branchSlice, branchId) {
+  DB.set('users', mergeUsersBranchSlice(branchSlice, branchId));
+}
+
+try {
+  users = ensureBranchStaffAccounts(users);
+} catch { /* empty */ }
 
 function filterLoginUsers() {
   const role = document.getElementById('login-role')?.value;
   const sel  = document.getElementById('login-username');
   if (!sel) return;
-  const list = users.filter(u => u.role === role && u.active);
+  const list = getAuthUserList().filter(u => u.role === role && u.active);
   sel.innerHTML = '<option value="">-- اختر المستخدم --</option>' +
     list.map(u => `<option value="${u.id}">${u.fullName}</option>`).join('');
 }
@@ -9709,7 +9861,7 @@ async function doLogin() {
     || (DEV_ACCOUNT.legacyPassword && await verifyPW(pw, DEV_ACCOUNT.legacyPassword, DEV_ACCOUNT.legacyUsername))
   )) {
     currentUser = DEV_ACCOUNT;
-    finishLogin();
+    await finishLogin();
     return;
   }
 
@@ -9720,7 +9872,7 @@ async function doLogin() {
   }
 
   if (!userId) { errEl.style.display='block'; errEl.textContent='❌ يرجى اختيار المستخدم'; return; }
-  const u = users.find(x => x.id === userId && x.active);
+  const u = getAuthUserList().find(x => x.id === userId && x.active);
   if (!u || u.role !== role || !(await verifyPW(pw, u.password, u.username))) {
     errEl.style.display='block'; errEl.textContent='❌ كلمة المرور غير صحيحة'; return;
   }
@@ -9737,7 +9889,7 @@ async function doLogin() {
       || !!(typeof RolePolicy !== 'undefined' && RolePolicy.isManager?.(u));
     if (allowWithoutValidLicense) {
       currentUser = u;
-      finishLogin();
+      await finishLogin();
       return;
     }
     errEl.style.display='block';
@@ -9746,13 +9898,13 @@ async function doLogin() {
   }
 
   currentUser = u;
-  finishLogin();
+  await finishLogin();
   } finally {
     _authPending = false;
   }
 }
 
-function finishLogin() {
+async function finishLogin() {
   // Single source of truth: SetupStateService (fallback BootFlow).
   const needsBoot = (typeof SetupStateDom !== 'undefined' && SetupStateDom.needsBootFlow)
     ? SetupStateDom.needsBootFlow()
@@ -9783,12 +9935,16 @@ function finishLogin() {
     return;
   }
 
-  completeAuthenticatedLogin();
+  await completeAuthenticatedLogin();
   try { SetupStateDom?.applyDomVisibility?.(); } catch { /* empty */ }
 }
 
-function completeAuthenticatedLogin() {
+async function completeAuthenticatedLogin() {
   if (typeof BranchScope !== 'undefined') BranchScope.initSessionBranch?.();
+  try {
+    const bid = typeof BranchScope !== 'undefined' ? BranchScope.getActiveBranchId?.() : null;
+    if (bid && typeof BranchDataIsolation !== 'undefined') BranchDataIsolation.applyIncoming?.(bid);
+  } catch { /* empty */ }
   try { if (typeof RbacGuard !== 'undefined') RbacGuard.applyAuthoritativeCurrentUser?.(); } catch { /* empty */ }
   const errEl = document.getElementById('login-error');
   if (errEl) errEl.style.display = 'none';
@@ -9803,10 +9959,14 @@ function completeAuthenticatedLogin() {
       : (currentUser.sessionEpoch || 0),
     passwordChangedAt: currentUser.passwordChangedAt || null
   });
-  // Bind Electron main RBAC session (authoritative IPC gate) — await so backup/sync IPC works.
-  void ensureRbacSessionBound().then((bound) => {
-    if (!bound) console.warn('RBAC session bind incomplete after login');
-  });
+  // Bind Electron main RBAC session before init/DB writes — prevents rbac_session_required toasts.
+  const bound = await ensureRbacSessionBound();
+  if (!bound) {
+    console.warn('RBAC session bind incomplete after login');
+    if (typeof OperationalErrorTruth?.notifyTruthful === 'function') {
+      OperationalErrorTruth.notifyTruthful('rbac_session_required', { toast: true });
+    }
+  }
   if (typeof logAudit === 'function') logAudit('USER_LOGIN', `تسجيل دخول: ${currentUser.fullName}`);
   document.getElementById('loginScreen')?.classList.add('hidden');
   applyRoleUI();
@@ -9835,11 +9995,16 @@ async function ensureRbacSessionBound() {
     };
 
     // Authoritative path: seed main KV if empty (public one-time), then bind against KV — never trust claim alone.
-    if (!currentUser.isDev && api.database?.seedUsersIfEmpty && Array.isArray(users) && users.length) {
+    if (!currentUser.isDev && api.database?.seedUsersIfEmpty) {
+      const seedUsers = (typeof SqliteBridge !== 'undefined' && SqliteBridge.getCommittedRaw)
+        ? (SqliteBridge.getCommittedRaw('users') || users)
+        : users;
+      if (Array.isArray(seedUsers) && seedUsers.length) {
       try {
-        await api.database.seedUsersIfEmpty(users);
+        await api.database.seedUsersIfEmpty(seedUsers);
       } catch (seedErr) {
         console.warn('ensureRbacSessionBound: seedUsersIfEmpty', seedErr);
+      }
       }
     }
 
@@ -9860,9 +10025,14 @@ async function ensureRbacSessionBound() {
 
     // After session exists, keep KV in sync for subsequent authoritative checks.
     try {
-      if (api.database?.persistKv && Array.isArray(users) && users.length && !currentUser.isDev) {
-        await api.database.persistKv('users', users);
-        await api.rbac.bindSession(payload);
+      if (api.database?.persistKv && !currentUser.isDev) {
+        const persistUsers = (typeof SqliteBridge !== 'undefined' && SqliteBridge.getCommittedRaw)
+          ? (SqliteBridge.getCommittedRaw('users') || users)
+          : users;
+        if (Array.isArray(persistUsers) && persistUsers.length) {
+          await api.database.persistKv('users', persistUsers);
+          await api.rbac.bindSession(payload);
+        }
       }
     } catch (flushErr) {
       console.warn('ensureRbacSessionBound: users flush failed', flushErr);
@@ -10303,7 +10473,8 @@ let editUserId = null;
 
 function deleteUser(id) {
   if (!checkAdmin('حذف المستخدم')) return;
-  if (id === '1') { notify('⚠️ لا يمكن حذف حساب المدير الرئيسي', 'danger'); return; }
+  const target = users.find(u => u.id === id);
+  if (target && isBranchPrimaryUser(target)) { notify('⚠️ لا يمكن حذف حساب المدير الرئيسي لهذا الفرع', 'danger'); return; }
   const gate = (typeof OwnerManagement !== 'undefined' && OwnerManagement.canRemoveOwnerUser)
     ? OwnerManagement.canRemoveOwnerUser(id, users)
     : (typeof RolePolicy !== 'undefined' && RolePolicy.canRemoveOwnerUser
@@ -10315,7 +10486,8 @@ function deleteUser(id) {
   }
   if (!confirm('حذف هذا المستخدم؟')) return;
   const removed = users.find(u => u.id === id);
-  users = users.filter(u=>u.id!==id); DB.set('users', users);
+  users = users.filter(u=>u.id!==id);
+  persistUsersBranchSlice(users);
   if (removed && typeof logAudit === 'function') logAudit('USER_DELETED', `حذف مستخدم: ${removed.fullName}`, { user: removed.fullName });
   renderUsersList();
   notify('🗑️ تم حذف المستخدم', 'danger');
@@ -10324,8 +10496,11 @@ function deleteUser(id) {
 function renderUsersList() {
   const el = document.getElementById('usersListContainer');
   if (!el) return;
+  const scopedUsers = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.filterUsersForView
+    ? BranchDataIsolation.filterUsersForView(users)
+    : users;
   // DEV account is NEVER shown here
-  const visible = users.filter(u => !u.isDev);
+  const visible = scopedUsers.filter(u => !u.isDev);
   const roleLabels = { owner:'المالك', hq_admin:'المالك', admin:'مدير النظام', reception:'استقبال', employee:'موظف', accountant:'محاسب', custom:'مخصص' };
   el.innerHTML = visible.map(u=>`
     <div class="user-card">
@@ -10342,7 +10517,7 @@ function renderUsersList() {
       </div>
       <div>${actionBtnRow(
         actionBtn('✏️', 'تعديل', { onclick: `openUserModal('${u.id}')` }) +
-        (u.id !== '1' ? actionBtn('🗑️', 'حذف', { cls: 'btn-danger', extraClass: 'admin-delete', onclick: `deleteUser('${u.id}')` }) : '')
+        (!isBranchPrimaryUser(u) ? actionBtn('🗑️', 'حذف', { cls: 'btn-danger', extraClass: 'admin-delete', onclick: `deleteUser('${u.id}')` }) : '')
       )}</div>
     </div>`).join('');
 }
@@ -10396,8 +10571,13 @@ async function saveUserAsync() {
   if (!fullName || !username) { notify('⚠️ الاسم واسم المستخدم مطلوبان', 'danger'); return; }
   if (!editUserId && !pw) { notify('⚠️ كلمة المرور مطلوبة للمستخدم الجديد', 'danger'); return; }
   const usernameKey = username.toLowerCase();
-  const duplicate = users.find(u => u.username?.toLowerCase() === usernameKey && u.id !== editUserId);
-  if (duplicate) { notify('⚠️ اسم المستخدم مستخدم بالفعل', 'danger'); return; }
+  const userBranchId = (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getViewBranchId)
+    ? (BranchDataIsolation.getViewBranchId() || BranchDataIsolation.getLoginBranchId())
+    : (BranchScope?.getActiveBranchId?.() || 'BR-MAIN');
+  const duplicate = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.usernameTakenInBranch
+    ? BranchDataIsolation.usernameTakenInBranch(getAllUsersStore(), username, userBranchId, editUserId)
+    : users.find(u => u.username?.toLowerCase() === usernameKey && u.id !== editUserId);
+  if (duplicate) { notify('⚠️ اسم المستخدم مستخدم بالفعل في هذا الفرع', 'danger'); return; }
   if (!editUserId && typeof LicenseLimits !== 'undefined' && LicenseLimits.canCreateUser) {
     const licDoc = (typeof LicenseCloud !== 'undefined' && LicenseCloud.loadLocal) ? LicenseCloud.loadLocal() : null;
     const gate = LicenseLimits.canCreateUser(licDoc, { users, isNew: true });
@@ -10419,7 +10599,7 @@ async function saveUserAsync() {
   if (editUserId) {
     const idx = users.findIndex(u=>u.id===editUserId);
     if (idx===-1) return;
-    if (users[idx].id === '1') {
+    if (isBranchPrimaryUser(users[idx])) {
       // Primary account may be Owner (highest) or Admin (operational); only Owner may assign Owner.
       if (role === 'owner' && !actorIsOwner) {
         notify('⚠️ فقط المالك يمكنه تعيين دور Owner للحساب الرئيسي', 'danger');
@@ -10464,6 +10644,9 @@ async function saveUserAsync() {
     users[idx].role = role; users[idx].empNum = document.getElementById('um-empnum').value;
     users[idx].active = nextActive;
     users[idx].customTitle = customTitle || undefined;
+    if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampUserBranch) {
+      BranchDataIsolation.stampUserBranch(users[idx]);
+    }
     if (permissions) users[idx].permissions = permissions;
     else delete users[idx].permissions;
     if (docId) users[idx].doctorId = docId;
@@ -10478,7 +10661,21 @@ async function saveUserAsync() {
       notify('⚠️ فقط المالك يمكنه إنشاء حساب Owner', 'danger');
       return;
     }
-    const newUser = { id: Date.now().toString(), fullName, username, password: await hashPW(pw, username), role, empNum: document.getElementById('um-empnum').value, doctorId: docId, active: true, customTitle: customTitle || undefined, permissions: permissions || undefined };
+    const newUser = {
+      id: Date.now().toString(),
+      fullName, username,
+      password: await hashPW(pw, username),
+      role,
+      empNum: document.getElementById('um-empnum').value,
+      doctorId: docId,
+      active: true,
+      customTitle: customTitle || undefined,
+      permissions: permissions || undefined,
+      branchId: userBranchId
+    };
+    if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampUserBranch) {
+      BranchDataIsolation.stampUserBranch(newUser);
+    }
     if (role === 'owner' || role === 'hq_admin') {
       if (typeof OwnerManagement !== 'undefined' && OwnerManagement.bindOwnerToCurrentContext) {
         OwnerManagement.bindOwnerToCurrentContext(newUser);
@@ -10486,8 +10683,16 @@ async function saveUserAsync() {
     }
     users.push(newUser);
   }
-  if (typeof BranchScope !== 'undefined') users.forEach(u => BranchScope.applyDefaultScopeToUser(u));
-  DB.set('users', users);
+  if (typeof BranchScope !== 'undefined') {
+    users.forEach(u => {
+      if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampUserBranch) {
+        BranchDataIsolation.stampUserBranch(u);
+      } else {
+        BranchScope.applyDefaultScopeToUser(u);
+      }
+    });
+  }
+  persistUsersBranchSlice(users, userBranchId);
   filterLoginUsers();
   document.getElementById('userModal').classList.remove('open');
   renderUsersList();
@@ -10610,6 +10815,12 @@ function syncAppGlobals() {
   window.nextSessions = nextSessions;
   window.users = users;
   window.doctors = doctors;
+  window.attendance = attendance;
+  window.expenses = expenses;
+  window.packages = packages;
+  window.services = services;
+  window.otRecords = otRecords;
+  window.activityLog = activityLog;
   window.backupLog = backupLog;
 }
 window.getActiveUser = () => currentUser;
@@ -10979,7 +11190,7 @@ function showPageAfterRestoreGate(id) {
     return;
   }
   if (id === 'owner-hub' && typeof OwnerHub?.canAccess === 'function' && !OwnerHub.canAccess()) {
-    notify('⛔ ليس لديك صلاحية للوصول إلى Owner Hub', 'danger');
+    notify('⛔ Owner Hub متاح لحساب المالك (Owner / HQ Admin) فقط', 'danger');
     return;
   }
   // Close sidebar on mobile
@@ -11451,7 +11662,7 @@ function initServices() {
 }
 
 function getActiveServices() {
-  return [...services].filter(s => s.active !== false).sort((a, b) => (a.sort || 0) - (b.sort || 0));
+  return getUiScopedRecords(services).filter(s => s.active !== false).sort((a, b) => (a.sort || 0) - (b.sort || 0));
 }
 
 function getServiceByName(name) {
@@ -11552,6 +11763,12 @@ function saveService() {
     useGlobalPrice: billing === 'cup' ? useGlobalPrice : false,
     price: billing === 'cup' && useGlobalPrice ? settings.cupPrice : price,
     commissionMode, commission, active,
+    branchId: editServiceId
+      ? (services.find(s => s.id === editServiceId)?.branchId
+        || (typeof BranchDataIsolation !== 'undefined' ? BranchDataIsolation.getViewBranchId?.() : null)
+        || BranchScope?.getActiveBranchId?.() || 'BR-MAIN')
+      : ((typeof BranchDataIsolation !== 'undefined' ? BranchDataIsolation.getViewBranchId?.() : null)
+        || BranchScope?.getActiveBranchId?.() || 'BR-MAIN'),
     sort: editServiceId ? (getServiceByName(name)?.sort || services.length) : services.length + 1
   };
   if (editServiceId) {
@@ -11602,11 +11819,12 @@ function deleteService(id) {
 function refreshServicesTable() {
   const body = document.getElementById('servicesTableBody');
   if (!body) return;
-  if (!services.length) {
+  const scopedServices = getUiScopedRecords(services);
+  if (!scopedServices.length) {
     body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-light)">لا توجد خدمات</td></tr>';
     return;
   }
-  body.innerHTML = [...services].sort((a, b) => (a.sort || 0) - (b.sort || 0)).map(s => `
+  body.innerHTML = [...scopedServices].sort((a, b) => (a.sort || 0) - (b.sort || 0)).map(s => `
     <tr>
       <td><strong>${s.name}</strong>${s.nameEn ? `<div style="font-size:11px;color:var(--text-muted)" dir="ltr">${s.nameEn}</div>` : ''}</td>
       <td>${s.billing === 'session' ? 'جلسة' : 'كأس'}</td>
@@ -12203,13 +12421,17 @@ function onPackageShareModeChange() {
 // PACKAGES (باقات الحجامة)
 // ═══════════════════════════════════════════════
 function logPackageActivity(action, detail) {
-  activityLog.unshift({
+  const entry = {
     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
     action,
     detail: detail || '',
     user: currentUser ? currentUser.fullName : '—',
     at: new Date().toISOString()
-  });
+  };
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampLogEntry) {
+    BranchDataIsolation.stampLogEntry(entry);
+  }
+  activityLog.unshift(entry);
   if (activityLog.length > 200) activityLog = activityLog.slice(0, 200);
   DB.set('activityLog', activityLog);
   if (typeof logAudit === 'function') {
@@ -12230,11 +12452,14 @@ function logPackageActivity(action, detail) {
 function renderPackageActivityLog() {
   const el = document.getElementById('packageActivityLog');
   if (!el) return;
-  if (!activityLog.length) {
+  const scopedLog = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.filterLogsForView
+    ? BranchDataIsolation.filterLogsForView(activityLog)
+    : activityLog;
+  if (!scopedLog.length) {
     el.innerHTML = '<div style="color:var(--text-light);font-size:13px;padding:12px">لا يوجد نشاط بعد</div>';
     return;
   }
-  el.innerHTML = activityLog.slice(0, 50).map(entry => {
+  el.innerHTML = scopedLog.slice(0, 50).map(entry => {
     const dt = new Date(entry.at);
     const when = dt.toLocaleDateString('ar-SA') + ' ' + dt.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
     return `<div class="activity-log-item">
@@ -12247,11 +12472,12 @@ function renderPackageActivityLog() {
 function refreshPackagesTable() {
   const body = document.getElementById('packagesTableBody');
   if (!body) return;
-  if (!packages.length) {
+  const scopedPackages = getUiScopedRecords(packages);
+  if (!scopedPackages.length) {
     body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-light)">لا توجد باقات — أضف أول باقة</td></tr>';
     return;
   }
-  body.innerHTML = packages.map(p => `
+  body.innerHTML = scopedPackages.map(p => `
     <tr>
       <td><strong>${p.name}</strong></td>
       <td dir="ltr">${fmtNum(p.cups, 0)}</td>
@@ -12304,6 +12530,8 @@ function savePackage() {
     packages.push({
       id: Date.now().toString(),
       name, cups, price, active, shareable,
+      branchId: (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getViewBranchId?.())
+        || BranchScope?.getActiveBranchId?.() || 'BR-MAIN',
       createdAt: new Date().toISOString()
     });
     logPackageActivity('إضافة باقة', name);
@@ -12480,6 +12708,9 @@ function saveSetting(key) {
   if (key === 'vat') settings.vatRate = val;
   else settings[key] = val;
   DB.set('settings', settings);
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.persistActiveBranchSettings) {
+    BranchDataIsolation.persistActiveBranchSettings();
+  }
   notify('✅ تم حفظ الإعداد بنجاح');
 }
 
@@ -12933,6 +13164,9 @@ function saveCenterSettings() {
   if (siteEl) settings.siteUrl = siteEl.value.trim();
   DB.set('settings', settings);
   syncUninstallCenterMeta();
+  if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.persistActiveBranchSettings) {
+    BranchDataIsolation.persistActiveBranchSettings();
+  }
   if (typeof DriveFolderRegistry !== 'undefined' && prevCenterName !== settings.centerName) {
     DriveFolderRegistry.renameCenterFolder(settings.centerName).catch(() => {});
     const lic = typeof LicenseCloud !== 'undefined' ? LicenseCloud.loadLocal?.() : null;
@@ -13246,11 +13480,13 @@ function deleteDoctor(id) {
 
 function refreshDoctorsTable() {
   const tbody = document.getElementById('doctorsTableBody');
-  if (!doctors.length) {
+  if (!tbody) return;
+  const scopedDoctors = getUiScopedRecords(doctors);
+  if (!scopedDoctors.length) {
     tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-light)">لا يوجد موظفون مسجلون</td></tr>`;
     return;
   }
-  tbody.innerHTML = doctors.map((d, i) => `
+  tbody.innerHTML = scopedDoctors.map((d, i) => `
     <tr>
       <td class="col-index">${i+1}</td>
       <td><strong>${d.name}</strong>${d.nonSpecialist?'<span class="tag tag-gray" style="margin-right:6px;font-size:10px">غير أخصائي</span>':''}</td>
@@ -13271,12 +13507,13 @@ function refreshDoctorsTable() {
 function populateDoctorSelects() {
   doctors = DB.get('doctors', doctors || []);
   syncAppGlobals();
+  const scopedDoctors = getUiScopedRecords(doctors);
   // Specialist-only dropdowns (exclude nonSpecialist staff)
   ['f-doctor', 'f2-doctor', 'ot-doctor', 'bk-doctor'].forEach(sid => {
     const el = document.getElementById(sid); if (!el) return;
     const cur = el.value;
     el.innerHTML = `<option value="">-- اختر الأخصائي --</option>` +
-      doctors.filter(d => d.active && !d.nonSpecialist)
+      scopedDoctors.filter(d => d.active && !d.nonSpecialist)
              .map(d => `<option value="${d.id}">${d.name}</option>`).join('');
     if (cur) el.value = cur;
   });
@@ -13285,7 +13522,7 @@ function populateDoctorSelects() {
     const el = document.getElementById(sid); if (!el) return;
     const cur = el.value;
     el.innerHTML = `<option value="">-- اختر الموظف --</option>` +
-      doctors.filter(d => d.active)
+      scopedDoctors.filter(d => d.active)
              .map(d => `<option value="${d.id}">${d.name}${d.nonSpecialist?' (موظف)':''}</option>`).join('');
     if (cur) el.value = cur;
   });
@@ -14855,6 +15092,40 @@ function refreshCaseDerivedViews(includeDaily) {
   if (typeof performInvoiceSearch === 'function') performInvoiceSearch(false);
 }
 
+/** Re-render every branch-scoped surface after owner branch switch (instant isolation). */
+function refreshAllBranchScopedViews(options) {
+  options = options || {};
+  if (typeof reloadClientStoreFromDb === 'function') reloadClientStoreFromDb();
+  if (typeof refreshCaseDerivedViews === 'function') refreshCaseDerivedViews();
+  if (typeof refreshBookingsTable === 'function') refreshBookingsTable();
+  if (typeof refreshExpenses === 'function') refreshExpenses();
+  if (typeof refreshAllAttViews === 'function') refreshAllAttViews();
+  if (typeof refreshDoctorsTable === 'function') refreshDoctorsTable();
+  if (typeof populateDoctorSelects === 'function') populateDoctorSelects();
+  if (typeof populateAttDoctor === 'function') populateAttDoctor();
+  if (typeof generateReportData === 'function') generateReportData();
+  if (typeof renderUsersList === 'function') renderUsersList();
+  if (typeof refreshInventoryPage === 'function') refreshInventoryPage();
+  if (typeof EmployeeLedger !== 'undefined') {
+    if (typeof EmployeeLedger.populateLedgerFilters === 'function') EmployeeLedger.populateLedgerFilters();
+    if (typeof EmployeeLedger.renderLedgerPage === 'function') EmployeeLedger.renderLedgerPage();
+    if (typeof EmployeeLedger.renderDashboardCard === 'function') EmployeeLedger.renderDashboardCard();
+  }
+  if (typeof refreshBulkTable === 'function') refreshBulkTable(false);
+  if (typeof refreshMessageLog === 'function') refreshMessageLog();
+  if (typeof loadSettings === 'function') loadSettings();
+  if (typeof loadPackagesPricing === 'function') loadPackagesPricing();
+  if (typeof refreshSystemLogsPage === 'function') refreshSystemLogsPage(false);
+  if (typeof renderUsersList === 'function') renderUsersList();
+  if (typeof filterLoginUsers === 'function') filterLoginUsers();
+  if (typeof applyBranchViewModeUi === 'function') applyBranchViewModeUi();
+  if (options.fromBranchSwitch !== true && typeof showPage === 'function') {
+    const active = document.querySelector('.page.active')?.id?.replace('page-', '');
+    if (active) showPage(active);
+  }
+}
+window.refreshAllBranchScopedViews = refreshAllBranchScopedViews;
+
 let _cloudSyncUiTimer = null;
 
 function refreshActivePageAfterCloudSync() {
@@ -15019,10 +15290,10 @@ function refreshDashboard() {
   const vatEl = document.getElementById('s-vat');
   if (vatEl) vatEl.textContent = fmtMoney(totalVat);
 
-  const apptCount = (bookings || []).filter(b => b.date === today).length;
+  const apptCount = getUiScopedRecords(bookings || []).filter(b => b.date === today).length;
   animateKpiValue(document.getElementById('s-appointments'), fmtNum(apptCount, 0));
 
-  const todayExp = (expenses || []).filter(e => e.date === today && isExpensePaid(e)).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+  const todayExp = getUiScopedRecords(expenses || []).filter(e => e.date === today && isExpensePaid(e)).reduce((a, e) => a + (Number(e.amount) || 0), 0);
   const profit = totalIncome - todayExp;
   animateKpiValue(document.getElementById('s-profit'), fmtMoney(profit));
   const profitSub = document.getElementById('s-profit-sub');
@@ -15032,7 +15303,7 @@ function refreshDashboard() {
   if (trendEl) {
     const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
     const yStr = formatDateISO(yesterday);
-    const yIncome = filterBillableCases(cases.filter(c => c.date === yStr)).reduce((a, c) => a + c.total, 0);
+    const yIncome = filterBillableCases(getUiScopedRecords(cases.filter(c => c.date === yStr))).reduce((a, c) => a + c.total, 0);
     if (yIncome > 0 && totalIncome !== yIncome) {
       const pct = Math.round(((totalIncome - yIncome) / yIncome) * 100);
       trendEl.className = 'kpi-trend ' + (pct >= 0 ? 'up' : 'down');
@@ -15492,11 +15763,15 @@ function generatePayroll() {
     recalcAllAttendancePolicy(attendance, doctors);
     DB.set('attendance', attendance);
   }
-  const monthCases = cases.filter(c => { const d=new Date(c.date); return d.getMonth()+1===month && d.getFullYear()===year; });
-  const monthOT    = otRecords.filter(r => { const d=new Date(r.date); return d.getMonth()+1===month && d.getFullYear()===year; });
-  const monthAtt   = (DB.get('attendance',[])).filter(a => { const d=new Date(a.date); return d.getMonth()+1===month && d.getFullYear()===year; });
+  const scopedCases = getUiScopedRecords(cases);
+  const scopedDoctors = getUiScopedRecords(doctors);
+  const scopedOt = getUiScopedRecords(otRecords);
+  const scopedAtt = getUiScopedRecords(DB.get('attendance', attendance));
+  const monthCases = scopedCases.filter(c => { const d=new Date(c.date); return d.getMonth()+1===month && d.getFullYear()===year; });
+  const monthOT    = scopedOt.filter(r => { const d=new Date(r.date); return d.getMonth()+1===month && d.getFullYear()===year; });
+  const monthAtt   = scopedAtt.filter(a => { const d=new Date(a.date); return d.getMonth()+1===month && d.getFullYear()===year; });
   const container  = document.getElementById('payrollCards');
-  if (!doctors.length) {
+  if (!scopedDoctors.length) {
     container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-light);background:var(--card);border-radius:14px;border:1px solid var(--border)">لا يوجد أطباء مسجلون</div>`;
     return;
   }
@@ -15505,7 +15780,7 @@ function generatePayroll() {
   let grandDeductions = 0;
   let grandNet = 0;
 
-  const cardsHtml = doctors.map(d => {
+  const cardsHtml = scopedDoctors.map(d => {
     const docCases   = monthCases.filter(c => c.doctorId === d.id);
     const commission = docCases.reduce((a,c) => a + c.commission, 0);
     const manualOtH  = monthOT.filter(r => r.doctorId === d.id).reduce((a,r) => a + r.hours, 0);
@@ -15634,7 +15909,8 @@ function toggleEmployeeLedgerModule(enabled) {
 function applyEmployeeLedgerModuleUI() {
   const on = typeof isEmployeeLedgerModuleEnabled === 'function' && isEmployeeLedgerModuleEnabled();
   const licOk = typeof isFeatureEnabled !== 'function' || isFeatureEnabled('hr_ledger');
-  const show = on && licOk;
+  const permOk = typeof hasPermission !== 'function' || hasPermission('ledger.view');
+  const show = on && licOk && permOk;
   ['nav-employee-ledger', 'payroll-ledger-link'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = show ? '' : 'none';
@@ -16145,6 +16421,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/rbac-guard.js"></script>
 <script src="cloud/owner-branch-mode.js"></script>
 <script src="cloud/settings-split.js"></script>
+<script src="cloud/branch-data-isolation.js"></script>
 <script src="cloud/repository.js"></script>
 <script src="cloud/role-policy.js"></script>
 <script src="cloud/operational-rbac-guard.js"></script>
@@ -16189,6 +16466,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/license-limits.js"></script>
 <script src="cloud/license-lifecycle.js"></script>
 <script src="cloud/license-cloud.js"></script>
+<script src="cloud/branch-display.js"></script>
 <script src="cloud/drive-folder-registry.js"></script>
 <script src="cloud/license-identity.js"></script>
 <script src="cloud/license-activation-gate.js"></script>
@@ -17661,7 +17939,10 @@ function populateDriveBootstrapBranchFields(license, prefix) {
   }
   sel.innerHTML = branches.map(b => {
     const id = String(b.id).replace(/"/g, '&quot;');
-    return `<option value="${id}">${b.name || b.id}</option>`;
+    const label = (typeof BranchDisplay !== 'undefined' && BranchDisplay.formatBranchOption)
+      ? BranchDisplay.formatBranchOption(b)
+      : (b.name || b.id);
+    return `<option value="${id}">${label}</option>`;
   }).join('');
   return sel.value;
 }
@@ -17776,7 +18057,7 @@ async function applyDriveBootstrapDeviceLock(prefix) {
     return { ok: false, error: 'branch_not_licensed' };
   }
   if (typeof DeviceConfig !== 'undefined') {
-    DeviceConfig.setBranchLock?.(branchId, true, deviceName);
+    DeviceConfig.setBranchLock?.(branchId, true, deviceName, { activation: true });
     DeviceConfig.ensureDeviceConfig?.({
       deviceName,
       centerId: typeof LicenseCloud !== 'undefined' ? LicenseCloud.loadLocal?.()?.centerId : undefined
@@ -18411,7 +18692,9 @@ function renderBackupStatusSummary() {
     || (typeof BranchScope !== 'undefined' && BranchScope.getActiveBranchId?.())
     || '—';
   const lic = typeof LicenseCloud !== 'undefined' ? LicenseCloud.loadLocal?.() : null;
-  const bname = lic?.branches?.find((b) => b && b.id === bid)?.name || bid;
+  const bname = (typeof BranchDisplay !== 'undefined' && BranchDisplay.resolveBranchName)
+    ? BranchDisplay.resolveBranchName(bid)
+    : (lic?.branches?.find((b) => b && b.id === bid)?.name || bid);
   set('bk-sum-branch', bname);
 }
 
@@ -18477,9 +18760,14 @@ function renderCloudV2BackupStatus() {
   const autoDate = settings?.cloudV2?.lastAutoBackupDate;
   set('bk-cv2-autobackup', autoDate || (enabled ? 'لم تُنشأ بعد' : '—'));
   const dc = typeof DeviceConfig !== 'undefined' ? DeviceConfig.load?.() : {};
-  const branch = dc?.lockedBranchId || settings?.defaultBranchId || '—';
+  const branchId = dc?.lockedBranchId || settings?.defaultBranchId || '';
+  const branchLabel = branchId
+    ? ((typeof BranchDisplay !== 'undefined' && BranchDisplay.resolveBranchName)
+      ? BranchDisplay.resolveBranchName(branchId)
+      : branchId)
+    : '—';
   const devName = dc?.deviceName || settings?.backup?.deviceName || '—';
-  set('bk-cv2-device', `${branch} / ${devName}`);
+  set('bk-cv2-device', `${branchLabel} / ${devName}`);
   loadCloudV2PollIntervalUI();
   renderDriveMigrationStatusUI();
   renderLegacyBranchMigrationStatusUI();
@@ -19558,7 +19846,7 @@ async function saveChangePassword() {
     _pendingForcedPwChange = false;
     _authPending = false;
     notify('✅ تم تغيير كلمة المرور — جارٍ فتح البرنامج');
-    completeAuthenticatedLogin();
+    await completeAuthenticatedLogin();
     return;
   }
   // Voluntary change — invalidate prior sessions.
@@ -20935,13 +21223,14 @@ function saveAttendance() {
 function refreshAttLog() {
   const tbody = document.getElementById('attLogBody');
   if (!tbody) return;
+  attendance = DB.get('attendance', attendance);
   const filterDoc   = document.getElementById('att-filter-doctor')?.value || '';
   const now = new Date();
   const filterMonth = parseInt(document.getElementById('att-filter-month')?.value || (now.getMonth()+1));
   const filterYear  = now.getFullYear();
   const typeLabels = ATT_TYPE_LABELS;
   const paidLabels = { paid: 'مدفوعة', unpaid: 'بدون أجر' };
-  const filtered = attendance.filter(a => {
+  const filtered = getUiScopedRecords(attendance).filter(a => {
     const d = new Date(a.date);
     return (!filterDoc || a.doctorId===filterDoc) && d.getMonth()+1===filterMonth && d.getFullYear()===filterYear;
   }).sort((a,b)=>b.date.localeCompare(a.date));
@@ -21110,7 +21399,7 @@ function generateAttReport() {
   const typeLabels = ATT_TYPE_LABELS;
   const typeColors = {normal:'tag-green',fullOT:'tag-gold',absent:'tag-red',leave:'tag-red',timeback:'tag-blue',sick:'tag-red',weekly:'tag-gray',annual:'tag-gray'};
 
-  const attAll = attendance.filter(a => {
+  const attAll = getUiScopedRecords(attendance).filter(a => {
     const d = new Date(a.date);
     return d.getMonth()+1===month && d.getFullYear()===curYear;
   });
@@ -22095,7 +22384,7 @@ function onClientDateModeChange() {
 
 function buildClientsMap() {
   const map = {};
-  cases.forEach(c => {
+  getUiScopedRecords(cases).forEach(c => {
     const key = getClientMapKey(c);
     if (!map[key]) map[key] = { key, name: c.name || '—', phone: c.phone||'', fileNo: c.fileNo||'', clientRegistryId: c.clientRegistryId||'', visits: [], lastDate: null };
     map[key].visits.push(c.date);
@@ -22214,6 +22503,13 @@ function reloadClientStoreFromDb() {
   services = DB.get('services', services);
   bookings = DB.get('bookings', bookings);
   expenses = DB.get('expenses', expenses);
+  attendance = DB.get('attendance', attendance);
+  nextSessions = DB.get('nextSessions', nextSessions);
+  packages = DB.get('packages', packages);
+  services = DB.get('services', services);
+  otRecords = DB.get('otRecords', otRecords);
+  activityLog = DB.get('activityLog', activityLog);
+  users = DB.get('users', users);
   clientFileCounter = DB.get('clientFileCounter', clientFileCounter);
   invoiceCounter = DB.get('invoiceCounter', invoiceCounter);
   syncAppGlobals();
@@ -23927,7 +24223,7 @@ function refreshBookingsTable() {
   const custEl = document.getElementById('bk-custom-date');
   if (custEl) custEl.style.display = filter==='custom' ? '' : 'none';
 
-  const filtered = bookings.filter(b => {
+  const filtered = getUiScopedRecords(bookings).filter(b => {
     switch(filter) {
       case 'today':    return b.date === today;
       case 'tomorrow': return b.date === tomStr;
@@ -24175,7 +24471,7 @@ function refreshExpenses() {
   const now   = new Date();
   const month = parseInt(document.getElementById('exp-filter-month')?.value || (now.getMonth() + 1));
   const year  = parseInt(document.getElementById('exp-filter-year')?.value || now.getFullYear());
-  const me    = expenses.filter(e => { const d = new Date(e.date); return d.getMonth() + 1 === month && d.getFullYear() === year; });
+  const me    = getUiScopedRecords(expenses).filter(e => { const d = new Date(e.date); return d.getMonth() + 1 === month && d.getFullYear() === year; });
   const total = me.reduce((a, e) => a + e.amount, 0);
   const paidTotal = me.filter(isExpensePaid).reduce((a, e) => a + e.amount, 0);
   const pendingItems = me.filter(e => !isExpensePaid(e));
@@ -27282,13 +27578,12 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
   if (session) {
     if (session.userId === '__dev__') {
       currentUser = DEV_ACCOUNT;
-      setAppAuthed(true);
-      syncAppGlobals();
-      document.getElementById('loginScreen').classList.add('hidden');
-      init();
+      await completeAuthenticatedLogin();
       return;
     }
-    const u = users.find(x => x.id === session.userId && x.active);
+    const u = typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.findUserInBranch
+      ? BranchDataIsolation.findUserInBranch(DB.get('users', users), session.userId)
+      : users.find(x => x.id === session.userId && x.active);
     if (u) {
       if (_licStatus === 'blocked') {
         clearUserSession();
@@ -27325,10 +27620,7 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
         openForcedPasswordChange();
         return;
       }
-      setAppAuthed(true);
-      syncAppGlobals();
-      document.getElementById('loginScreen').classList.add('hidden');
-      init();
+      await completeAuthenticatedLogin();
       return;
     }
   }

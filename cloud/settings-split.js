@@ -76,8 +76,16 @@
   function filterUsersForBranch(users, branchId) {
     if (!Array.isArray(users)) return [];
     branchId = branchId || global.BranchScope?.getActiveBranchId?.() || 'BR-MAIN';
+    if (global.BranchDataIsolation?.userBelongsToBranch) {
+      return users.filter((u) => global.BranchDataIsolation.userBelongsToBranch(u, branchId)).map((u) => {
+        const copy = { ...u };
+        delete copy.password;
+        return copy;
+      });
+    }
     return users.filter(u => {
       if (!u || !u.active) return false;
+      if (u.branchId) return u.branchId === branchId;
       if (typeof global.BranchScope?.userCanAccessBranch === 'function') {
         return global.BranchScope.userCanAccessBranch(u, branchId);
       }

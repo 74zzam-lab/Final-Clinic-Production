@@ -75,6 +75,9 @@
   }
 
   function filterForActiveViewIfNeeded(key, value) {
+    if (global.BranchDataIsolation?.filterKvForView) {
+      return global.BranchDataIsolation.filterKvForView(key, value);
+    }
     if (!CORE_TABLES.includes(key) || !Array.isArray(value)) return value;
     if (shouldUseAggregateView()) return value;
     if (global.BranchScope?.filterForActiveView) {
@@ -588,15 +591,28 @@
         messageAr: healthBlock.messageAr,
       };
     }
+    let persistValue = value;
+    const branchScopedKv = global.BranchDataIsolation?.BRANCH_SCOPED_ARRAY_KEYS?.has?.(key);
+    if (Array.isArray(value) && branchScopedKv) {
+      const branchId = getOperationalWriteBranchId();
+      const slice = filterRecordsForWriteBranch(value.map((r) => {
+        if (r && typeof r === 'object' && !r.branchId && global.BranchDataIsolation?.stampBranchId) {
+          return global.BranchDataIsolation.stampBranchId({ ...r });
+        }
+        return r;
+      }));
+      mergeBranchSliceIntoCommitted(key, slice, branchId);
+      persistValue = state.lastCommitted[key] || value;
+    }
     state.pendingKeys.add(key);
     try {
-      const res = await db.persistKv(key, value);
+      const res = await db.persistKv(key, persistValue);
       if (res && res.ok === false) {
         state.lastError = res.error || 'kv_persist_failed';
         restoreLastCommit(key);
         return { ok: false, error: state.lastError };
       }
-      applyCommittedToView(key, value);
+      applyCommittedToView(key, persistValue);
       state.lastError = null;
       return { ok: true, key, authoritative: true };
     } catch (e) {
@@ -646,6 +662,20 @@
       }
       const db = api();
       if (!db || !state.sqlitePrimary) {
+        const branchScopedKv = global.BranchDataIsolation?.BRANCH_SCOPED_ARRAY_KEYS?.has?.(k);
+        if (Array.isArray(v) && branchScopedKv) {
+          const branchId = getOperationalWriteBranchId();
+          const slice = filterRecordsForWriteBranch(v.map((r) => {
+            if (r && typeof r === 'object' && !r.branchId && global.BranchDataIsolation?.stampBranchId) {
+              return global.BranchDataIsolation.stampBranchId({ ...r });
+            }
+            return r;
+          }));
+          mergeBranchSliceIntoCommitted(k, slice, branchId);
+          baseRaw(k, state.lastCommitted[k] || v);
+          syncMemory(k, filterForActiveViewIfNeeded(k, state.lastCommitted[k]));
+          return true;
+        }
         baseRaw(k, v);
         rememberCommit(k, v);
         return true;
@@ -737,6 +767,16 @@
     };
   }
 
+  function getCommittedRaw(key) {
+    if (!Object.prototype.hasOwnProperty.call(state.lastCommitted, key)) return undefined;
+    const raw = state.lastCommitted[key];
+    try {
+      return typeof structuredClone === 'function' ? structuredClone(raw) : JSON.parse(JSON.stringify(raw));
+    } catch {
+      return raw;
+    }
+  }
+
   global.SqliteBridge = {
     migrateAndEnable,
     hydrateIntoMemory,
@@ -769,6 +809,7 @@
       hasLastCommitted: Object.keys(state.lastCommitted),
     }),
     getLastError: () => state.lastError,
+    getCommittedRaw,
   };
 
   if (typeof document !== 'undefined') {

@@ -20,6 +20,16 @@
     return getRegistered(doc).find(d => d && d.deviceUuid === deviceUuid) || null;
   }
 
+  /** Owner / HQ Admin — not branch admin alone. */
+  function canManageDevicesAsOwner(options) {
+    options = options || {};
+    if (options.force === true) return true;
+    const user = global.Auth?.getCurrentUser?.() || global.currentUser;
+    if (global.RolePolicy?.canManageOrganization?.(user)) return true;
+    if (global.OwnerProfile?.currentUserIsOwner?.()) return true;
+    return String(user?.role || '').toLowerCase() === 'owner';
+  }
+
   async function resignDoc(doc) {
     if (!global.LicenseCloud?.verifyLicenseDoc) return doc;
     const { signature, ...body } = doc;
@@ -214,10 +224,7 @@
     options = options || {};
     const doc = global.LicenseCloud?.loadLocal?.();
     if (!doc) return { ok: false, error: 'no_license' };
-    const role = global.OwnerProfile?.currentUserIsOwner?.()
-      ? 'owner'
-      : (global.OwnerProfile?.getRole?.() || global.Auth?.getCurrentUser?.()?.role || global.currentUser?.role);
-    if (role !== 'owner' && options.force !== true) {
+    if (!canManageDevicesAsOwner(options)) {
       return { ok: false, error: 'owner_required' };
     }
     const d = findDevice(doc, deviceUuid);
@@ -250,10 +257,7 @@
     options = options || {};
     const doc = global.LicenseCloud?.loadLocal?.();
     if (!doc) return { ok: false, error: 'no_license' };
-    const role = global.OwnerProfile?.currentUserIsOwner?.()
-      ? 'owner'
-      : (global.OwnerProfile?.getRole?.() || global.Auth?.getCurrentUser?.()?.role || global.currentUser?.role);
-    if (role !== 'owner' && options.force !== true) {
+    if (!canManageDevicesAsOwner(options)) {
       return { ok: false, error: 'owner_required' };
     }
     const d = findDevice(doc, deviceUuid);
@@ -287,10 +291,7 @@
   async function transferDevice(fromDeviceUuid, toDevice, options) {
     options = options || {};
     toDevice = toDevice || {};
-    const role = global.OwnerProfile?.currentUserIsOwner?.()
-      ? 'owner'
-      : (global.OwnerProfile?.getRole?.() || global.Auth?.getCurrentUser?.()?.role || global.currentUser?.role);
-    if (role !== 'owner' && options.force !== true) {
+    if (!canManageDevicesAsOwner(options)) {
       return { ok: false, error: 'owner_required' };
     }
     const from = String(fromDeviceUuid || '').trim();
