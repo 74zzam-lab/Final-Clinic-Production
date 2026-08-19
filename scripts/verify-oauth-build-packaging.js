@@ -15,32 +15,24 @@ function assert(cond, msg) {
   if (!cond) errors.push(msg);
 }
 
-const embeddedPath = path.join(root, 'electron', 'cloud-oauth.embedded.json');
-const configPath = path.join(root, 'electron', 'cloud-oauth.config.json');
-const vaultDefaults = path.join(root, 'license', 'license-vault.defaults.json');
+const bundle = require('../electron/cloud-oauth-production-bundle');
+const emb = bundle.decodeProductionBundle();
+assert(emb && emb.google?.clientSecret?.startsWith('GOCSPX-'), 'production bundle missing GOCSPX secret');
+assert(fs.existsSync(path.join(root, 'electron', 'cloud-oauth.production.b64')), 'cloud-oauth.production.b64 missing');
 
-const gen = spawnSync(process.execPath, ['scripts/bootstrap-oauth-for-build.mjs'], {
-  cwd: root,
-  encoding: 'utf8',
-});
-assert(gen.status === 0, 'bootstrap-oauth-for-build failed');
-
-const strict = spawnSync(process.execPath, ['scripts/generate-oauth-config.mjs', '--strict'], {
+const gen = spawnSync(process.execPath, ['scripts/generate-oauth-config.mjs', '--strict'], {
   cwd: root,
   encoding: 'utf8',
 });
 assert(gen.status === 0, 'generate-oauth-config --strict failed');
 
-assert(fs.existsSync(configPath), 'cloud-oauth.config.json not generated');
+const configPath = path.join(root, 'electron', 'cloud-oauth.config.json');
+const vaultDefaults = path.join(root, 'license', 'license-vault.defaults.json');
 const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 const g = cfg.google || {};
 assert(g.clientId && g.clientId.includes('googleusercontent.com'), 'generated config missing clientId');
 assert(g.clientSecret && g.clientSecret.startsWith('GOCSPX-'), 'generated config missing GOCSPX secret');
 assert(g.scopes?.includes('https://www.googleapis.com/auth/drive.file'), 'drive.file scope missing');
-
-const emb = JSON.parse(fs.readFileSync(embeddedPath, 'utf8'));
-assert(!String(emb.google?.clientSecret || '').includes('REPLACE_ME'), 'embedded still has REPLACE_ME');
-assert(!String(emb.google?.clientId || '').includes('REPLACE_ME'), 'embedded clientId still placeholder');
 
 const vault = JSON.parse(fs.readFileSync(vaultDefaults, 'utf8'));
 assert(vault.webAppUrl && vault.webAppUrl.includes('script.google.com'), 'license vault webAppUrl missing');

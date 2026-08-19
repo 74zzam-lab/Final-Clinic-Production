@@ -88,7 +88,13 @@ function loadEmbeddedDefaults() {
 }
 
 function loadEmbeddedSecrets() {
-  const google = parseGoogleSection(readJsonSafe(embeddedSecretsPath()));
+  let google = parseGoogleSection(readJsonSafe(embeddedSecretsPath()));
+  if (!google?.clientId || !google?.clientSecret) {
+    try {
+      const { decodeProductionBundle } = require('./cloud-oauth-production-bundle');
+      google = parseGoogleSection(decodeProductionBundle());
+    } catch { /* ignore */ }
+  }
   if (!google?.clientId || !google?.clientSecret) return null;
   if (String(google.clientSecret).includes('YOUR_') || String(google.clientSecret).includes('PASTE_YOUR') || String(google.clientSecret).includes('REPLACE_ME') || String(google.clientSecret).includes('BOOTSTRAP_AT_BUILD')) return null;
   return {

@@ -10,6 +10,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import {
   PROJECT_LOCAL,
   PROJECT_TARGET,
@@ -18,6 +19,9 @@ import {
   loadMachineConfig,
   syncMachineToProject,
 } from './oauth-machine-store.mjs';
+
+const require = createRequire(import.meta.url);
+const { decodeProductionBundle, writeEmbeddedFromBundle } = require('../electron/cloud-oauth-production-bundle.js');
 
 const root = process.cwd();
 const target = PROJECT_TARGET;
@@ -38,6 +42,15 @@ function writeConfig(googleCfg, source) {
   base.google = { ...base.google, ...googleCfg };
   writeFileSync(target, JSON.stringify(base, null, 2) + '\n', 'utf8');
   console.log(`✓ cloud-oauth.config.json generated (${source})`);
+}
+
+function tryProductionBundle() {
+  const emb = decodeProductionBundle();
+  if (!emb || !hasGoogleCreds(emb)) return false;
+  writeEmbeddedFromBundle();
+  writeFileSync(target, JSON.stringify(emb, null, 2) + '\n', 'utf8');
+  console.log('✓ cloud-oauth.config.json generated (production bundle)');
+  return true;
 }
 
 function tryEmbedded() {
@@ -97,6 +110,8 @@ if (existsSync(localOverride)) {
   } catch { /* fall through */ }
 }
 
+if (tryProductionBundle()) process.exit(0);
+
 if (tryEmbedded()) process.exit(0);
 
 const machine = loadMachineConfig();
@@ -112,7 +127,7 @@ console.error(`
 ❌ Google OAuth is NOT configured for this build.
 
 Expected committed file:
-  electron/cloud-oauth.embedded.json
+  electron/cloud-oauth.production.b64
 `);
 
 if (process.argv.includes('--strict')) {

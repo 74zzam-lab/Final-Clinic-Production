@@ -159,12 +159,11 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 
 ## Phase 15 — OAuth / Drive / Sheets build
 
-**Goal:** Restore embedded Google OAuth + auto prebuild config like original v2-5-10.
+**Goal:** Production OAuth + vault embedded — `npm run build:prod` with zero manual copy.
 
 **Operator UAT (you):**
-1. `npm run build:prod` succeeds (strict OAuth)
-2. Installed app OAuth test + Drive connect work
-3. License vault reaches Apps Script URL
+1. Fresh clone → `npm run build:prod` with no ZIP/vendor steps
+2. Installed app OAuth + Drive + vault work
 
 ## Stable Operational Core — verification
 
