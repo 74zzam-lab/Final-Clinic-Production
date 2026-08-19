@@ -775,7 +775,7 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
       // Lock device to branch
       const branchId = (doc.branches || []).find((b) => b && b.active !== false)?.id;
       if (branchId && global.DeviceConfig?.lockToBranch) {
-        await global.DeviceConfig.lockToBranch(branchId, { deviceName });
+        await global.DeviceConfig.lockToBranch(branchId, { deviceName, activation: true });
       } else if (branchId && global.applyDriveBootstrapDeviceLock) {
         const sel = document.getElementById('bf-branch-id');
         if (sel) sel.value = branchId;
@@ -783,10 +783,11 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
         if (nameInput) nameInput.value = deviceName;
         await global.applyDriveBootstrapDeviceLock('bf');
       } else if (branchId) {
-        const cfg = global.DeviceConfig?.load?.() || {};
-        cfg.lockedBranchId = branchId;
-        cfg.deviceName = deviceName;
-        global.DeviceConfig?.save?.(cfg);
+        if (global.DeviceConfig?.lockToBranch) {
+          await global.DeviceConfig.lockToBranch(branchId, { deviceName, activation: true });
+        } else {
+          global.DeviceConfig?.setBranchLock?.(branchId, true, deviceName, { activation: true });
+        }
       }
       try {
         await global.LicenseCloud?.ensurePushedToDrive?.();
@@ -821,12 +822,13 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
         return lock;
       }
       if (!lock && global.DeviceConfig?.lockToBranch) {
-        await global.DeviceConfig.lockToBranch(branchId, { deviceName });
+        await global.DeviceConfig.lockToBranch(branchId, { deviceName, activation: true });
       } else if (!hasDeviceBranch()) {
-        const cfg = global.DeviceConfig?.load?.() || {};
-        cfg.lockedBranchId = branchId;
-        cfg.deviceName = deviceName;
-        global.DeviceConfig?.save?.(cfg);
+        if (global.DeviceConfig?.lockToBranch) {
+          await global.DeviceConfig.lockToBranch(branchId, { deviceName, activation: true });
+        } else {
+          global.DeviceConfig?.setBranchLock?.(branchId, true, deviceName, { activation: true });
+        }
       }
       try {
         await global.DeviceRegistry?.registerDevice?.({ deviceName, branchId });

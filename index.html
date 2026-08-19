@@ -17783,7 +17783,7 @@ async function applyDriveBootstrapDeviceLock(prefix) {
     return { ok: false, error: 'branch_not_licensed' };
   }
   if (typeof DeviceConfig !== 'undefined') {
-    DeviceConfig.setBranchLock?.(branchId, true, deviceName);
+    DeviceConfig.setBranchLock?.(branchId, true, deviceName, { activation: true });
     DeviceConfig.ensureDeviceConfig?.({
       deviceName,
       centerId: typeof LicenseCloud !== 'undefined' ? LicenseCloud.loadLocal?.()?.centerId : undefined

@@ -48,7 +48,7 @@
     if (!el) return;
     const bid = getDisplayBranchId();
     el.textContent = branchName(bid);
-    el.title = bid;
+    el.title = `${bid} — مربوط بهذا الجهاز (قراءة فقط)`;
   }
 
   function ensureBranchLabelDOM() {
@@ -59,7 +59,7 @@
     wrap.id = 'topbar-branch-label-wrap';
     wrap.style.cssText = 'display:none;align-items:center;gap:6px';
     wrap.innerHTML = `
-      <span style="font-size:11px;font-weight:700;color:var(--text-muted);white-space:nowrap">🌿 الفرع</span>
+      <span style="font-size:11px;font-weight:700;color:var(--text-muted);white-space:nowrap">🔒 الفرع</span>
       <span id="topbar-branch-label" style="font-size:12px;font-weight:800;color:var(--primary);white-space:nowrap;padding:6px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border)"></span>`;
     actions.insertBefore(wrap, actions.firstChild);
   }
@@ -97,6 +97,10 @@
   }
 
   function applyBranchSwitch(bid) {
+    const from = global.BranchContexts?.getOperationalWriteBranch?.()
+      || global.BranchScope?.getActiveBranchId?.()
+      || global.DeviceConfig?.getLockedBranchId?.()
+      || 'BR-MAIN';
     try { sessionStorage.setItem('__tdw_branch_drawer_pref__', bid); } catch { /* empty */ }
     if (bid === ALL_BRANCHES_VALUE) {
       try { global.OwnerBranchMode?.exitToOwnerMode?.(); } catch { /* empty */ }
@@ -113,6 +117,14 @@
         }
       } catch { /* empty */ }
       global.notify?.('🌿 تم التبديل إلى: ' + branchName(bid), 'info');
+    }
+    if (from !== bid) {
+      global.AuditLogger?.logSyncEvent?.('BRANCH_SESSION_SWITCHED', {
+        entity: 'branch',
+        entityId: bid === ALL_BRANCHES_VALUE ? '*' : bid,
+        summary: `Branch session: ${branchName(from)} → ${branchName(bid)}`,
+        meta: { fromBranchId: from, toBranchId: bid, userId: global.currentUser?.id || '', role: global.currentUser?.role || '' }
+      });
     }
     refreshSurfaces();
     if (typeof global.applyBranchViewModeUi === 'function') global.applyBranchViewModeUi();

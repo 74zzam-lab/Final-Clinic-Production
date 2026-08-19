@@ -161,7 +161,12 @@
       return;
     }
 
-    global.DeviceConfig?.setBranchLock?.(branchId, true, name);
+    const lockResult = global.DeviceConfig?.trySetBranchLock?.(branchId, true, name, { activation: true })
+      || { ok: true, cfg: global.DeviceConfig?.setBranchLock?.(branchId, true, name, { activation: true }) };
+    if (lockResult.ok === false) {
+      global.notify?.('⛔ تغيير ربط الفرع للمالك فقط', 'danger');
+      return;
+    }
     global.DeviceConfig?.ensureDeviceConfig?.({ deviceName: name, centerId: doc.centerId });
     const reg = await global.DeviceRegistry?.registerDevice?.({ deviceName: name, branchId });
     if (reg && !reg.ok && reg.error === 'branch_not_licensed') {
@@ -174,6 +179,13 @@
     global.notify?.('✅ تم ربط الجهاز بفرع ' + bName, 'success');
     if (typeof global.logAudit === 'function') {
       global.logAudit('DEVICE_BRANCH_LOCKED', `Branch lock: ${branchId} — ${name}`);
+    } else {
+      global.AuditLogger?.logSyncEvent?.('DEVICE_BRANCH_LOCKED', {
+        entity: 'device',
+        entityId: global.DeviceConfig?.load?.()?.deviceUuid || '',
+        summary: `Branch lock UI: ${branchId} — ${name}`,
+        meta: { branchId, deviceName: name, source: 'branch_lock_ui' }
+      });
     }
     global.CloudV2?.maybeAutoEnableCloudV2?.();
     if (global.CloudMeta?.isCloudV2Enabled?.() && global.CloudBootstrap?.runNewDeviceBootstrap) {

@@ -159,6 +159,46 @@ assert(branchCtx.BranchScope.getUserBranchScope(ownerUser).includes('*'), 'owner
 
 const switcherSrc = fs.readFileSync(path.join(root, 'cloud/branch-switcher.js'), 'utf8');
 assert(switcherSrc.includes('topbar-branch-label'), 'read-only branch label for device-bound users');
+assert(switcherSrc.includes('BRANCH_SESSION_SWITCHED'), 'branch switch audit event');
+
+const deviceCtx = {
+  window: {},
+  globalThis: {},
+  console,
+  currentUser: null,
+  DB: {
+    _d: {},
+    get(k, d) { return this._d[k] !== undefined ? this._d[k] : d; },
+    set(k, v) { this._d[k] = v; },
+  },
+  BranchScope: { setActiveBranchId: () => {} },
+  AuditLogger: { logSyncEvent: () => {} },
+};
+deviceCtx.window = deviceCtx;
+deviceCtx.globalThis = deviceCtx;
+vm.createContext(deviceCtx);
+vm.runInContext(fs.readFileSync(path.join(root, 'cloud/role-policy.js'), 'utf8'), deviceCtx);
+vm.runInContext(fs.readFileSync(path.join(root, 'cloud/device-config.js'), 'utf8'), deviceCtx);
+
+const firstLock = deviceCtx.DeviceConfig.setBranchLock('BR-MAIN', true, 'PC-1', { activation: true });
+assert(firstLock.branchLocked && firstLock.lockedBranchId === 'BR-MAIN', 'initial branch lock during activation');
+
+deviceCtx.currentUser = { id: '2', role: 'admin' };
+const denied = deviceCtx.DeviceConfig.trySetBranchLock('BR-JED', true, 'PC-1');
+assert(denied.ok === false && denied.error === 'owner_required', 'admin cannot change device branch lock');
+
+deviceCtx.currentUser = { id: '1', role: 'owner' };
+const ownerChange = deviceCtx.DeviceConfig.trySetBranchLock('BR-JED', true, 'PC-1');
+assert(ownerChange.ok && ownerChange.cfg.lockedBranchId === 'BR-JED', 'owner can change device branch lock');
+
+const bootSrc = fs.readFileSync(path.join(root, 'cloud/boot-flow-ui.js'), 'utf8');
+assert(bootSrc.includes('activation: true'), 'boot flow uses activation branch lock');
+
+const deviceCfgSrc = fs.readFileSync(path.join(root, 'cloud/device-config.js'), 'utf8');
+assert(deviceCfgSrc.includes('owner_required'), 'device config guards branch lock changes');
+
+const centerSrc = fs.readFileSync(path.join(root, 'cloud/center-setup.js'), 'utf8');
+assert(centerSrc.includes('owner_required'), 'center setup removeBranch owner guard');
 
 if (errors.length) {
   console.error('FAIL verify-operational-rbac:');
