@@ -793,8 +793,10 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
         await global.LicenseCloud?.ensurePushedToDrive?.();
       } catch { /* empty */ }
       try { global.ActivationSyncDefaults?.applyDefaults?.({ startSync: false }); } catch { /* empty */ }
+      try { global.ensureBranchStaffAccounts?.(global.DB?.get?.('users', global.users || []), branchId); } catch { /* empty */ }
       try { localStorage.setItem(RESTART_REQUIRED_KEY, '1'); } catch { /* empty */ }
-      setStatus('✅ تم تسجيل الجهاز وربطه بالفرع بنجاح. سيتم إعادة تشغيل البرنامج لتطبيق التفعيل واستكمال المزامنة.');
+      const bLabel = global.BranchDisplay?.resolveBranchName?.(branchId) || branchId;
+      setStatus(`✅ تم تسجيل الجهاز وربطه بفرع «${bLabel}» بنجاح. سيتم إعادة تشغيل البرنامج لتطبيق التفعيل واستكمال المزامنة.`);
       return { ok: true, restartRequired: true };
     } catch (e) {
       setStatusFromErr(e);
@@ -837,8 +839,10 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
         await global.LicenseCloud?.ensurePushedToDrive?.();
       } catch { /* empty */ }
       try { global.ActivationSyncDefaults?.applyDefaults?.({ startSync: false }); } catch { /* empty */ }
+      try { global.ensureBranchStaffAccounts?.(global.DB?.get?.('users', global.users || []), branchId); } catch { /* empty */ }
       try { localStorage.setItem(RESTART_REQUIRED_KEY, '1'); } catch { /* empty */ }
-      setStatus('✅ تم تسجيل الجهاز وربطه بالفرع بنجاح. سيتم إعادة تشغيل البرنامج لتطبيق التفعيل واستكمال المزامنة.');
+      const bLabel = global.BranchDisplay?.resolveBranchName?.(branchId) || branchId;
+      setStatus(`✅ تم تسجيل الجهاز وربطه بفرع «${bLabel}» بنجاح. سيتم إعادة تشغيل البرنامج لتطبيق التفعيل واستكمال المزامنة.`);
       return { ok: true, restartRequired: true };
     } catch (e) {
       setStatusFromErr(e);
@@ -992,7 +996,8 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             <p><strong>إنشاء أول فرع</strong> — لا توجد فروع بعد.</p>
             <div class="form-group"><label>اسم الفرع (عربي) *</label><input id="bf-branch-name-ar" class="form-control" required></div>
             <div class="form-group"><label>الاسم بالإنجليزية</label><input id="bf-branch-name-en" class="form-control" dir="ltr"></div>
-            <div class="form-group"><label>رمز الفرع</label><input id="bf-branch-code" class="form-control" dir="ltr" placeholder="BR-MAIN"></div>
+            <div class="form-group"><label>رمز داخلي (اختياري — للمزامنة فقط)</label><input id="bf-branch-code" class="form-control" dir="ltr" placeholder="يُولَّد تلقائياً"></div>
+            <p class="bf-source-meta" style="margin:-4px 0 8px">الاسم العربي أعلاه هو ما يظهر في الواجهة — الرمز الداخلي لا يُعرض للمستخدمين.</p>
             <div class="form-group"><label>المدينة</label><input id="bf-branch-city" class="form-control"></div>
             <div class="form-group"><label>الهاتف</label><input id="bf-branch-phone" class="form-control" dir="ltr"></div>
             <div class="form-group"><label>اسم هذا الجهاز *</label><input id="bf-device-name" class="form-control" placeholder="Reception-PC"></div>
@@ -1171,7 +1176,7 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
                ${cloud.timedOut ? `<span class="bf-source-meta">⚠️ ${cloud.message || 'انتهت المهلة لكن وُجدت نسخة.'}</span><br>` : ''}
                النوع: ${newest.kind === 'backup_file' ? 'نسخة Backup' : 'نقطة مزامنة سحابية'}<br>
                المركز: <code dir="ltr">${cloud.centerId || discovery?.identity?.centerId || '—'}</code><br>
-               الفرع: <code dir="ltr">${cloud.branchId || discovery?.identity?.branchId || '—'}</code><br>
+               الفرع: ${global.BranchDisplay?.resolveBranchName?.(cloud.branchId || discovery?.identity?.branchId) || cloud.branchId || discovery?.identity?.branchId || '—'}<br>
                آخر نسخة: ${Discovery.formatWhen(newest.modifiedAt)}<br>
                الحجم: ${Discovery.formatBytes(newest.sizeBytes)}<br>
                الملف: <code dir="ltr">${newest.name || newest.path || '—'}</code><br>
@@ -1361,7 +1366,9 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
           ['المزامنة', hasSyncDone()]
         ];
         const setupState = global.SetupStateService?.getState?.({ ignoreRestart: true });
-        content.innerHTML = `<ul style="font-size:13px;line-height:1.9">${checks.map(([l, ok]) => `<li>${ok ? '✅' : '❌'} ${l}</li>`).join('')}</ul>
+        const lockedBranchId = global.DeviceConfig?.load?.()?.lockedBranchId || '';
+        const lockedBranchLabel = global.BranchDisplay?.resolveBranchName?.(lockedBranchId) || lockedBranchId || '—';
+        content.innerHTML = `${hasDeviceBranch() ? `<p class="bf-source-meta" style="margin-bottom:10px">✅ الفرع المربوط: <strong>${lockedBranchLabel}</strong></p>` : ''}<ul style="font-size:13px;line-height:1.9">${checks.map(([l, ok]) => `<li>${ok ? '✅' : '❌'} ${l}</li>`).join('')}</ul>
           <p>اكتمل الإعداد بنجاح. اضغط الزر الوحيد أدناه لإعادة تشغيل البرنامج وتطبيق التفعيل، ثم سجّل الدخول.</p>
           <p class="bf-source-meta">لن تُعرض هذه الشاشة مرة أخرى بعد إعادة التشغيل الناجحة.</p>`;
         // Single terminal CTA — no duplicate finish / login / restart buttons.

@@ -89,7 +89,7 @@
       <div class="${stepClass(s.branchLocked, s.hasCloudLicense && s.needsBranchSetup)}">
         <div class="cs-status">${s.branchLocked ? '✅' : '⬜'} 3 — فرع وجهاز</div>
         <h3>ربط الجهاز بفرع مصرّح</h3>
-        <p>${s.branchLocked ? `مربوط: ${s.lockedBranchId} / ${s.deviceName || '—'}` : 'اختر فرعاً موجوداً واربط هذا الجهاز — إنشاء الفروع من Owner Hub فقط.'}</p>
+        <p>${s.branchLocked ? `مربوط: ${(typeof BranchDisplay !== 'undefined' && BranchDisplay.resolveBranchName ? BranchDisplay.resolveBranchName(s.lockedBranchId) : s.lockedBranchId) || '—'} / ${s.deviceName || '—'}` : 'اختر فرعاً موجوداً واربط هذا الجهاز — إنشاء الفروع من Owner Hub فقط.'}</p>
         <button type="button" class="btn btn-primary btn-sm" onclick="CenterSetupUI.openBranchStep()">🏥 فرع وجهاز</button>
       </div>
       ${s.centerId ? `<p style="font-size:11px;color:var(--text-muted);margin:12px 0 0" dir="ltr">Center ID: ${s.centerId}</p>` : ''}`;

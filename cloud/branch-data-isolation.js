@@ -279,6 +279,12 @@
   function afterBranchSwitch(toBranchId) {
     if (toBranchId && toBranchId !== '*' && toBranchId !== '__ALL__') {
       applyIncoming(toBranchId);
+      try {
+        if (typeof global.ensureBranchStaffAccounts === 'function') {
+          const all = global.DB?.get?.('users', global.users || []) || [];
+          global.ensureBranchStaffAccounts(all, toBranchId);
+        }
+      } catch { /* empty */ }
     }
   }
 

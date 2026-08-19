@@ -24,6 +24,9 @@
 
   function branchName(bid) {
     if (!bid || bid === '*' || bid === ALL_BRANCHES_VALUE) return 'كل الفروع';
+    if (global.BranchDisplay?.resolveBranchName) {
+      return global.BranchDisplay.resolveBranchName(bid);
+    }
     return getBranches().find(b => b.id === bid)?.name || bid;
   }
 
@@ -48,7 +51,7 @@
     if (!el) return;
     const bid = getDisplayBranchId();
     el.textContent = branchName(bid);
-    el.title = `${bid} — مربوط بهذا الجهاز (قراءة فقط)`;
+    el.title = (global.BranchDisplay?.resolveBranchTitle?.(bid) || branchName(bid)) + ' — مربوط بهذا الجهاز (قراءة فقط)';
   }
 
   function ensureBranchLabelDOM() {
@@ -218,7 +221,8 @@
       opts.push(`<option value="${ALL_BRANCHES_VALUE}">🌐 كل الفروع (All Branches)</option>`);
     }
     visible.forEach((b) => {
-      opts.push(`<option value="${String(b.id).replace(/"/g, '&quot;')}">${b.name || b.id}</option>`);
+      const label = global.BranchDisplay?.formatBranchOption?.(b) || b.name || b.id;
+      opts.push(`<option value="${String(b.id).replace(/"/g, '&quot;')}">${label}</option>`);
     });
     sel.innerHTML = opts.join('');
     if (active && [...sel.options].some((o) => o.value === active)) sel.value = active;

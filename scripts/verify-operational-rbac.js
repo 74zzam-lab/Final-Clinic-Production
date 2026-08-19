@@ -201,6 +201,27 @@ assert(isoCtx.BranchDataIsolation.usernameTakenInBranch(branchUsers, 'admin', 'B
 assert(isoCtx.BranchDataIsolation.usernameTakenInBranch(branchUsers, 'admin', 'BR-MAIN', 'x') === true, 'username blocked same branch');
 assert(isoCtx.BranchDataIsolation.getUsersForAuth(branchUsers).length === 1, 'login lists device branch users only');
 
+const displaySrc = fs.readFileSync(path.join(root, 'cloud/branch-display.js'), 'utf8');
+assert(displaySrc.includes('resolveBranchName'), 'branch display resolver exists');
+const displayCtx = {
+  window: {},
+  globalThis: {},
+  console,
+  LicenseCloud: { loadLocal: () => ({ branches: [{ id: 'BR-MAIN', name: 'فرع الرياض', active: true }] }) },
+  DB: { get: () => ({}) },
+};
+displayCtx.window = displayCtx;
+displayCtx.globalThis = displayCtx;
+vm.createContext(displayCtx);
+vm.runInContext(displaySrc, displayCtx);
+assert(displayCtx.BranchDisplay.resolveBranchName('BR-MAIN') === 'فرع الرياض', 'branch name shown instead of BR-MAIN');
+
+const indexSrc2 = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+assert(indexSrc2.includes('ensureBranchStaffAccounts'), 'default admin/reception seed per branch');
+assert(indexSrc2.includes('branch-display.js'), 'branch display script loaded');
+
+const ownerHubSrc = fs.readFileSync(path.join(root, 'cloud/owner-hub.js'), 'utf8');
+assert(ownerHubSrc.includes('BranchDisplay?.resolveBranchName'), 'owner hub shows branch name not id');
 const switcherSrc = fs.readFileSync(path.join(root, 'cloud/branch-switcher.js'), 'utf8');
 assert(switcherSrc.includes('topbar-branch-label'), 'read-only branch label for device-bound users');
 assert(switcherSrc.includes('BRANCH_SESSION_SWITCHED'), 'branch switch audit event');

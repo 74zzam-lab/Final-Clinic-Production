@@ -70,7 +70,9 @@
   function getLabel(branchNameResolver) {
     if (isOwnerMode()) return 'Owner Mode';
     const branchId = getBranchId();
-    const label = typeof branchNameResolver === 'function' ? branchNameResolver(branchId) : branchId;
+    const label = typeof branchNameResolver === 'function'
+      ? branchNameResolver(branchId)
+      : (global.BranchDisplay?.resolveBranchName?.(branchId) || branchId);
     return `Branch Mode: ${label || branchId || '—'}`;
   }
 

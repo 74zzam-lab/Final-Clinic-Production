@@ -9551,6 +9551,70 @@ function ensureOwnerSeedAccount(list) {
   return next;
 }
 
+function branchStaffRolePresent(list, branchId, role) {
+  return (list || []).some((u) => u
+    && String(u.role || '').toLowerCase() === role
+    && u.active !== false
+    && (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
+      ? BranchDataIsolation.userBelongsToBranch(u, branchId)
+      : String(u.branchId || 'BR-MAIN') === String(branchId)));
+}
+
+function ensureBranchStaffAccounts(list, branchId) {
+  if (!Array.isArray(list)) list = (typeof getAllUsersStore === 'function' ? getAllUsersStore() : DB.get('users', defaultUsers)) || [];
+  branchId = branchId
+    || (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getLoginBranchId
+      ? BranchDataIsolation.getLoginBranchId()
+      : (typeof DeviceConfig !== 'undefined' ? DeviceConfig.getLockedBranchId?.() : null) || 'BR-MAIN');
+  if (!branchId || branchId === '*' || branchId === '__ALL__') return list;
+
+  let out = list.slice();
+  let changed = false;
+  const stampStaff = (user) => {
+    const next = { ...user, branchId, isBranchPrimary: user.role === 'admin' };
+    if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.stampUserBranch) {
+      return BranchDataIsolation.stampUserBranch(next);
+    }
+    next.branchScope = [branchId];
+    next.canSwitchBranch = false;
+    return next;
+  };
+
+  if (!branchStaffRolePresent(out, branchId, 'admin')) {
+    const seed = defaultUsers.find((u) => u.role === 'admin');
+    if (seed) {
+      out.push(stampStaff({
+        ...seed,
+        id: 'admin-' + branchId.replace(/[^a-zA-Z0-9-]/g, '') + '-' + Date.now(),
+      }));
+      changed = true;
+    }
+  }
+
+  if (!branchStaffRolePresent(out, branchId, 'reception')) {
+    const seed = defaultUsers.find((u) => u.role === 'reception');
+    if (seed) {
+      out.push(stampStaff({
+        ...seed,
+        id: 'reception-' + branchId.replace(/[^a-zA-Z0-9-]/g, '') + '-' + Date.now(),
+        isBranchPrimary: false,
+      }));
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    if (typeof persistUsersBranchSlice === 'function') {
+      persistUsersBranchSlice(out, branchId);
+    } else {
+      DB.set('users', out);
+    }
+    return (typeof getAllUsersStore === 'function' ? getAllUsersStore() : out);
+  }
+  return list;
+}
+window.ensureBranchStaffAccounts = ensureBranchStaffAccounts;
+
 function userMustChangePassword(u) {
   if (!u || u.isDev) return false;
   if (u.mustChangePassword || u.seedDefaultPassword) return true;
@@ -9754,6 +9818,10 @@ function mergeUsersBranchSlice(branchSlice, branchId) {
 function persistUsersBranchSlice(branchSlice, branchId) {
   DB.set('users', mergeUsersBranchSlice(branchSlice, branchId));
 }
+
+try {
+  users = ensureBranchStaffAccounts(users);
+} catch { /* empty */ }
 
 function filterLoginUsers() {
   const role = document.getElementById('login-role')?.value;
@@ -16388,6 +16456,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/license-limits.js"></script>
 <script src="cloud/license-lifecycle.js"></script>
 <script src="cloud/license-cloud.js"></script>
+<script src="cloud/branch-display.js"></script>
 <script src="cloud/drive-folder-registry.js"></script>
 <script src="cloud/license-identity.js"></script>
 <script src="cloud/license-activation-gate.js"></script>
@@ -17860,7 +17929,10 @@ function populateDriveBootstrapBranchFields(license, prefix) {
   }
   sel.innerHTML = branches.map(b => {
     const id = String(b.id).replace(/"/g, '&quot;');
-    return `<option value="${id}">${b.name || b.id}</option>`;
+    const label = (typeof BranchDisplay !== 'undefined' && BranchDisplay.formatBranchOption)
+      ? BranchDisplay.formatBranchOption(b)
+      : (b.name || b.id);
+    return `<option value="${id}">${label}</option>`;
   }).join('');
   return sel.value;
 }
@@ -18610,7 +18682,9 @@ function renderBackupStatusSummary() {
     || (typeof BranchScope !== 'undefined' && BranchScope.getActiveBranchId?.())
     || '—';
   const lic = typeof LicenseCloud !== 'undefined' ? LicenseCloud.loadLocal?.() : null;
-  const bname = lic?.branches?.find((b) => b && b.id === bid)?.name || bid;
+  const bname = (typeof BranchDisplay !== 'undefined' && BranchDisplay.resolveBranchName)
+    ? BranchDisplay.resolveBranchName(bid)
+    : (lic?.branches?.find((b) => b && b.id === bid)?.name || bid);
   set('bk-sum-branch', bname);
 }
 
@@ -18676,9 +18750,14 @@ function renderCloudV2BackupStatus() {
   const autoDate = settings?.cloudV2?.lastAutoBackupDate;
   set('bk-cv2-autobackup', autoDate || (enabled ? 'لم تُنشأ بعد' : '—'));
   const dc = typeof DeviceConfig !== 'undefined' ? DeviceConfig.load?.() : {};
-  const branch = dc?.lockedBranchId || settings?.defaultBranchId || '—';
+  const branchId = dc?.lockedBranchId || settings?.defaultBranchId || '';
+  const branchLabel = branchId
+    ? ((typeof BranchDisplay !== 'undefined' && BranchDisplay.resolveBranchName)
+      ? BranchDisplay.resolveBranchName(branchId)
+      : branchId)
+    : '—';
   const devName = dc?.deviceName || settings?.backup?.deviceName || '—';
-  set('bk-cv2-device', `${branch} / ${devName}`);
+  set('bk-cv2-device', `${branchLabel} / ${devName}`);
   loadCloudV2PollIntervalUI();
   renderDriveMigrationStatusUI();
   renderLegacyBranchMigrationStatusUI();
