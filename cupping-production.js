@@ -34,16 +34,22 @@
     const otRecords = global.otRecords || [];
     const attendance = global.DB?.get('attendance', []) || [];
     const monthCases = cases.filter(c => {
-      const dt = new Date(c.date);
-      return c.doctorId === d.id && dt.getMonth() + 1 === month && dt.getFullYear() === year;
+      const matchMonth = typeof global.recordMatchesMonth === 'function'
+        ? global.recordMatchesMonth(c, month, year)
+        : (() => { const m = String(c.date || '').match(/^(\d{4})-(\d{2})-/); return m && +m[2] === month && +m[1] === year; })();
+      return c.doctorId === d.id && matchMonth;
     }).filter(c => typeof global.isBillableCase !== 'function' || global.isBillableCase(c));
     const monthOT = otRecords.filter(r => {
-      const dt = new Date(r.date);
-      return r.doctorId === d.id && dt.getMonth() + 1 === month && dt.getFullYear() === year;
+      const matchMonth = typeof global.recordMatchesMonth === 'function'
+        ? global.recordMatchesMonth(r, month, year)
+        : (() => { const m = String(r.date || '').match(/^(\d{4})-(\d{2})-/); return m && +m[2] === month && +m[1] === year; })();
+      return r.doctorId === d.id && matchMonth;
     });
     const docAtt = attendance.filter(a => {
-      const dt = new Date(a.date);
-      return a.doctorId === d.id && dt.getMonth() + 1 === month && dt.getFullYear() === year;
+      const matchMonth = typeof global.recordMatchesMonth === 'function'
+        ? global.recordMatchesMonth(a, month, year)
+        : (() => { const m = String(a.date || '').match(/^(\d{4})-(\d{2})-/); return m && +m[2] === month && +m[1] === year; })();
+      return a.doctorId === d.id && matchMonth;
     });
     const commission = monthCases.reduce((a, c) => a + (c.commission || 0), 0);
     const attOtH = docAtt.reduce((a, r) => a + (r.otHours || 0), 0);
