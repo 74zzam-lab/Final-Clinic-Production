@@ -305,13 +305,15 @@ assert(!syncedTables.includes('activityLog'), 'activityLog is local-only not clo
   assert(driveStore[autoRes.remotePath], 'auto backup on mock drive');
   assert(context.settings.cloudV2.lastAutoBackupDate, 'auto backup date tracked');
 
-  context.currentUser = { id: '1', role: 'admin', fullName: 'Admin' };
+  context.currentUser = { id: '1', role: 'owner', fullName: 'Owner' };
   loadScript('cloud/owner-hub.js');
-  assert(context.OwnerHub.canAccess(), 'owner hub admin access when v2 enabled');
+  assert(context.OwnerHub.canAccess(), 'owner hub owner access when v2 enabled');
+  context.currentUser = { id: '1', role: 'admin', fullName: 'Admin' };
+  assert(!context.OwnerHub.canAccess(), 'owner hub blocked for admin');
   context.currentUser = { id: '2', role: 'reception', fullName: 'Rec' };
-  assert(!context.OwnerHub.canAccess(), 'owner hub blocked for non-admin');
+  assert(!context.OwnerHub.canAccess(), 'owner hub blocked for non-owner');
   context.currentUser = { id: '3', role: 'accountant', fullName: 'Acc', branchScope: ['*'] };
-  assert(context.OwnerHub.canAccess(), 'owner hub accountant multi-branch access');
+  assert(!context.OwnerHub.canAccess(), 'owner hub blocked for accountant');
 
   const bootBranch = 'BR-MAIN';
   CloudMeta.saveMeta({ ...CloudMeta.loadMeta(), bootstrapCompletedAt: null, bootstrapBranchId: null });

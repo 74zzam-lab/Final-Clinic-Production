@@ -99,6 +99,36 @@ assert(mainSrc.includes('assertSyncOpAllowed'), 'main wires syncOp RBAC');
 
 const indexSrc = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 assert(indexSrc.includes('operational-rbac-guard.js'), 'index loads operational RBAC guard');
+assert(indexSrc.includes('await completeAuthenticatedLogin'), 'login awaits RBAC before init');
+assert(indexSrc.includes('value="hq_admin"'), 'hq_admin login role option');
+
+vm.runInContext(fs.readFileSync(path.join(root, 'cloud/owner-hub.js'), 'utf8'), context);
+context.currentUser = { id: '1', role: 'owner', active: true };
+assert(context.OwnerHub.canAccess(), 'owner hub for organization owner');
+context.currentUser = { id: '2', role: 'admin', active: true };
+assert(!context.OwnerHub.canAccess(), 'owner hub blocked for branch admin');
+
+const extCtx = {
+  ...context,
+  DB: context.DB,
+  settings: {},
+  RolePolicy: context.RolePolicy,
+  currentUser: { role: 'admin' },
+};
+extCtx.window = extCtx;
+extCtx.globalThis = extCtx;
+vm.createContext(extCtx);
+vm.runInContext(fs.readFileSync(path.join(root, 'cloud/role-policy.js'), 'utf8'), extCtx);
+vm.runInContext(fs.readFileSync(path.join(root, 'cupping-ext-modules.js'), 'utf8'), extCtx);
+const adminPerms = extCtx.getUserPermissions({ role: 'admin' });
+const ownerPerms = extCtx.getUserPermissions({ role: 'owner' });
+const recPerms = extCtx.getUserPermissions({ role: 'reception' });
+assert(!adminPerms._all, 'admin uses explicit preset not _all');
+assert(ownerPerms._all, 'owner keeps _all permissions');
+assert(!recPerms.cash?.view, 'reception preset excludes cash');
+
+const truth = require('../database/operational-error-truth');
+assert(truth.CATALOG.rbac_session_required, 'rbac_session_required catalog entry');
 
 if (errors.length) {
   console.error('FAIL verify-operational-rbac:');

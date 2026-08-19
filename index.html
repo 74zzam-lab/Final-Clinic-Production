@@ -4037,6 +4037,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <label>نوع الحساب</label>
         <select id="login-role" onchange="filterLoginUsers()">
           <option value="owner">المالك (Owner)</option>
+          <option value="hq_admin">إدارة المركز (HQ Admin)</option>
           <option value="admin">مدير النظام</option>
           <option value="reception">موظف الاستقبال</option>
           <option value="accountant">محاسب</option>
@@ -8549,6 +8550,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <label class="form-label">نوع الصلاحية</label>
         <select class="form-control" id="um-role" onchange="toggleCustomPermissionsRow()">
           <option value="owner">المالك (Owner) — أعلى صلاحية</option>
+          <option value="hq_admin">إدارة المركز (HQ Admin)</option>
           <option value="admin">مدير النظام (تشغيلي)</option>
           <option value="reception">موظف استقبال</option>
           <option value="accountant">محاسب (قراءة فقط)</option>
@@ -9709,7 +9711,7 @@ async function doLogin() {
     || (DEV_ACCOUNT.legacyPassword && await verifyPW(pw, DEV_ACCOUNT.legacyPassword, DEV_ACCOUNT.legacyUsername))
   )) {
     currentUser = DEV_ACCOUNT;
-    finishLogin();
+    await finishLogin();
     return;
   }
 
@@ -9737,7 +9739,7 @@ async function doLogin() {
       || !!(typeof RolePolicy !== 'undefined' && RolePolicy.isManager?.(u));
     if (allowWithoutValidLicense) {
       currentUser = u;
-      finishLogin();
+      await finishLogin();
       return;
     }
     errEl.style.display='block';
@@ -9746,13 +9748,13 @@ async function doLogin() {
   }
 
   currentUser = u;
-  finishLogin();
+  await finishLogin();
   } finally {
     _authPending = false;
   }
 }
 
-function finishLogin() {
+async function finishLogin() {
   // Single source of truth: SetupStateService (fallback BootFlow).
   const needsBoot = (typeof SetupStateDom !== 'undefined' && SetupStateDom.needsBootFlow)
     ? SetupStateDom.needsBootFlow()
@@ -9783,11 +9785,11 @@ function finishLogin() {
     return;
   }
 
-  completeAuthenticatedLogin();
+  await completeAuthenticatedLogin();
   try { SetupStateDom?.applyDomVisibility?.(); } catch { /* empty */ }
 }
 
-function completeAuthenticatedLogin() {
+async function completeAuthenticatedLogin() {
   if (typeof BranchScope !== 'undefined') BranchScope.initSessionBranch?.();
   try { if (typeof RbacGuard !== 'undefined') RbacGuard.applyAuthoritativeCurrentUser?.(); } catch { /* empty */ }
   const errEl = document.getElementById('login-error');
@@ -9803,10 +9805,14 @@ function completeAuthenticatedLogin() {
       : (currentUser.sessionEpoch || 0),
     passwordChangedAt: currentUser.passwordChangedAt || null
   });
-  // Bind Electron main RBAC session (authoritative IPC gate) — await so backup/sync IPC works.
-  void ensureRbacSessionBound().then((bound) => {
-    if (!bound) console.warn('RBAC session bind incomplete after login');
-  });
+  // Bind Electron main RBAC session before init/DB writes — prevents rbac_session_required toasts.
+  const bound = await ensureRbacSessionBound();
+  if (!bound) {
+    console.warn('RBAC session bind incomplete after login');
+    if (typeof OperationalErrorTruth?.notifyTruthful === 'function') {
+      OperationalErrorTruth.notifyTruthful('rbac_session_required', { toast: true });
+    }
+  }
   if (typeof logAudit === 'function') logAudit('USER_LOGIN', `تسجيل دخول: ${currentUser.fullName}`);
   document.getElementById('loginScreen')?.classList.add('hidden');
   applyRoleUI();
@@ -10979,7 +10985,7 @@ function showPageAfterRestoreGate(id) {
     return;
   }
   if (id === 'owner-hub' && typeof OwnerHub?.canAccess === 'function' && !OwnerHub.canAccess()) {
-    notify('⛔ ليس لديك صلاحية للوصول إلى Owner Hub', 'danger');
+    notify('⛔ Owner Hub متاح لحساب المالك (Owner / HQ Admin) فقط', 'danger');
     return;
   }
   // Close sidebar on mobile
@@ -19558,7 +19564,7 @@ async function saveChangePassword() {
     _pendingForcedPwChange = false;
     _authPending = false;
     notify('✅ تم تغيير كلمة المرور — جارٍ فتح البرنامج');
-    completeAuthenticatedLogin();
+    await completeAuthenticatedLogin();
     return;
   }
   // Voluntary change — invalidate prior sessions.
@@ -27282,10 +27288,7 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
   if (session) {
     if (session.userId === '__dev__') {
       currentUser = DEV_ACCOUNT;
-      setAppAuthed(true);
-      syncAppGlobals();
-      document.getElementById('loginScreen').classList.add('hidden');
-      init();
+      await completeAuthenticatedLogin();
       return;
     }
     const u = users.find(x => x.id === session.userId && x.active);
@@ -27325,10 +27328,7 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
         openForcedPasswordChange();
         return;
       }
-      setAppAuthed(true);
-      syncAppGlobals();
-      document.getElementById('loginScreen').classList.add('hidden');
-      init();
+      await completeAuthenticatedLogin();
       return;
     }
   }

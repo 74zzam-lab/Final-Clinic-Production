@@ -124,7 +124,11 @@ context.ConflictQueue.enqueue({
 });
 
 const OwnerHub = context.OwnerHub;
-check(OwnerHub.canAccess(), 'admin should access owner hub');
+context.currentUser = { id: '3', role: 'owner', username: 'owner', active: true, branchScope: ['*'] };
+check(OwnerHub.canAccess(), 'owner should access owner hub');
+context.currentUser = { id: '1', role: 'admin', username: 'admin', active: true, branchScope: ['*'] };
+check(!OwnerHub.canAccess(), 'admin should not access owner hub');
+context.currentUser = { id: '3', role: 'owner', username: 'owner', active: true, branchScope: ['*'] };
 const model = OwnerHub.buildModel();
 check(model.analytics?.health === 'healthy', 'analytics health should be healthy');
 check(model.analytics?.onlineDevices === 1, 'online device count mismatch');

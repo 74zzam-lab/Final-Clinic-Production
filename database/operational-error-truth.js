@@ -102,6 +102,42 @@ const CATALOG = Object.freeze({
     userMessageAr: 'ليس لديك صلاحية لإكمال هذه العملية.',
     userMessageEn: 'Permission denied.',
   },
+  rbac_session_required: {
+    category: 'rbac',
+    severity: 'warning',
+    userMessageAr: 'جلسة الصلاحيات غير مربوطة — أعد تسجيل الدخول ثم حاول مجدداً.',
+    userMessageEn: 'RBAC session not bound — sign in again and retry.',
+  },
+  rbac_role_denied: {
+    category: 'rbac',
+    severity: 'denied',
+    userMessageAr: 'دور الحساب لا يسمح بهذه العملية.',
+    userMessageEn: 'Account role cannot perform this operation.',
+  },
+  rbac_permission_denied: {
+    category: 'rbac',
+    severity: 'denied',
+    userMessageAr: 'صلاحية الحساب لا تسمح بهذه العملية.',
+    userMessageEn: 'Account permission denied for this operation.',
+  },
+  kv_persist_failed: {
+    category: 'sqlite',
+    severity: 'error',
+    userMessageAr: 'فشل حفظ الإعدادات — أُعيدت آخر حالة معتمدة.',
+    userMessageEn: 'Settings save failed — last committed state restored.',
+  },
+  sync_not_ready: {
+    category: 'sync',
+    severity: 'warning',
+    userMessageAr: 'محرك المزامنة غير جاهز — راجع المتطلبات في الإعدادات.',
+    userMessageEn: 'Sync engine not ready — check prerequisites in Settings.',
+  },
+  database_api_unavailable: {
+    category: 'sqlite',
+    severity: 'error',
+    userMessageAr: 'خدمة قاعدة البيانات غير متاحة في هذه الجلسة.',
+    userMessageEn: 'Database service unavailable in this session.',
+  },
   branch_access_denied: {
     category: 'rbac',
     severity: 'denied',

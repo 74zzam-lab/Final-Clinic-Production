@@ -53,15 +53,8 @@
   function canAccess() {
     const u = global.currentUser;
     if (!u) return false;
-    if (global.RolePolicy?.isManager?.(u)) return true;
     if (u.isDev) return true;
-    const cv2 = global.CloudMeta?.isCloudV2Enabled?.() || global.settings?.cloudV2Enabled;
-    if (!cv2) return false;
-    if (u.role === 'accountant') {
-      const scope = global.BranchScope?.getUserBranchScope?.(u) || [];
-      return scope.includes('*') || scope.length > 1;
-    }
-    return false;
+    return !!global.RolePolicy?.isOrganizationOwner?.(u);
   }
 
   function isCloudV2Ready() {
@@ -624,7 +617,7 @@
 
     try {
       if (!canAccess()) {
-        host.innerHTML = '<div class="card" style="padding:20px"><p style="margin:0;color:var(--text-muted)">Owner Hub متاح للمدير أو المحاسب (بصلاحية كل الفروع).</p></div>';
+        host.innerHTML = '<div class="card" style="padding:20px"><p style="margin:0;color:var(--text-muted)">Owner Hub متاح لحساب المالك (Owner / HQ Admin) فقط.</p></div>';
         return;
       }
       if (!isCloudV2Ready()) {
@@ -946,9 +939,7 @@
     const nav = document.getElementById('nav-owner-hub');
     if (!nav) return;
     const u = global.currentUser;
-    const show = !!u && (global.RolePolicy?.isManager?.(u) || u.isDev ||
-      (u.role === 'accountant' && ((global.BranchScope?.getUserBranchScope?.(u) || []).includes('*') ||
-        (global.BranchScope?.getUserBranchScope?.(u) || []).length > 1)));
+    const show = !!u && (u.isDev || !!global.RolePolicy?.isOrganizationOwner?.(u));
     nav.style.display = show ? '' : 'none';
     if (show) nav.classList.remove('admin-only');
   }

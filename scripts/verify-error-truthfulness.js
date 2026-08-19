@@ -24,6 +24,9 @@ assert(push.userMessageAr.includes('اسحب'), 'actionable AR message');
 const rbac = truth.present({ error: 'manager_only' });
 assert(rbac.category === 'rbac', 'rbac category');
 
+const rbacSess = truth.present('rbac_session_required');
+assert(rbacSess.userMessageAr.includes('جلسة'), 'rbac_session_required actionable AR');
+
 const enriched = truth.enrichResult({ ok: false, error: 'commit_failed' });
 assert(enriched.userMessageAr && enriched.code === 'commit_failed', 'enrichResult');
 

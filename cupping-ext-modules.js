@@ -43,6 +43,23 @@ const PERMISSION_DEFS = {
 const ALLOWED_PERMISSION_KEYS = Object.keys(PERMISSION_DEFS);
 
 const ROLE_PRESETS = {
+  admin: {
+    'cases.view': true, 'cases.edit': true,
+    'clients.view': true, 'clients.edit': true,
+    'bookings.view': true, 'bookings.edit': true,
+    'messages.view': true, 'messages.edit': true,
+    'reports.view': true, 'reports.print': true,
+    'expenses.view': true, 'expenses.edit': true,
+    'payroll.view': true, 'payroll.edit': true,
+    'ledger.view': true, 'ledger.edit': true, 'ledger.pay': true,
+    'ledger.partial_pay': true, 'ledger.adjust': true, 'ledger.close': true,
+    'ledger.reopen': true, 'ledger.print': true, 'ledger.export': true, 'ledger.view_all': true,
+    'attendance.view': true, 'attendance.edit': true,
+    'inventory.view': true, 'inventory.edit': true,
+    'cash.view': true, 'cash.edit': true,
+    'settings.view': true, 'settings.edit': true,
+    'users.manage': true, 'logs.view': true, 'core.edit': true
+  },
   reception: {
     'cases.view': true, 'cases.edit': true,
     'clients.view': true, 'clients.edit': true,
@@ -51,12 +68,12 @@ const ROLE_PRESETS = {
     'reports.view': true, 'reports.print': true,
     'expenses.view': true, 'expenses.edit': true,
     'attendance.view': true, 'attendance.edit': true,
-    'cash.view': true, 'cash.edit': true,
     'payroll.view': false, 'payroll.edit': false,
     'ledger.view': false, 'ledger.edit': false, 'ledger.pay': false,
     'ledger.partial_pay': false, 'ledger.adjust': false, 'ledger.close': false,
     'ledger.reopen': false, 'ledger.print': false, 'ledger.export': false, 'ledger.view_all': false,
     'inventory.view': false, 'inventory.edit': false,
+    'cash.view': false, 'cash.edit': false,
     'settings.view': false, 'settings.edit': false,
     'users.manage': false, 'logs.view': false, 'core.edit': false
   },
@@ -196,8 +213,9 @@ function ensureExtSettings() {
 
 function getUserPermissions(user) {
   if (!user) return {};
-  if (typeof RolePolicy !== 'undefined' && RolePolicy.isManager(user)) return { _all: true };
   if (user.isDev) return { _all: true };
+  if (typeof RolePolicy !== 'undefined' && RolePolicy.isOrganizationOwner(user)) return { _all: true };
+  if (user.role === 'admin') return sanitizePermissionMap(ROLE_PRESETS.admin);
   if (user.role === 'custom' && user.permissions) return sanitizePermissionMap(user.permissions);
   return sanitizePermissionMap(ROLE_PRESETS[user.role] || ROLE_PRESETS.reception);
 }
