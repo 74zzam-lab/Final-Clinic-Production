@@ -18,6 +18,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-11-migration-safety-7c71` | 11 — Migration safety | DONE (code) | Required after merge |
 | `cursor/phase-12-operational-db-health-7c71` | 12 — DB health gates | DONE (code) | Required after merge |
 | `cursor/phase-13-operational-readiness-7c71` | 13 — Operational readiness | DONE (code) | Required after merge |
+| `cursor/phase-14-build-reliability-gates-7c71` | 14 — Build reliability gates | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -146,6 +147,19 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Legacy migration pending → sync blocked with Arabic message
 3. Owner Hub diagnostics shows `operational` blockers when unhealthy
 
-## Deferred phase (14)
+## Phase 14 — Build reliability gates
 
-See planning doc in agent conversation — not started on this branch.
+**Goal:** Packaging gates + master verifier for phases 1–14.
+
+**Operator UAT (you):**
+1. `npm run build:win` on Windows → installer without missing-module errors
+2. Packaged app loads operational cloud scripts (DevTools Network)
+3. Save + sync smoke on installed build
+
+## Stable Operational Core — verification
+
+```bash
+npm run verify:stable-operational-core
+```
+
+All phases 0–14 code complete; operator UAT on Windows after each merge chain.
