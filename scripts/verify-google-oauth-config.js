@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Verify Google OAuth config structure (no live OAuth).
+ * Verify Google OAuth config structure (no live OAuth secrets in git).
  */
 const fs = require('fs');
 const path = require('path');
@@ -30,16 +30,18 @@ try {
   if (!def.google?.projectId) errors.push('defaults missing projectId');
 } catch (e) { errors.push('defaults: ' + e.message); }
 
-const embeddedPath = path.join(root, 'electron', 'cloud-oauth.embedded.json');
+const templatePath = path.join(root, 'electron', 'cloud-oauth.embedded.template.json');
 try {
-  const emb = JSON.parse(fs.readFileSync(embeddedPath, 'utf8'));
-  const g = emb.google || {};
-  if (!g.clientId || !g.clientId.includes('googleusercontent.com')) errors.push('embedded missing clientId');
-  if (!g.clientSecret || String(g.clientSecret).includes('YOUR_') || String(g.clientSecret).includes('PASTE_YOUR')) {
-    errors.push('embedded missing real clientSecret');
-  }
+  const tpl = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
+  const g = tpl.google || {};
+  if (!g.clientId || !g.clientId.includes('googleusercontent.com')) errors.push('template missing clientId');
+  if (!String(g.clientSecret).includes('BOOTSTRAP_AT_BUILD')) errors.push('template must not contain real secret');
 } catch (e) {
-  errors.push('embedded oauth file required: ' + e.message);
+  errors.push('embedded template required: ' + e.message);
+}
+
+if (!fs.existsSync(path.join(root, 'scripts', 'bootstrap-oauth-for-build.mjs'))) {
+  errors.push('bootstrap-oauth-for-build.mjs missing');
 }
 
 for (const f of ['clinic-snapshot.js', 'backup-crypto.js']) {

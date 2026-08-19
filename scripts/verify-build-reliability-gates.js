@@ -95,7 +95,13 @@ assert(bridge.includes('MigrationSafety'), 'SqliteBridge must integrate Migratio
 const main = read('electron/main.js');
 assert(main.includes('database:status') || main.includes("'database:status'"), 'main must expose database status IPC');
 
-assert(fileExists('scripts/validate-production-deps.mjs'), 'validate-production-deps.mjs missing');
+assert(fileExists('scripts/verify-oauth-build-packaging.js'), 'verify-oauth-build-packaging.js missing');
+
+const oauthPkg = spawnSync(process.execPath, ['scripts/verify-oauth-build-packaging.js'], {
+  cwd: root,
+  encoding: 'utf8',
+});
+assert(oauthPkg.status === 0, 'verify-oauth-build-packaging failed');
 assert(fileExists('scripts/run-win-build.cjs'), 'run-win-build.cjs missing');
 assert((pkg.scripts.build || '').includes('validate-production-deps.mjs'), 'build script must validate production deps');
 

@@ -19,6 +19,7 @@ Independent verification plan (not relying on legacy test PASS claims).
 | `cursor/phase-12-operational-db-health-7c71` | 12 — DB health gates | DONE (code) | Required after merge |
 | `cursor/phase-13-operational-readiness-7c71` | 13 — Operational readiness | DONE (code) | Required after merge |
 | `cursor/phase-14-build-reliability-gates-7c71` | 14 — Build reliability gates | DONE (code) | Required after merge |
+| `cursor/phase-15-oauth-drive-build-7c71` | 15 — OAuth/Drive build restore | DONE (code) | Required after merge |
 
 ## Branch naming
 
@@ -156,10 +157,19 @@ Each branch includes `docs/branches/PHASE-<N>-*.md` and descriptive commits.
 2. Packaged app loads operational cloud scripts (DevTools Network)
 3. Save + sync smoke on installed build
 
+## Phase 15 — OAuth / Drive / Sheets build
+
+**Goal:** Restore embedded Google OAuth + auto prebuild config like original v2-5-10.
+
+**Operator UAT (you):**
+1. `npm run build:prod` succeeds (strict OAuth)
+2. Installed app OAuth test + Drive connect work
+3. License vault reaches Apps Script URL
+
 ## Stable Operational Core — verification
 
 ```bash
 npm run verify:stable-operational-core
 ```
 
-All phases 0–14 code complete; operator UAT on Windows after each merge chain.
+Phases 0–15 code complete; operator UAT on Windows after merge chain.

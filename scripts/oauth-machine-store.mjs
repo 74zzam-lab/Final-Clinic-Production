@@ -31,10 +31,15 @@ export function readJson(path) {
 
 export function hasGoogleCreds(cfg) {
   const g = cfg?.google || cfg;
-  return !!(g?.clientId && g?.clientSecret &&
-    !String(g.clientId).includes('YOUR_') &&
-    !String(g.clientSecret).includes('YOUR_') &&
-    !String(g.clientSecret).includes('PASTE_YOUR'));
+  const secret = String(g?.clientSecret || '');
+  const clientId = String(g?.clientId || '');
+  return !!(clientId && secret &&
+    !clientId.includes('YOUR_') &&
+    !clientId.includes('REPLACE_ME') &&
+    !secret.includes('YOUR_') &&
+    !secret.includes('PASTE_YOUR') &&
+    !secret.includes('REPLACE_ME') &&
+    !secret.includes('BOOTSTRAP_AT_BUILD'));
 }
 
 export function ensureMachineDir(filePath) {

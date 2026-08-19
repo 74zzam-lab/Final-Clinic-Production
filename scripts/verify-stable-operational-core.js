@@ -25,9 +25,10 @@ const STEPS = [
   { phase: 12, script: 'scripts/verify-operational-db-health.js' },
   { phase: 13, script: 'scripts/verify-operational-readiness.js' },
   { phase: 14, script: 'scripts/verify-build-reliability-gates.js' },
+  { phase: 15, script: 'scripts/verify-oauth-build-packaging.js' },
 ];
 
-console.log('══ Stable Operational Core verification (phases 1–14) ══\n');
+console.log('══ Stable Operational Core verification (phases 1–15) ══\n');
 
 for (const step of STEPS) {
   const abs = path.join(root, step.script);

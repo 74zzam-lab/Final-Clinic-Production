@@ -34,8 +34,7 @@ npm ci
 npm run build:prod
 ```
 
-OAuth is embedded in `electron/cloud-oauth.embedded.json` and is applied automatically during build.
-No manual secret editing is required.
+OAuth credentials are **not** stored in GitHub (push protection). Before build, `scripts/bootstrap-oauth-for-build.mjs` resolves them from your original ZIP, `vendor/cloud-oauth.embedded.json`, or local machine store — then `prebuild` generates `electron/cloud-oauth.config.json` automatically.
 
 ## Why phase4 failed on your PC
 
