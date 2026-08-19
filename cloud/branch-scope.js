@@ -137,16 +137,12 @@
     return false;
   }
 
-  /**
-   * UI view filter:
-   * - Device locked → locked branch only
-   * - Active / write branch selected → that branch only (incl. owner after switcher)
-   * - Owner aggregate (* / Owner Mode) → all records (read-only enforced in UI)
-   * - Normal staff → active branch
-   */
   function filterForActiveView(records) {
     if (!Array.isArray(records)) return [];
-    if (global.DeviceConfig?.isBranchLocked?.()) {
+    const user = global.currentUser;
+    const ownerCanSwitch = !!(user && canUserSwitchBranch(user));
+    // Device lock applies to staff only — owners who switch branches use session write branch.
+    if (global.DeviceConfig?.isBranchLocked?.() && !ownerCanSwitch) {
       return filterByBranch(records, global.DeviceConfig.getLockedBranchId() || DEFAULT_BRANCH_ID);
     }
     const viewBranch = getViewBranchFilter();

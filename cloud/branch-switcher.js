@@ -74,6 +74,10 @@
         await global.SqliteBridge.rehydrateBranchView();
       } catch { /* non-fatal — fall back to DB.get */ }
     }
+    if (typeof global.refreshAllBranchScopedViews === 'function') {
+      global.refreshAllBranchScopedViews({ fromBranchSwitch: true });
+      return;
+    }
     if (typeof global.reloadClientStoreFromDb === 'function') global.reloadClientStoreFromDb();
     if (typeof global.refreshCaseDerivedViews === 'function') global.refreshCaseDerivedViews();
     if (typeof global.refreshDashboard === 'function') global.refreshDashboard();
@@ -83,17 +87,16 @@
     if (typeof global.refreshInvoicesPage === 'function') global.refreshInvoicesPage(false);
     if (typeof global.refreshDashboardAlerts === 'function') global.refreshDashboardAlerts();
     if (typeof global.refreshDoctorsTable === 'function') global.refreshDoctorsTable();
-    if (typeof global.refreshUsersTable === 'function') global.refreshUsersTable();
-    if (typeof global.renderReportsPage === 'function') global.renderReportsPage();
     if (typeof global.renderOwnerHubPage === 'function') global.renderOwnerHubPage();
     if (typeof global.showPage === 'function') {
       try {
-        const active = document.querySelector('.page.active')?.id;
-        if (active) global.showPage(active.replace('Page', ''));
+        const active = document.querySelector('.page.active')?.id?.replace('page-', '');
+        if (active) global.showPage(active);
       } catch { /* empty */ }
     }
     if (typeof global.BranchSwitcher?.populate === 'function') global.BranchSwitcher.populate();
     if (typeof global.BranchSwitcher?.updateBranchLabel === 'function') global.BranchSwitcher.updateBranchLabel();
+    if (typeof global.applyBranchViewModeUi === 'function') global.applyBranchViewModeUi();
   }
 
   function applyBranchSwitch(bid) {

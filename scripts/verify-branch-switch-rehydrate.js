@@ -10,6 +10,7 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const bridge = fs.readFileSync(path.join(root, 'cupping-sqlite-bridge.js'), 'utf8');
 const switcher = fs.readFileSync(path.join(root, 'cloud/branch-switcher.js'), 'utf8');
+const scopeSrc = fs.readFileSync(path.join(root, 'cloud/branch-scope.js'), 'utf8');
 
 const checks = [
   { name: 'rehydrateBranchView exported', ok: /async function rehydrateBranchView/.test(bridge) && /rehydrateBranchView,/.test(bridge) },
@@ -18,6 +19,8 @@ const checks = [
   { name: 'filterRecordsForWriteBranch on commit', ok: /filterRecordsForWriteBranch/.test(bridge) },
   { name: 'hydrate applies view filter', ok: /filterForActiveViewIfNeeded\(k, v\)/.test(bridge) },
   { name: 'branch-switcher awaits rehydrate', ok: /rehydrateBranchView/.test(switcher) && /refreshSurfacesAsync/.test(switcher) },
+  { name: 'refreshAllBranchScopedViews hook', ok: /refreshAllBranchScopedViews/.test(switcher) },
+  { name: 'owner view overrides device lock', ok: /ownerCanSwitch/.test(scopeSrc) },
 ];
 
 let failed = 0;

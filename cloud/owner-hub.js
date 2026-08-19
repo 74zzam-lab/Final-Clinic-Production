@@ -988,6 +988,18 @@
     promptDisableDevice,
     promptDeleteDevice,
     enterBranchMode(branchId) {
+      branchId = String(branchId || '').trim();
+      if (!branchId) return { ok: false, error: 'branch_required' };
+      if (!global.RolePolicy?.isOrganizationOwner?.(global.currentUser)) {
+        return { ok: false, error: 'owner_required' };
+      }
+      if (global.BranchSwitcher?.applyBranchSwitch) {
+        global.BranchSwitcher.applyBranchSwitch(branchId);
+        const sel = document.getElementById('topbar-branch-switcher');
+        if (sel && [...sel.options].some((o) => o.value === branchId)) sel.value = branchId;
+        refresh();
+        return { ok: true, mode: 'branch', branchId };
+      }
       const res = global.OwnerBranchMode?.enterBranchMode?.(branchId);
       if (!res?.ok) {
         global.notify?.('⚠️ تعذّر تفعيل Branch Mode: ' + (res?.error || 'unknown'), 'warning');
@@ -995,18 +1007,26 @@
       }
       global.notify?.('✅ تم تفعيل Branch Mode — تُعرض بيانات هذا الفرع فقط', 'success');
       try {
-        if (typeof global.refreshClientsView === 'function') global.refreshClientsView(true);
-        if (typeof global.syncAppGlobals === 'function') global.syncAppGlobals();
+        if (typeof global.refreshAllBranchScopedViews === 'function') global.refreshAllBranchScopedViews();
+        else if (typeof global.refreshClientsView === 'function') global.refreshClientsView(true);
       } catch { /* empty */ }
       refresh();
       return res;
     },
     exitToOwnerMode() {
+      if (global.BranchSwitcher?.applyBranchSwitch && global.BranchSwitcher.ALL_BRANCHES_VALUE) {
+        global.BranchSwitcher.applyBranchSwitch(global.BranchSwitcher.ALL_BRANCHES_VALUE);
+        const sel = document.getElementById('topbar-branch-switcher');
+        if (sel) sel.value = global.BranchSwitcher.ALL_BRANCHES_VALUE;
+        refresh();
+        return { ok: true, mode: 'owner' };
+      }
       const res = global.OwnerBranchMode?.exitToOwnerMode?.();
       if (!res?.ok) return res;
       global.notify?.('✅ العودة إلى Owner Mode (نظرة عامة لكل الفروع)', 'success');
       try {
-        if (typeof global.refreshClientsView === 'function') global.refreshClientsView(true);
+        if (typeof global.refreshAllBranchScopedViews === 'function') global.refreshAllBranchScopedViews();
+        else if (typeof global.refreshClientsView === 'function') global.refreshClientsView(true);
       } catch { /* empty */ }
       refresh();
       return res;

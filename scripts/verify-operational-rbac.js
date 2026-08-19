@@ -101,6 +101,7 @@ const indexSrc = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 assert(indexSrc.includes('operational-rbac-guard.js'), 'index loads operational RBAC guard');
 assert(indexSrc.includes('await completeAuthenticatedLogin'), 'login awaits RBAC before init');
 assert(indexSrc.includes('value="hq_admin"'), 'hq_admin login role option');
+assert(indexSrc.includes('refreshAllBranchScopedViews'), 'central branch refresh hook');
 
 vm.runInContext(fs.readFileSync(path.join(root, 'cloud/owner-hub.js'), 'utf8'), context);
 context.currentUser = { id: '1', role: 'owner', active: true };
@@ -156,6 +157,17 @@ assert(!branchCtx.BranchScope.canUserSwitchBranch(adminUser), 'admin cannot swit
 assert(branchCtx.BranchScope.canUserSwitchBranch(ownerUser), 'owner can switch branches');
 assert(branchCtx.BranchScope.getUserBranchScope(adminUser).join(',') === 'BR-RYD', 'admin scoped to device branch');
 assert(branchCtx.BranchScope.getUserBranchScope(ownerUser).includes('*'), 'owner keeps wildcard scope');
+
+branchCtx.currentUser = { id: '1', role: 'owner', branchScope: ['*'] };
+branchCtx.BranchScope.setActiveBranchId('BR-RYD');
+branchCtx.BranchContexts = { getOperationalWriteBranch: () => 'BR-RYD' };
+const mixedRecords = [{ id: '1', branchId: 'BR-RYD' }, { id: '2', branchId: 'BR-MAIN' }];
+const ownerView = branchCtx.BranchScope.filterForActiveView(mixedRecords);
+assert(ownerView.length === 1 && ownerView[0].branchId === 'BR-RYD', 'owner branch switch overrides device lock in view filter');
+
+branchCtx.currentUser = { id: '3', role: 'reception' };
+const staffView = branchCtx.BranchScope.filterForActiveView(mixedRecords);
+assert(staffView.length === 1 && staffView[0].branchId === 'BR-RYD', 'staff still scoped to device lock');
 
 const switcherSrc = fs.readFileSync(path.join(root, 'cloud/branch-switcher.js'), 'utf8');
 assert(switcherSrc.includes('topbar-branch-label'), 'read-only branch label for device-bound users');
