@@ -206,6 +206,9 @@
         lastError: model.sync?.lastError || null,
         pollIntervalMs: model.sync?.pollIntervalMs || null
       },
+      operational: global.OperationalReadiness?.getCached?.()
+        || global.SqliteBridge?.getState?.()?.operationalReadiness
+        || null,
       backup: {
         enabled: model.backup?.enabled !== false,
         lastAutoBackupAt: model.backup?.lastAutoBackupAt || null,

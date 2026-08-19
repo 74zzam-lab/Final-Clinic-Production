@@ -213,7 +213,25 @@
         }
   }
 
+  function checkOperationalWriteGate() {
+    try {
+      const gate = global.OperationalReadiness?.canWrite?.();
+      if (gate && gate.ok === false) return gate;
+    } catch { /* empty */ }
+    return { ok: true };
+  }
+
   async function pushTable(table, branchId) {
+    const opGate = checkOperationalWriteGate();
+    if (!opGate.ok) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: opGate.error || 'operational_not_ready',
+        messageAr: opGate.messageAr,
+        readiness: opGate.readiness,
+      };
+    }
     if (global.LegacyBranchMigration?.isPushBlocked?.()) {
       return { ok: false, blocked: true, reason: 'legacy_branch_migration_required' };
     }
@@ -742,6 +760,18 @@
         error: 'sync_engine_not_ready',
         readiness,
         message: readiness.messageAr,
+      };
+    }
+    const opGate = global.OperationalReadiness?.canWrite?.();
+    if (opGate && !opGate.ok && !options.force) {
+      return {
+        ok: false,
+        blocked: true,
+        error: opGate.error || 'operational_not_ready',
+        readiness,
+        operational: opGate.readiness,
+        message: opGate.messageAr,
+        messageAr: opGate.messageAr,
       };
     }
     if (!isEnabled() && !options.force) {

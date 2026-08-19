@@ -445,6 +445,7 @@
     installWriteThrough();
     installReadThrough();
     try { await global.OperationalDbHealth?.refresh?.({ force: true }); } catch { /* empty */ }
+    try { await global.OperationalReadiness?.refresh?.({ force: true }); } catch { /* empty */ }
     return { ok: true, status: state.status, report: res, sqlitePrimary: state.sqlitePrimary };
   }
 
@@ -724,6 +725,18 @@
     return !!state.sqlitePrimary;
   }
 
+  async function getOperationalReadiness(options) {
+    if (typeof global.OperationalReadiness?.ensureFresh === 'function') {
+      return global.OperationalReadiness.ensureFresh(options);
+    }
+    const st = await status();
+    return st?.operationalReadiness || {
+      ok: !!(st?.operationalHealth?.ok),
+      unknown: !st?.operationalReadiness,
+      health: st?.operationalHealth,
+    };
+  }
+
   global.SqliteBridge = {
     migrateAndEnable,
     hydrateIntoMemory,
@@ -741,6 +754,7 @@
     readOperational,
     status,
     isPrimary,
+    getOperationalReadiness,
     collectSnapshotFromLocal,
     CORE_TABLES,
     KV_MIRROR,

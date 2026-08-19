@@ -180,6 +180,12 @@ const CATALOG = Object.freeze({
     userMessageAr: 'إصدار مخطط قاعدة البيانات غير متوقع.',
     userMessageEn: 'Unexpected database schema version.',
   },
+  operational_not_ready: {
+    category: 'sqlite',
+    severity: 'error',
+    userMessageAr: 'التشغيل غير جاهز — راجع صحة قاعدة البيانات وترحيل الفروع.',
+    userMessageEn: 'Operations not ready — check database health and branch migration.',
+  },
   cloud_v2_disabled: {
     category: 'config',
     severity: 'info',
