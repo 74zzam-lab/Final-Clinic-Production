@@ -4067,6 +4067,18 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
       <button class="login-btn" onclick="doLogin()">🔐 تسجيل الدخول</button>
       <div class="login-error" id="login-error">❌ اسم المستخدم أو كلمة المرور غير صحيحة</div>
       <div id="login-license-status" style="margin-top:8px;font-size:11px;color:rgba(255,255,255,0.4)">جارٍ التحقق من الترخيص...</div>
+      <script>
+      (function () {
+        function clearPendingLoginLicenseStatus(reason) {
+          var el = document.getElementById('login-license-status');
+          if (!el || !/جار[ٍي]?\s*التحقق/.test(String(el.textContent || ''))) return;
+          el.textContent = reason || '⛔ تعذّر إكمال التحقق بسرعة — الدخول للموظفين فقط (قراءة)';
+          el.style.color = '#ffa05a';
+        }
+        setTimeout(function () { clearPendingLoginLicenseStatus(); }, 5000);
+        setTimeout(function () { clearPendingLoginLicenseStatus(); }, 10000);
+      })();
+      </script>
       <div class="login-setup-hint" id="login-setup-hint" role="status"></div>
       <!-- V2-5.10: login CenterSetup panel removed — BootFlow CTA below is the only customer path -->
       <div id="login-drive-bootstrap-panel" class="login-extra-panel" style="display:none" aria-live="polite">
@@ -10815,7 +10827,7 @@ function syncAppGlobals() {
   window.users = users;
   window.doctors = doctors;
   window.attendance = attendance;
-  window.expenses = expenses;
+  window.expenses = typeof expenses !== 'undefined' ? expenses : [];
   window.packages = packages;
   window.services = services;
   window.otRecords = otRecords;
@@ -24047,6 +24059,7 @@ function toggleLuxRushMode() {
 // BOOKINGS
 // ═══════════════════════════════════════════════
 let bookings = DB.get('bookings', []);
+let expenses = DB.get('expenses', []);
 const BOOKING_STATUS_CANON = new Set(['pending', 'confirmed', 'completed', 'absent', 'deferred', 'cancelled']);
 function normalizeBookingStatus(status) {
   const raw = String(status || '').toLowerCase().trim();
@@ -24344,7 +24357,6 @@ function refreshBookingsTable() {
 // ═══════════════════════════════════════════════
 // EXPENSES
 // ═══════════════════════════════════════════════
-let expenses = DB.get('expenses', []);
 
 const EXP_PAY_LABELS = { cash: 'كاش', card: 'شبكة', deferred: 'بالأجل', scheduled: 'موعد دفع' };
 
@@ -26345,16 +26357,17 @@ function finalizeLicCheckUi(reason) {
   const statusEl = document.getElementById('login-license-status');
   if (!statusEl) return;
   if (!licStatusLooksPending(statusEl.textContent)) return;
+  let licStatus = 'none';
+  try { licStatus = _licStatus; } catch { /* TDZ before license flags init */ }
   // Even if a prior status flag exists, clear sticky pending text so login stays usable.
-  if (_licStatus === 'valid') {
+  if (licStatus === 'valid') {
     // Race: check finished as valid but text still pending — leave a safe valid placeholder
     statusEl.textContent = '✓ الترخيص صالح';
     statusEl.style.color = '#5dde8a';
     return;
   }
-  if (_licStatus !== 'expired' && _licStatus !== 'blocked') {
-    _licStatus = 'none';
-    _licBlocked = false;
+  if (licStatus !== 'expired' && licStatus !== 'blocked') {
+    try { _licStatus = 'none'; _licBlocked = false; } catch { /* TDZ */ }
   }
   statusEl.textContent = reason
     || '⛔ تعذّر إكمال التحقق بسرعة — الدخول للموظفين فقط (قراءة)';
@@ -27522,6 +27535,7 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
     ]);
   }
 
+  try {
   if (new URLSearchParams(location.search).get('uninstallLicenseWipe') === '1') {
     try {
       if (typeof clearAllLicenseStorage === 'function') clearAllLicenseStorage();
@@ -27668,6 +27682,11 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
       if (ticks >= 8 || currentUser || _appAuthed) clearInterval(watch);
     }, 500);
   } catch { /* empty */ }
+  } catch (startupErr) {
+    console.warn('startup failed:', startupErr);
+  } finally {
+    try { finalizeLicCheckUi(); } catch { /* empty */ }
+  }
 })();
 </script>
 <script defer src="node_modules/xlsx/dist/xlsx.full.min.js"></script>

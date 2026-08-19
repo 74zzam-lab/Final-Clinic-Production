@@ -28,6 +28,15 @@ check(!/_DB_AUTH_EXEMPT = new Set\(\)\s*;/.test(html), '_DB_AUTH_EXEMPT must not
 check(html.includes("'settings'"), 'settings must be pre-auth writable');
 check(html.includes('Silent deny for automatic/pre-auth writes'), 'dbSetGuarded must not toast-spam pre-auth');
 check(html.includes('window.closeLicenseScreen = closeLicenseScreen'), 'closeLicenseScreen must be on window for onclick');
+check(/let expenses = DB\.get\('expenses'/.test(html), 'expenses store must be declared');
+{
+  const bookingsIdx = html.indexOf('let bookings = DB.get(\'bookings\'');
+  const expensesDeclIdx = html.indexOf('let expenses = DB.get(\'expenses\'');
+  const topSyncIdx = html.indexOf('syncAppGlobals();', bookingsIdx);
+  check(bookingsIdx >= 0 && expensesDeclIdx >= 0 && topSyncIdx >= 0, 'bookings/expenses/syncAppGlobals anchors missing');
+  check(expensesDeclIdx < topSyncIdx, 'expenses must be declared before top-level syncAppGlobals()');
+}
+check(html.includes('clearPendingLoginLicenseStatus'), 'early login license safety net missing');
 
 // ── Inline script syntax ──
 {
