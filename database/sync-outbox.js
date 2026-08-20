@@ -6,6 +6,7 @@
  */
 const crypto = require('crypto');
 const idempotencyKeys = require('./idempotency-keys');
+const conflictKeys = require('./conflict-keys');
 const { runWithSqliteBusyRetry } = require('./sqlite-busy-retry');
 
 function nowIso() {
@@ -321,8 +322,15 @@ function createSyncPlatform(db) {
   }
 
   function openConflict(entry) {
-    const conflictId = entry.conflict_id || uuid();
-    insertConflict.run(
+    let conflictId = entry.conflict_id || null;
+    if (!conflictId) {
+      try {
+        conflictId = conflictKeys.buildConflictId(entry);
+      } catch {
+        conflictId = uuid();
+      }
+    }
+    const info = insertConflict.run(
       conflictId,
       entry.center_id,
       entry.branch_id,
@@ -340,7 +348,7 @@ function createSyncPlatform(db) {
       entry.device_id || null,
       entry.actor_id || null
     );
-    return { ok: true, conflictId };
+    return { ok: true, conflictId, upserted: info.changes > 0 };
   }
 
   function resolveConflictById(conflictId, resolution, resolvedRevision, actorId) {

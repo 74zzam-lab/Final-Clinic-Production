@@ -86,10 +86,31 @@
       || 'CTR';
   }
 
-  /** Dual-write pending conflict into SQLite sync_conflicts (canonical table). */
-  function mirrorOpenToSqlite(item) {
+  function isSqliteAuthority() {
+    return typeof global.SqliteBridge?.isPrimary === 'function' && global.SqliteBridge.isPrimary();
+  }
+
+  function stableConflictId(entry) {
+    const built = global.ConflictKeys?.buildConflictId?.({
+      center_id: centerIdForConflict(),
+      branch_id: entry.branchId || global.BranchScope?.getActiveBranchId?.() || 'BR-MAIN',
+      table_name: entry.table || entry.table_name,
+      record_id: entry.recordId || entry.record_id,
+    });
+    if (built) return built;
+    return entry.id || entry.sqliteConflictId || `cf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function cacheQueueItem(item) {
+    if (!item?.id) return;
+    const list = loadQueue().filter((x) => x.id !== item.id);
+    list.unshift(item);
+    saveQueue(list.slice(0, 200));
+  }
+
+  function openConflictSqlite(item) {
     const api = dbApi();
-    if (!api?.syncOp || !item?.id || !item.table || !item.recordId) return;
+    if (!api?.syncOp || !item?.id || !item.table || !item.recordId) return null;
     try {
       const result = api.syncOp({
         op: 'openConflict',
@@ -105,14 +126,36 @@
           actor_id: item.detectedBy || null,
         },
       });
-      if (result && typeof result.then === 'function') {
-        result.then((r) => {
-          if (r?.ok) item.sqliteConflictId = r.conflictId || item.id;
-        }).catch(() => { /* non-blocking */ });
-      } else if (result?.ok) {
+      if (result?.ok) {
         item.sqliteConflictId = result.conflictId || item.id;
+        return item;
       }
-    } catch { /* non-blocking dual-write */ }
+    } catch { /* non-blocking */ }
+    return null;
+  }
+
+  function listOpenFromSqlite(options) {
+    options = options || {};
+    const api = dbApi();
+    if (!api?.syncOp) return [];
+    try {
+      const res = api.syncOp({
+        op: 'listOpenConflicts',
+        options: { branchId: options.branchId, table: options.table, limit: 200 },
+      });
+      const rows = res?.ok && Array.isArray(res.rows) ? res.rows : [];
+      return rows.map(rowToQueueItem).filter((item) => {
+        if (options.status && item.status !== options.status) return false;
+        return true;
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /** @deprecated alias — use openConflictSqlite */
+  function mirrorOpenToSqlite(item) {
+    return openConflictSqlite(item);
   }
 
   function mirrorResolveToSqlite(item, resolution) {
@@ -132,8 +175,7 @@
 
   function enqueue(entry) {
     entry = entry || {};
-    const list = loadQueue();
-    const id = entry.id || `cf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = stableConflictId(entry);
     const item = {
       id,
       status: 'pending',
@@ -148,14 +190,22 @@
       deviceId: global.RecordMetadata?.getDeviceId?.() || '',
       detectedBy: global.RecordMetadata?.getUserLabel?.() || 'system',
       summary: '',
-      sqliteConflictId: entry.sqliteConflictId || null,
+      sqliteConflictId: entry.sqliteConflictId || id,
+      source: isSqliteAuthority() ? 'sync_conflicts' : 'local_cache',
     };
     item.summary = friendlySummary(item);
-    const existing = list.findIndex(x => x.status === 'pending' && x.table === item.table && x.recordId === item.recordId);
-    if (existing >= 0) list[existing] = { ...list[existing], ...item, updatedAt: new Date().toISOString() };
-    else list.unshift(item);
-    saveQueue(list.slice(0, 200));
-    mirrorOpenToSqlite(existing >= 0 ? list[existing] : item);
+
+    if (isSqliteAuthority()) {
+      openConflictSqlite(item);
+      cacheQueueItem(item);
+    } else {
+      const list = loadQueue();
+      const existing = list.findIndex(x => x.status === 'pending' && x.table === item.table && x.recordId === item.recordId);
+      if (existing >= 0) list[existing] = { ...list[existing], ...item, updatedAt: new Date().toISOString() };
+      else list.unshift(item);
+      saveQueue(list.slice(0, 200));
+      openConflictSqlite(item);
+    }
 
     global.AuditLogger?.logSyncEvent?.('CONFLICT_DETECTED', {
       entity: item.table,
@@ -210,35 +260,27 @@
     return item;
   }
 
-  /** Prefer UI queue; hydrate missing pending rows from SQLite sync_conflicts. */
+  /** SQLite-first when bridge is primary; LS is read-only cache. */
   function listMerged(options) {
     options = options || {};
+    if (isSqliteAuthority()) {
+      return listOpenFromSqlite(options);
+    }
     const fromQueue = list(options);
     const byId = new Map(fromQueue.map((x) => [x.id, x]));
     try {
-      const api = dbApi();
-      if (api?.syncOp) {
-        const res = api.syncOp({ op: 'listOpenConflicts', options: { branchId: options.branchId, table: options.table, limit: 200 } });
-        const applyRows = (rows) => {
-          (rows || []).forEach((row) => {
-            const item = rowToQueueItem(row);
-            if (!item) return;
-            if (options.status && item.status !== options.status) return;
-            if (!byId.has(item.id)) byId.set(item.id, item);
-          });
-        };
-        if (res && typeof res.then === 'function') {
-          // sync path is sync in main; if promise, ignore for sync list
-        } else if (res?.ok && Array.isArray(res.rows)) {
-          applyRows(res.rows);
-        }
-      }
+      listOpenFromSqlite(options).forEach((item) => {
+        if (!byId.has(item.id)) byId.set(item.id, item);
+      });
     } catch { /* non-blocking */ }
     return Array.from(byId.values());
   }
 
   function list(options) {
     options = options || {};
+    if (isSqliteAuthority()) {
+      return listOpenFromSqlite(options);
+    }
     let q = loadQueue();
     if (options.status) q = q.filter(x => x.status === options.status);
     if (options.table) q = q.filter(x => x.table === options.table);
@@ -290,10 +332,19 @@
 
   function resolve(conflictId, resolution) {
     resolution = resolution || {};
-    const list = loadQueue();
-    const idx = list.findIndex(x => x.id === conflictId);
-    if (idx < 0) return { ok: false, error: 'not_found' };
-    const item = list[idx];
+    let item = null;
+    let list = loadQueue();
+    let idx = list.findIndex(x => x.id === conflictId);
+
+    if (isSqliteAuthority()) {
+      const pending = listOpenFromSqlite({ status: 'pending' });
+      item = pending.find((x) => x.id === conflictId) || null;
+      if (!item && idx >= 0) item = list[idx];
+    } else if (idx >= 0) {
+      item = list[idx];
+    }
+
+    if (!item) return { ok: false, error: 'not_found' };
     if (item.status !== 'pending') return { ok: false, error: 'already_resolved' };
     if (!global.OperationalRbacGuard?.canResolveConflicts?.()
       && !global.RolePolicy?.canResolveConflicts?.()) {
@@ -314,7 +365,8 @@
     item.resolvedBy = global.RecordMetadata?.getUserLabel?.() || 'manager';
     item.resolution = resolution.choice || 'manual';
     item.resolvedRecord = applied.record || resolution.record || null;
-    list.splice(idx, 1);
+    if (idx >= 0) list.splice(idx, 1);
+    else list = list.filter((x) => x.id !== conflictId);
     saveQueue(list);
     mirrorResolveToSqlite(item, resolution);
 
@@ -369,5 +421,8 @@
     mirrorOpenToSqlite,
     mirrorResolveToSqlite,
     rowToQueueItem,
+    isSqliteAuthority,
+    stableConflictId,
+    listOpenFromSqlite,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -35,7 +35,14 @@ const updateVsDel = tombstone.decideTombstone(
   { id: 'c1', deletedAt: '2026-01-02T10:00:00Z', revision: 2 },
   'clientsRegistry'
 );
-assert(updateVsDel?.action === tombstone.ACTIONS.CONFLICT, 'update_vs_delete → conflict');
+assert(updateVsDel?.action === tombstone.ACTIONS.PULL, 'equal revision: remote tombstone wins over stale live');
+
+const trueConflict = tombstone.decideTombstone(
+  { id: 'c1', name: 'Alive', revision: 4 },
+  { id: 'c1', deletedAt: '2026-01-02T10:00:00Z', revision: 2 },
+  'clientsRegistry'
+);
+assert(trueConflict?.action === tombstone.ACTIONS.CONFLICT, 'local revision newer than tombstone → conflict');
 
 const bothTomb = tombstone.decideTombstone(
   { id: 'c1', deletedAt: '2026-01-03T10:00:00Z', revision: 3 },

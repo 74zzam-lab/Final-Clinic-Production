@@ -159,6 +159,9 @@
         if (Array.isArray(data)) {
           const idx = data.findIndex(r => r && r.id === record.id);
           if (idx >= 0) {
+            const prev = data[idx];
+            const resurrection = global.TombstonePolicy?.assertNotResurrecting?.(prev, record, options);
+            if (resurrection && !resurrection.ok) return resurrection;
             record = RM?.stampUpdate ? RM.stampUpdate(record, data[idx], options) : record;
             data[idx] = record;
           } else {

@@ -367,6 +367,11 @@ function createDevice(options) {
   function upsertRecord(table, record, actorId) {
     const list = getAll(table);
     const idx = list.findIndex((r) => r && r.id === record.id);
+    if (idx >= 0) {
+      const prev = list[idx];
+      const block = tombstonePolicy.assertNotResurrecting(prev, record);
+      if (block && !block.ok) return block;
+    }
     const op = idx >= 0 ? 'UPDATE' : 'CREATE';
     if (idx >= 0) list[idx] = { ...list[idx], ...record, updatedAt: new Date().toISOString() };
     else list.push({ ...record, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -622,6 +627,75 @@ function createDevice(options) {
     }, { operationId: options.operationId, prefix: 'flush' });
   }
 
+  function openRecordConflict(table, lr, rr, baseRevision) {
+    sync.openConflict({
+      center_id: state.centerId,
+      branch_id: state.branchId,
+      table_name: table,
+      record_id: lr.id,
+      base_revision: baseRevision,
+      local_json: lr,
+      remote_json: rr,
+      device_id: state.deviceId,
+    });
+  }
+
+  function mergeRemoteTable(table, localRecords, remoteRecords, localTableRev, remoteTableRev) {
+    const byId = new Map();
+    for (const r of localRecords) {
+      if (r?.id) byId.set(r.id, r);
+    }
+    let openedConflicts = 0;
+    for (const rr of remoteRecords) {
+      if (!rr?.id) continue;
+      const lr = byId.get(rr.id);
+      if (!lr) {
+        byId.set(rr.id, rr);
+        continue;
+      }
+      const tombDecision = tombstonePolicy.decideTombstone(lr, rr, table);
+      if (tombDecision) {
+        if (tombDecision.action === tombstonePolicy.ACTIONS.CONFLICT) {
+          openRecordConflict(table, lr, rr, localTableRev);
+          openedConflicts += 1;
+          continue;
+        }
+        if (tombDecision.action === tombstonePolicy.ACTIONS.PULL) {
+          byId.set(rr.id, tombDecision.tombstone || rr);
+          continue;
+        }
+        if (tombDecision.action === tombstonePolicy.ACTIONS.PUSH) {
+          continue;
+        }
+        if (tombDecision.action === tombstonePolicy.ACTIONS.SKIP) {
+          byId.set(rr.id, lr);
+          continue;
+        }
+      }
+      if (JSON.stringify(lr) === JSON.stringify(rr)) {
+        byId.set(rr.id, lr);
+        continue;
+      }
+      const lrRev = Number(lr.revision) || 0;
+      const rrRev = Number(rr.revision) || 0;
+      if (rrRev > lrRev) {
+        byId.set(rr.id, rr);
+      } else if (lrRev > rrRev) {
+        continue;
+      } else if (remoteTableRev >= localTableRev) {
+        // Table-level pull advanced — remote payload authoritative on tie/missing record revision
+        byId.set(rr.id, rr);
+      } else {
+        openRecordConflict(table, lr, rr, localTableRev);
+        openedConflicts += 1;
+      }
+    }
+    for (const lr of localRecords) {
+      if (lr?.id && !byId.has(lr.id)) byId.set(lr.id, lr);
+    }
+    return { merged: [...byId.values()], openedConflicts };
+  }
+
   async function pull(remote) {
     const gate = canSync();
     if (!gate.ok) {
@@ -663,7 +737,7 @@ function createDevice(options) {
     for (const [table, meta] of Object.entries(versions.tables || {})) {
       const localRev = Number(state.revisions[table] || 0);
       const remoteRev = Number(meta.revision || 0);
-      if (remoteRev <= localRev) continue;
+      if (remoteRev < localRev) continue;
       let remoteTable;
       try {
         remoteTable = await Promise.resolve(remote.getTable(state.centerId, state.branchId, table));
@@ -697,32 +771,13 @@ function createDevice(options) {
       });
       if (marked.duplicate) continue;
 
-      const pending = sync.countByStatus(state.branchId);
-      if ((pending.pending || 0) + (pending.inflight || 0) > 0 && localRev > 0) {
-        const localRecords = getAll(table);
-        const remoteRecords = remoteTable.records || [];
-        for (const lr of localRecords) {
-          const rr = remoteRecords.find((x) => x && x.id === lr.id);
-          if (!rr) continue;
-          if (tombstonePolicy.recordsConflict(lr, rr)) {
-            sync.openConflict({
-              center_id: state.centerId,
-              branch_id: state.branchId,
-              table_name: table,
-              record_id: lr.id,
-              base_revision: localRev,
-              local_json: lr,
-              remote_json: rr,
-              device_id: state.deviceId,
-            });
-          }
-        }
-      }
-
-      state.tables[table] = remoteTable.records || [];
+      const localRecords = getAll(table);
+      const remoteRecords = remoteTable.records || [];
+      const { merged, openedConflicts } = mergeRemoteTable(table, localRecords, remoteRecords, localRev, remoteRev);
+      state.tables[table] = merged;
       state.revisions[table] = remoteRev;
       persistTableState(table);
-      applied.push({ table, revision: remoteRev, duplicate: false });
+      applied.push({ table, revision: remoteRev, duplicate: false, openedConflicts });
       sync.audit({
         action: 'sync.pull.apply',
         center_id: state.centerId,
