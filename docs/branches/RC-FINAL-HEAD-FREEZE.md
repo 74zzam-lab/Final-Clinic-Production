@@ -11,7 +11,7 @@
 |------|-------|
 | **RC branch** | `cursor/final-stable-operational-rc-7c71` |
 | **RUNTIME / BUILD SOURCE COMMIT** | `c2c2ad6650797af8e9769722aaa094f76176459e` |
-| **EVIDENCE / DOC HEAD** | `1e7800a02293217d0abada64d46bcf3948658dab` |
+| **EVIDENCE / DOC HEAD** | `70468aba361a5e9e2c8fb4609f9dbc0bd87c33cf` |
 | **PR13 base** | `59d443a148fc271b26065f84b5a697f015504f35` |
 | **Version** | `2.0.1` |
 | **EXE SHA-256** | `174ab10a016deddfe3758e08bec59e47cd953a0535b167bbd108e4bbb25747a9` |
