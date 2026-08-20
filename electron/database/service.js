@@ -13,6 +13,8 @@ const { createSyncPlatform } = require('../../database/sync-outbox');
 const operationalDbHealth = require('../../database/operational-db-health');
 const operationalReadiness = require('../../database/operational-readiness');
 const operationalScope = require('../../database/operational-scope');
+const operationalErrorTruth = require('../../database/operational-error-truth');
+const upgradeOrchestrator = require('../../database/upgrade-migration-orchestrator');
 
 let db = null;
 let repos = null;
@@ -41,20 +43,57 @@ function getOperationalHealth() {
   return operationalDbHealth.assessHealth(db);
 }
 
+function readMeta(db) {
+  const meta = {};
+  for (const row of db.prepare('SELECT key, value FROM meta').all()) meta[row.key] = row.value;
+  return meta;
+}
+
+function getUpgradeAssessment() {
+  ensureDb();
+  return upgradeOrchestrator.assessUpgradeState(db, repos, { syncPlatform: ensureSync() });
+}
+
 function assertOperationalWriteAllowed() {
-  const health = getOperationalHealth();
-  return operationalDbHealth.assertWriteAllowed(health);
+  ensureDb();
+  const health = operationalDbHealth.assessHealth(db);
+  const healthGate = operationalDbHealth.assertWriteAllowed(health);
+  if (!healthGate.ok) {
+    return operationalErrorTruth.enrichResult({ ...healthGate, stage: 'database_write' });
+  }
+
+  const meta = readMeta(db);
+  const upgrade = getUpgradeAssessment();
+  const readinessGate = operationalReadiness.assertOperationalReady({
+    health,
+    sqlitePrimary: meta.sqlitePrimary === 'true',
+    sqlitePrimaryRequired: false,
+    migrationPending: !!upgrade.migration_pending,
+    migrationInProgress: !!upgrade.migration_in_progress,
+    migrationFailed: !!upgrade.migration_failed,
+    ownerCorrupted: !!upgrade.owner_corrupted,
+    legacyBranchMigrationBlocked: !!upgrade.unresolved_null_branch,
+  });
+  if (!readinessGate.ok) {
+    return operationalErrorTruth.enrichResult({ ...readinessGate, stage: 'database_write' });
+  }
+  return { ok: true, readiness: readinessGate.readiness, upgrade };
 }
 
 function getStatus() {
   ensureDb();
-  const meta = {};
-  for (const row of db.prepare('SELECT key, value FROM meta').all()) meta[row.key] = row.value;
+  const meta = readMeta(db);
   const operationalHealth = operationalDbHealth.assessHealth(db);
+  const upgradeState = getUpgradeAssessment();
   const operationalReadinessReport = operationalReadiness.assessOperationalReadiness({
     health: operationalHealth,
     sqlitePrimary: meta.sqlitePrimary === 'true',
     sqlitePrimaryRequired: false,
+    migrationPending: !!upgradeState.migration_pending,
+    migrationInProgress: !!upgradeState.migration_in_progress,
+    migrationFailed: !!upgradeState.migration_failed,
+    ownerCorrupted: !!upgradeState.owner_corrupted,
+    legacyBranchMigrationBlocked: !!upgradeState.unresolved_null_branch,
   });
   return {
     ok: true,
@@ -63,6 +102,7 @@ function getStatus() {
     integrity: integrityCheck(db),
     operationalHealth,
     operationalReadiness: operationalReadinessReport,
+    upgradeState,
     meta,
     counts: {
       clients: repos.clients.count(),
@@ -441,4 +481,21 @@ module.exports = {
   syncOp,
   exportSnapshot: () => exportSnapshot(getDbPath()),
   close,
+  getUpgradeAssessment,
+  runUpgradePipeline: (options = {}) => {
+    ensureDb();
+    return upgradeOrchestrator.runUpgradePipeline(db, repos, {
+      ...options,
+      dbPath: getDbPath(),
+      syncPlatform: ensureSync(),
+    });
+  },
+  resumeUpgradePipeline: (options = {}) => {
+    ensureDb();
+    return upgradeOrchestrator.resumeInProgressRun(db, repos, {
+      ...options,
+      dbPath: getDbPath(),
+      syncPlatform: ensureSync(),
+    });
+  },
 };

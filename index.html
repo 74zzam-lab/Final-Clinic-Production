@@ -11043,8 +11043,15 @@ function initProductionErrorHandlers() {
   if (window._prodErrorHandlers) return;
   window._prodErrorHandlers = true;
   const isBenignCloudErr = (msg) => {
+    if (global.BenignOperationalErrors?.isBenignOperationalError) {
+      return global.BenignOperationalErrors.isBenignOperationalError(msg);
+    }
     if (!msg) return true;
     const m = String(msg);
+    if (/^(ReferenceError|TypeError|SyntaxError):/i.test(m)) return false;
+    if (/is not defined$/i.test(m) && !/^(CloudBootstrap|CloudMeta|DriveBranchMigration|SyncEngine|LicenseLegacyBridge|CloudV2)\b/i.test(m)) {
+      return false;
+    }
     return /is not defined$/i.test(m) && /^(CloudBootstrap|CloudMeta|DriveBranchMigration|SyncEngine|LicenseLegacyBridge|CloudV2)\b/i.test(m)
       || /no_remote_versions|no_versions_path|offline|no_center_id|push_failed|not_found|drive_not_connected/i.test(m);
   };
@@ -16601,6 +16608,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/danger-confirm.js"></script>
 <script src="cloud/error-recovery-ux.js"></script>
 <script src="cloud/ops-log-redact.js"></script>
+<script src="cloud/benign-operational-errors.js"></script>
 <script src="cloud/operational-error-truth.js"></script>
 <script src="cloud/migration-safety.js"></script>
 <script src="cloud/operational-db-health.js"></script>

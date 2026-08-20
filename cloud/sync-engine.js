@@ -39,10 +39,13 @@
 
   const BENIGN_SYNC_ERRORS = new Set([
     'no_center_id', 'no_remote_versions', 'no_versions_path', 'not_found',
-    'offline', 'drive_not_connected', 'no_backup_bridge'
+    'offline', 'drive_not_connected', 'no_backup_bridge',
   ]);
 
   function isBenignSyncError(msg) {
+    if (global.BenignOperationalErrors?.isBenignOperationalError) {
+      return global.BenignOperationalErrors.isBenignOperationalError(msg);
+    }
     if (!msg) return true;
     const m = String(msg).toLowerCase();
     if (BENIGN_SYNC_ERRORS.has(m)) return true;

@@ -12,6 +12,10 @@ const BLOCKER_MESSAGES_AR = {
   schema_version_mismatch: 'إصدار مخطط غير متوقع',
   legacy_branch_migration_required: 'يلزم إكمال ترحيل الفروع',
   sqlite_primary_required: 'SQLite غير جاهز كمصدر معتمد',
+  migration_pending: 'ترحيل بيانات معلّق',
+  migration_in_progress: 'ترحيل قيد التنفيذ',
+  migration_failed: 'فشل ترحيل سابق',
+  owner_corrupted: 'حالة المالك تالفة',
 };
 
 function buildBlockerMessageAr(blockers) {
@@ -27,6 +31,10 @@ function buildBlockerMessageAr(blockers) {
  * @param {boolean} [ctx.legacyBranchMigrationBlocked]
  * @param {boolean} [ctx.sqlitePrimary]
  * @param {boolean} [ctx.sqlitePrimaryRequired]
+ * @param {boolean} [ctx.migrationPending]
+ * @param {boolean} [ctx.migrationInProgress]
+ * @param {boolean} [ctx.migrationFailed]
+ * @param {boolean} [ctx.ownerCorrupted]
  */
 function assessOperationalReadiness(ctx = {}) {
   const blockers = [];
@@ -37,6 +45,18 @@ function assessOperationalReadiness(ctx = {}) {
       blockers.push(reason);
     }
     if (!health.reasons?.length) blockers.push('database_unhealthy');
+  }
+
+  if (ctx.ownerCorrupted) {
+    blockers.push('owner_corrupted');
+  }
+
+  if (ctx.migrationInProgress) {
+    blockers.push('migration_in_progress');
+  } else if (ctx.migrationFailed) {
+    blockers.push('migration_failed');
+  } else if (ctx.migrationPending) {
+    blockers.push('migration_pending');
   }
 
   if (ctx.legacyBranchMigrationBlocked) {
@@ -61,6 +81,10 @@ function assessOperationalReadiness(ctx = {}) {
     health: health || null,
     sqlitePrimary: ctx.sqlitePrimary,
     legacyBranchMigrationBlocked: !!ctx.legacyBranchMigrationBlocked,
+    migrationPending: !!ctx.migrationPending,
+    migrationInProgress: !!ctx.migrationInProgress,
+    migrationFailed: !!ctx.migrationFailed,
+    ownerCorrupted: !!ctx.ownerCorrupted,
     assessedAt: new Date().toISOString(),
   };
 }

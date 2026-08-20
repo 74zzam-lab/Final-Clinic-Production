@@ -12,6 +12,10 @@
     legacy_branch_migration_required: 'يلزم إكمال ترحيل الفروع',
     sqlite_primary_required: 'SQLite غير جاهز كمصدر معتمد',
     operational_not_ready: 'التشغيل غير جاهز',
+    migration_pending: 'ترحيل بيانات معلّق',
+    migration_in_progress: 'ترحيل قيد التنفيذ',
+    migration_failed: 'فشل ترحيل سابق',
+    owner_corrupted: 'حالة المالك تالفة',
   };
 
   let cached = null;
@@ -34,6 +38,10 @@
     if (parts.legacyBranchMigrationBlocked) {
       blockers.push('legacy_branch_migration_required');
     }
+    if (parts.ownerCorrupted) blockers.push('owner_corrupted');
+    if (parts.migrationInProgress) blockers.push('migration_in_progress');
+    else if (parts.migrationFailed) blockers.push('migration_failed');
+    else if (parts.migrationPending) blockers.push('migration_pending');
     if (parts.sqlitePrimaryRequired && !parts.sqlitePrimary) {
       blockers.push('sqlite_primary_required');
     }
@@ -61,11 +69,16 @@
     const status = await global.SqliteBridge?.status?.() || {};
     const legacyBlocked = !!(global.LegacyBranchMigration?.isPushBlocked?.()
       || (global.LegacyBranchMigration?.needsMigration?.() && !global.LegacyBranchMigration?.isMigrationComplete?.()));
+    const upgrade = status.upgradeState || {};
     const readiness = assessFromParts({
       health: status.operationalHealth || healthAllow?.health,
-      legacyBranchMigrationBlocked: legacyBlocked,
+      legacyBranchMigrationBlocked: legacyBlocked || !!upgrade.unresolved_null_branch,
       sqlitePrimary: status.sqlitePrimary,
       sqlitePrimaryRequired: !!global.SqliteBridge?.isPrimary,
+      migrationPending: !!upgrade.migration_pending,
+      migrationInProgress: !!upgrade.migration_in_progress,
+      migrationFailed: !!upgrade.migration_failed,
+      ownerCorrupted: !!upgrade.owner_corrupted,
     });
     cached = readiness;
     cachedAt = Date.now();

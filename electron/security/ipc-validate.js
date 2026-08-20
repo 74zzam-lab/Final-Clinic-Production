@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * IPC payload validation helpers (Phase 2).
+ * IPC payload validation helpers (Phase 2 + PR13 error envelope).
  */
+const operationalErrorTruth = require('../../database/operational-error-truth');
 
 const MAX_STRING = 2 * 1024 * 1024; // 2 MiB
 const MAX_HTML = 5 * 1024 * 1024; // 5 MiB print HTML
@@ -133,18 +134,23 @@ function isRbacError(err) {
   return code === 'RBAC_DENIED' || code.startsWith('rbac_') || !!err.rbac;
 }
 
-function guard(handler, { soft = true } = {}) {
+function guard(handler, { soft = true, stage = 'ipc' } = {}) {
   return async (event, ...args) => {
     try {
-      return await handler(event, ...args);
+      const result = await handler(event, ...args);
+      if (result && result.ok === false) {
+        return operationalErrorTruth.enrichResult({ ...result, stage: result.stage || stage }, { stage });
+      }
+      return result;
     } catch (err) {
       if (soft && (isValidationError(err) || isRbacError(err))) {
-        return {
+        return operationalErrorTruth.enrichResult({
           ok: false,
           error: err.code || (err.rbac && err.rbac.error) || 'IPC_ERROR',
           message: err.message || String(err),
           rbac: err.rbac || null,
-        };
+          stage,
+        }, { stage });
       }
       throw err;
     }
