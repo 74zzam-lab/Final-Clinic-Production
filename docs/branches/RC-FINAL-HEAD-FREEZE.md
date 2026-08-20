@@ -2,7 +2,8 @@
 
 **Status:** `SOURCE VERIFIED / RUNTIME UAT PENDING`  
 **Branch:** `cursor/final-stable-operational-rc-7c71`  
-**Commit:** `c2c2ad6650797af8e9769722aaa094f76176459e` (PR13 + RC gate scripts)  
+**Commit:** `6f773054e93f98cdbda3e687af0558aa1cc9e37b` (Final RC HEAD)  
+**Build source commit:** `c2c2ad6` (app binary; doc-only delta after build)  
 **Version:** `2.0.1`  
 **Freeze eligible:** **NO** — runtime UAT on Windows/Google/Device A/B pending
 
@@ -14,7 +15,7 @@
 |-------|-------|
 | Branch | `cursor/final-stable-operational-rc-7c71` |
 | Base | PR13 `cursor/error-truth-migration-safety-7c71` |
-| HEAD (pre-RC scripts commit) | `59d443a148fc271b26065f84b5a697f015504f35` |
+| HEAD | `c2c2ad6650797af8e9769722aaa094f76176459e` |
 | Product | Hijama Management System |
 | Electron | 43.2.0 |
 
