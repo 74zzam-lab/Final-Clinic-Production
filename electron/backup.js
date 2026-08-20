@@ -120,7 +120,7 @@ async function pickLocalFolder() {
 }
 
 const cloudDbBackup = require('./cloud-db-backup');
-const { isBackupV1RuntimeDisabled, denyBackupV1 } = require('./backup-v1-gate');
+const { isBackupV1RuntimeDisabled, denyBackupV1, denyBackupV1Restore } = require('./backup-v1-gate');
 
 async function uploadDbBackup(password, meta) {
   if (isBackupV1RuntimeDisabled()) return denyBackupV1('uploadDbBackup');
@@ -132,9 +132,8 @@ async function listDbBackups(meta) {
   return cloudDbBackup.listDbBackups(meta);
 }
 
-async function restoreDbBackup(remotePath, password) {
-  if (isBackupV1RuntimeDisabled()) return denyBackupV1('restoreDbBackup');
-  return cloudDbBackup.restoreDbBackup(remotePath, password);
+async function restoreDbBackup(_remotePath, _password) {
+  return denyBackupV1Restore('restoreDbBackup');
 }
 
 async function syncDbBackup(password, meta) {

@@ -7,6 +7,7 @@ const pathGuard = require('./security/path-guard');
 const V = require('./security/ipc-validate');
 const windowPolicy = require('./security/window-policy');
 const rbacSession = require('./rbac-session');
+const restoreAuthority = require('./restore-authority');
 
 /** Fixed userData path — preserves data across rebranding and reinstalls */
 const USER_DATA_FOLDER = 'Cupping Center';
@@ -544,19 +545,7 @@ handle('backup:uploadDbBackup', async (_e, password, meta) =>
 
 handle('backup:listDbBackups', async (_e, meta) => backupListDbBackups(V.asObject(meta)));
 
-handle('backup:restoreDbBackup', async (_e, remotePath, password, relaunch) => {
-  const rp = V.asString(remotePath, { name: 'remotePath', max: 1000, required: true });
-  if (pathGuard.hasTraversal(rp)) V.fail('PATH_TRAVERSAL', 'remote_path_traversal');
-  const result = await backupRestoreDbBackup(
-    rp,
-    V.asString(password, { name: 'password', max: 200, required: true, allowEmpty: false })
-  );
-  if (result.ok && result.needRestart && relaunch !== false) {
-    app.relaunch();
-    app.exit(0);
-  }
-  return result;
-});
+handle('backup:restoreDbBackup', async () => restoreAuthority.denyLegacyRestore('backup:restoreDbBackup'));
 
 handle('backup:syncDbBackup', async (_e, password, meta) =>
   backupSyncDbBackup(
@@ -883,7 +872,10 @@ handle('database:seedUsersIfEmpty', (_e, users) => {
 handle('database:enableSqlitePrimary', () => dbService.enableSqlitePrimary());
 handle('database:migrateFromBackup', (_e, snapshot, options) => {
   V.asObject(snapshot, { name: 'snapshot', required: true, maxKeys: 200 });
-  return dbService.migrateFromBackupObject(snapshot, V.asObject(options));
+  const opts = V.asObject(options);
+  const gate = restoreAuthority.assertMigrationDbReplaceAllowed(opts);
+  if (!gate.ok) return gate;
+  return dbService.migrateFromBackupObject(snapshot, opts);
 });
 handle('database:querySafe', (e, request) => {
   const req = V.asObject(request, { required: true });

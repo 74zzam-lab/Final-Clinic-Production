@@ -86,6 +86,15 @@
     options = options || {};
     const staged = loadStaging();
     if (!staged) return { ok: false, error: 'no_staging' };
+
+    if (options.manual && global.RestoreSurfaceAuthority) {
+      const gate = global.RestoreSurfaceAuthority.assertMigrationMergeAllowed(
+        { source: staged.source, migrationOnly: options.migrationOnly },
+        options
+      );
+      if (!gate.ok) return gate;
+    }
+
     const branchId = options.branchId || global.BranchScope?.getActiveBranchId?.() || 'BR-MAIN';
     const comparison = compareWithLocal(staged, branchId);
 

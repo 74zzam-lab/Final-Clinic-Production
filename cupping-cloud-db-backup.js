@@ -72,11 +72,13 @@
       return api.listDbBackups(await getBackupMeta());
     },
 
-    async restore(remotePath, password, relaunch) {
-      if (CloudDbBackupBridge.isDisabled()) return denyV1('restore');
-      const api = getElectronBackup();
-      if (!api?.restoreDbBackup) return { ok: false, message: 'متاح في Electron فقط' };
-      return api.restoreDbBackup(remotePath, password, relaunch !== false);
+    async restore(_remotePath, _password, _relaunch) {
+      return {
+        ok: false,
+        error: 'legacy_restore_disabled',
+        code: 'LEGACY_RESTORE_DISABLED',
+        message: 'Legacy LevelDB restore is disabled. Use Backup V2 atomic restore.',
+      };
     },
 
     async syncNow(password) {

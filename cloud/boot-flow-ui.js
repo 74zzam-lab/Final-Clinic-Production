@@ -55,7 +55,7 @@
     branch: 'اسم الفرع الأول + اسم هذا الجهاز.',
     branch_select: 'اختر فرعاً موجوداً واربط الجهاز به.',
     owner: 'مسار دعم فقط — ليس في رحلة العميل اليومية.',
-    restore: 'فحص سريع للمصادر ثم تأكيد الاستعادة — سحابة / محلي / Backup V2 / فارغ بلا تنزيل أثناء الاكتشاف.',
+    restore: 'فحص مصادر البيانات — سحب سحابي / محلي / Backup V2 / فارغ (لا استبدال DB للسحابة).',
     sync: 'المزامنة تُفعَّل بعد اكتمال الربط.',
     ready: 'أعد تشغيل التطبيق لتطبيق التفعيل.'
   };
@@ -1190,14 +1190,14 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
           });
 
           if (newest && (cloudStatus === 'ready' || cloudStatus === 'ipc_missing')) {
-            addBtn(cloudCard.actions, 'استعادة هذه البيانات', 'btn-primary', async () => {
+            addBtn(cloudCard.actions, 'سحب بيانات الفرع من السحابة', 'btn-primary', async () => {
               if (restoreInFlight || Discovery.isRestoreLocked?.()) {
-                setStatus('⚠️ استعادة جارية — انتظر', true);
+                setStatus('⚠️ عملية سحب جارية — انتظر', true);
                 return;
               }
               restoreInFlight = true;
               try { global.OwnerManagement?.setSystemBusy?.('restore'); } catch { /* empty */ }
-              setStatus('⏳ جارٍ الاستعادة المؤكدة من السحابة…');
+              setStatus('⏳ جارٍ سحب/دمج حالة السحابة (sync hydrate — بدون استبدال DB)…');
               try {
                 const result = await Discovery.confirmedCloudRestore(newest, {
                   onProgress: (snap) => {
@@ -1207,17 +1207,17 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
                 });
                 if (!result?.ok) {
                   setStatus(
-                    `❌ فشلت الاستعادة: ${result?.message || result?.error || 'unknown'}`
+                    `❌ فشل سحب السحابة: ${result?.message || result?.error || 'unknown'}`
                     + (result?.diagnosticId ? ` · ID ${result.diagnosticId}` : ''),
                     true
                   );
                   if (progressHost) {
-                    progressHost.innerHTML += `<p class="bf-source-meta">لم تُستبدل القاعدة المحلية. الترخيص والجهاز والفرع محفوظون. يمكنك إعادة المحاولة أو تغيير المصدر.</p>`;
+                    progressHost.innerHTML += `<p class="bf-source-meta">لم تُستبدل قاعدة البيانات المحلية — هذا مسار sync hydrate فقط. الترخيص والجهاز والفرع محفوظون.</p>`;
                   }
                   return;
                 }
-                markRestore('cloud', '✅ تمت الاستعادة السحابية المؤكدة — انتقل للمزامنة');
-                setStatus('✅ تمت الاستعادة — المزامنة التالية تسحب الأحدث فقط');
+                markRestore('cloud', '✅ تم سحب/دمج بيانات السحابة — انتقل للمزامنة');
+                setStatus('✅ تم سحب السحابة — المزامنة التالية تسحب الأحدث فقط');
               } catch (e) {
                 setStatusFromErr(e, 'restore_interrupted');
               } finally {
@@ -1253,17 +1253,46 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
           // --- Local backups / file ---
           const lb = discovery?.localBackup || {};
           const fileCard = addSourceCard({
-            title: '📁 اختيار ملف Backup',
+            title: '📁 استعادة Backup V2 (.tdw)',
             status: lb.available ? 'ready' : 'not_found',
-            metaHtml: `${lb.message || 'اختيار ملف...'}<br>النسخ المحلية: ${lb.count || 0}`,
+            metaHtml: `${lb.message || 'اختيار ملف Backup V2...'}<br>النسخ المحلية: ${lb.count || 0}<br><small>مسار DR الوحيد — atomic pipeline</small>`,
           });
-          addBtn(fileCard.actions, 'اختيار ملف…', 'btn-secondary', async () => {
+          addBtn(fileCard.actions, 'اختيار ملف Backup V2…', 'btn-secondary', async () => {
             try {
-              if (global.OpsUxBridge?.openRestoreWizard) {
-                await global.OpsUxBridge.openRestoreWizard({ preferFile: true });
+              const api = global.cuppingElectron?.backup;
+              if (!api?.v2PickFile || !api?.v2Restore) {
+                setStatus('⚠️ Backup V2 غير متاح — استخدم نسخة Electron كاملة', true);
+                return;
               }
-            } catch { /* empty */ }
-            markRestore('file', '✅ تم اختيار مسار ملف النسخة/قاعدة البيانات');
+              const picked = await api.v2PickFile();
+              if (picked?.canceled || !picked?.filePath) return;
+              const identity = {
+                centerId: global.DeviceConfig?.load?.()?.centerId || global.settings?.centerId,
+                branchId: global.DeviceConfig?.load?.()?.lockedBranchId || global.BranchScope?.getActiveBranchId?.(),
+                organizationId: global.settings?.organizationId,
+              };
+              const flow = await global.OpsUxBridge?.openRestoreWizard?.({
+                filePath: picked.filePath,
+                identity,
+                validate: () => ({ ok: true, validation: 'valid' }),
+                execute: async () => api.v2Restore({
+                  filePath: picked.filePath,
+                  relaunch: true,
+                  ...identity,
+                }),
+              });
+              if (!flow?.ok && flow?.error !== 'overwrite_phrase_mismatch') {
+                setStatus('❌ فشلت استعادة Backup V2: ' + (flow?.error || 'unknown'), true);
+                return;
+              }
+              if (flow?.ok) {
+                markRestore('file', '✅ تمت استعادة Backup V2 — إعادة تشغيل');
+                return;
+              }
+            } catch (e) {
+              setStatusFromErr(e, 'restore_interrupted');
+            }
+            markRestore('file', '✅ تم اختيار مسار ملف Backup V2');
             try { global.ActivationSyncDefaults?.applyDefaults?.({ startSync: true }); } catch { /* empty */ }
             try {
               setStatus('⏳ مواءمة ما بعد الاستعادة (سحب الأحدث — بلا رفع فوري)...');

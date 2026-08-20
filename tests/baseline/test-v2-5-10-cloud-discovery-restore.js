@@ -41,14 +41,14 @@ check(/buildDiscoveryProgressState/.test(rendererDiscovery), 'renderer discovery
 check(/confirmedCloudRestore/.test(rendererDiscovery), 'renderer confirmedCloudRestore');
 check(/SyncEngine must NOT start during discovery|never start sync during discovery/i.test(rendererDiscovery),
   'renderer forbids SyncEngine during discovery');
-check(/RESTORE_STAGES/.test(rendererDiscovery) && /atomic_swap/.test(rendererDiscovery),
-  'real restore stages defined');
+check(/RESTORE_STAGES/.test(rendererDiscovery) && /cloud_merge/.test(rendererDiscovery),
+  'hydrate restore stages defined (sync merge, not atomic_swap)');
 check(/restore_in_flight|discovery_in_flight|stale_discovery|stale_restore/.test(rendererDiscovery),
   'locks / stale op guards');
 
 // --- BootFlow wiring ---
 check(/CloudDataDiscovery/.test(boot), 'BootFlow uses CloudDataDiscovery');
-check(/استعادة هذه البيانات/.test(boot), 'explicit confirm CTA');
+check(/سحب بيانات الفرع من السحابة/.test(boot), 'explicit cloud hydrate CTA (not full DR restore)');
 check(/onProgress/.test(boot), 'BootFlow discovery progress callback');
 check(/DISCOVERY_TIMEOUT_MS/.test(boot), 'BootFlow uses discovery timeout constant');
 check(!/جارٍ الاستعادة من السحابة\.\.\./.test(boot)
@@ -57,7 +57,7 @@ check(!/جارٍ الاستعادة من السحابة\.\.\./.test(boot)
 check(/openRestoreWizard\(\)/.test(boot) === false
   || /preferFile:\s*true/.test(boot),
   'cloud path no longer awaits bare openRestoreWizard()');
-check(/لم تُستبدل القاعدة المحلية/.test(boot), 'failure preserves local DB messaging');
+check(/لم تُستبدل قاعدة البيانات المحلية/.test(boot), 'failure preserves local DB messaging');
 check(/Diagnostic ID/.test(boot), 'diagnostic id surfaced on progress');
 
 // --- Z-index fix ---
