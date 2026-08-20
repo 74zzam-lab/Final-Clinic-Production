@@ -14,11 +14,16 @@ const peer = fs.readFileSync(path.join(root, 'database/peer-sync-engine.js'), 'u
 
 const checks = [
   { name: 'sync-push-guards module', ok: fs.existsSync(path.join(root, 'database/sync-push-guards.js')) },
+  { name: 'sync-baseline module', ok: fs.existsSync(path.join(root, 'database/sync-baseline.js')) },
+  { name: 'sync-coordinator module', ok: fs.existsSync(path.join(root, 'cloud/sync-coordinator.js')) },
   { name: 'cloud SyncPushGuards script', ok: fs.existsSync(path.join(root, 'cloud/sync-push-guards.js')) },
   { name: 'sync-engine assertPushAllowed', ok: /function assertPushAllowed/.test(syncEngine) },
   { name: 'sync-engine pull guard', ok: /evaluatePullApplyGuard/.test(syncEngine) },
+  { name: 'sync-engine baseline gate', ok: /SyncBaseline\?\.assertPushAllowed/.test(syncEngine) },
   { name: 'peer-sync-engine push guard', ok: /pushGuards\.evaluatePushGuard/.test(peer) },
+  { name: 'peer-sync-engine baseline gate', ok: /baseline\.assertPushAllowed/.test(peer) },
   { name: 'index loads sync-push-guards', ok: /cloud\/sync-push-guards\.js/.test(fs.readFileSync(path.join(root, 'index.html'), 'utf8')) },
+  { name: 'index loads sync-baseline', ok: /cloud\/sync-baseline\.js/.test(fs.readFileSync(path.join(root, 'index.html'), 'utf8')) },
 ];
 
 let failed = 0;
@@ -46,6 +51,10 @@ if (staleOverwrite.ok || staleOverwrite.code !== 'stale_overwrite_blocked') fail
 const okPush = guards.evaluatePushGuard({ localRevision: 2, remoteRevision: 5, recordCount: 3 });
 console.log((okPush.ok ? 'PASS' : 'FAIL') + '  valid push allowed');
 if (!okPush.ok) failed += 1;
+
+const casMismatch = guards.evaluateCasPushGuard({ expectedRemoteRevision: 10, actualRemoteRevision: 11 });
+console.log((!casMismatch.ok && casMismatch.code === 'remote_revision_mismatch' ? 'PASS' : 'FAIL') + '  CAS stale revision');
+if (casMismatch.ok || casMismatch.code !== 'remote_revision_mismatch') failed += 1;
 
 if (failed) process.exit(1);
 console.log('\nAll sync guard checks passed.');

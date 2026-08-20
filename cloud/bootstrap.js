@@ -513,6 +513,31 @@
 
     if (options.markComplete !== false) markBootstrapComplete(branchId);
 
+    try {
+      global.SyncBaseline?.markHydrating?.({
+        organizationResolved: !!centerId,
+        branchResolved: !!branchId,
+      });
+      const remoteRev = Number(
+        versionsRes?.data?.branches?.[branchId]?.databaseVersion
+        || versionsRes?.data?.databaseVersion
+        || 0
+      );
+      const health = global.OperationalDbHealth?.isOperationalAllowed?.();
+      const integrityPass = health?.ok !== false;
+      if (integrityPass) {
+        global.SyncBaseline?.markBaselineKnown?.({
+          branchId,
+          remoteRevision: remoteRev,
+          integrityPass: true,
+          organizationResolved: !!centerId,
+          branchResolved: !!branchId,
+          operationId: options.operationId || null,
+        });
+        global.SyncBaseline?.markReady?.({ operationId: options.operationId || null });
+      }
+    } catch { /* fail closed — push remains blocked */ }
+
     global.AuditLogger?.logSyncEvent?.('BOOTSTRAP', {
       summary: `Bootstrap hydrate — فرع ${branchId}`,
       branchId,

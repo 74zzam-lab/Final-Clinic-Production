@@ -53,8 +53,18 @@ async function uploadCloud(payload, filename, providerId, meta) {
 
   // V2-4: atomic temp→verify→commit for sync JSON when supported
   if (meta?.atomicReplace && providerKey === 'google' && typeof googleDrive.atomicReplaceJson === 'function') {
-    const atomic = await googleDrive.atomicReplaceJson(remotePath, payload, meta);
-    if (!atomic.ok) return { ...atomic, remotePath };
+    const atomic = await googleDrive.atomicReplaceJson(remotePath, payload, {
+      ...meta,
+      remotePath,
+    });
+    if (!atomic.ok) {
+      return {
+        ...atomic,
+        remotePath,
+        code: atomic.code || (atomic.retry ? 'remote_revision_mismatch' : undefined),
+        error: atomic.code || atomic.message,
+      };
+    }
     return { ...atomic, remotePath, filename: filename || remotePath.split('/').pop() };
   }
 

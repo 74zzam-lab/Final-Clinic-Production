@@ -68,9 +68,15 @@
     if (!isConnected()) {
       return global.DriveErrors?.handleFailure?.({ error: 'offline' }) || { ok: false, offline: true };
     }
+
     const payload = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
     const { filename } = splitRemotePath(remotePath);
     const provider = options.provider || global.settings?.backup?.cloudProvider || 'google';
+    const centerMatch = String(remotePath || '').match(/centers\/([^/]+)\/branches\/([^/]+)/);
+    const branchId = centerMatch ? centerMatch[2] : (options.branchId || null);
+
+    const isManifest = /^versions\.json$/i.test(filename);
+    const casResource = options.casResource || (isManifest ? 'manifest' : 'table');
 
     let res;
     if (bridge.uploadCloud) {
@@ -78,9 +84,14 @@
         remotePath,
         overwrite: options.overwrite !== false,
         brand: 'NajjarTech',
-        // V2-4: atomic replace for versions/operational JSON by default
         atomicReplace: options.atomicReplace !== false && /\.json$/i.test(filename),
-        hash: options.hash
+        hash: options.hash,
+        casResource,
+        expectedBranchRevision: options.expectedBranchRevision ?? options.expectedDatabaseVersion,
+        expectedTableRevision: options.expectedTableRevision,
+        expectedDatabaseVersion: options.expectedBranchRevision ?? options.expectedDatabaseVersion,
+        branchId,
+        operationId: options.operationId,
       });
     } else if (bridge.uploadSyncFile) {
       const { folder } = splitRemotePath(remotePath);
@@ -135,6 +146,74 @@
     return uploadJson(path, versions, { overwrite: true });
   }
 
+  async function uploadVersionsConditional(centerId, versions, branchId, options) {
+    options = options || {};
+    branchId = branchId || global.BranchScope?.getActiveBranchId?.() || 'BR-MAIN';
+    const path = global.VersionsIndex?.drivePath?.(centerId, branchId) || global.DriveLayout?.syncVersionsJson?.(centerId, branchId);
+    if (!path) return { ok: false, error: 'no_versions_path' };
+
+    const remote = await downloadVersions(centerId, branchId);
+    if (!remote?.ok && !/not_found|no_remote/i.test(String(remote?.error || ''))) {
+      return { ok: false, code: 'manifest_revision_unconfirmed', error: remote?.error || 'manifest_revision_unconfirmed' };
+    }
+    const actual = Number(
+      remote?.data?.branches?.[branchId]?.databaseVersion
+      || remote?.data?.databaseVersion
+      || 0
+    );
+    const expected = Number(
+      options.expectedBranchRevision != null
+        ? options.expectedBranchRevision
+        : options.expectedDatabaseVersion
+    );
+    const manifestCas = global.SyncPushGuards?.evaluateManifestCasGuard?.({
+      expectedManifestRevision: expected,
+      actualManifestRevision: actual,
+    });
+    if (manifestCas && !manifestCas.ok) {
+      return { ok: false, ...manifestCas, error: manifestCas.code };
+    }
+
+    const newDbRev = Number(options.newDatabaseVersion != null ? options.newDatabaseVersion : expected + 1);
+    const enriched = {
+      ...(versions || {}),
+      centerId: centerId || versions?.centerId,
+      updatedAt: new Date().toISOString(),
+      writerDeviceId: options.writerDeviceId || null,
+      operationId: options.operationId || null,
+      databaseVersion: newDbRev,
+      branches: {
+        ...(versions?.branches || {}),
+        [branchId]: {
+          ...(versions?.branches?.[branchId] || {}),
+          databaseVersion: newDbRev,
+        },
+      },
+    };
+
+    const up = await uploadJson(path, enriched, {
+      overwrite: true,
+      atomicReplace: true,
+      casResource: 'manifest',
+      expectedBranchRevision: expected,
+      expectedDatabaseVersion: expected,
+      branchId,
+      operationId: options.operationId,
+    });
+    if (!up?.ok) return up;
+
+    const verify = await downloadVersions(centerId, branchId);
+    const verifiedRev = Number(
+      verify?.data?.branches?.[branchId]?.databaseVersion
+      || verify?.data?.databaseVersion
+      || 0
+    );
+    if (verifiedRev !== newDbRev) {
+      return { ok: false, code: 'remote_verify_manifest_mismatch', retry: true, expected: newDbRev, actual: verifiedRev };
+    }
+    return { ok: true, databaseVersion: verifiedRev, ...up };
+  }
+
   async function downloadVersions(centerId, branchId) {
     branchId = branchId || global.BranchScope?.getActiveBranchId?.() || 'BR-MAIN';
     const paths = global.VersionsIndex?.drivePathCandidates?.(centerId, branchId)
@@ -162,6 +241,7 @@
     downloadJson,
     downloadJsonFirst,
     uploadVersions,
+    uploadVersionsConditional,
     downloadVersions,
     splitRemotePath
   };
