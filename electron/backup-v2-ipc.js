@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { dialog } = require('electron');
 const backupV2 = require('./backup-v2-core');
+const backupV2Cloud = require('./backup-v2-cloud');
 const { BackupV2Scheduler } = require('./backup-v2-scheduler');
 const { copyWithResume, uploadWithResume } = require('./backup-v2-transfer');
 const backupMain = require('./backup');
@@ -98,6 +99,63 @@ function registerBackupV2Ipc({
     return path.join(getUserDataPath(), 'Backups', 'V2');
   }
 
+  function cloudRetentionCount(opts = {}) {
+    const n = Number(opts.cloudRetentionCount ?? opts.retentionCount);
+    return Number.isFinite(n) && n > 0
+      ? Math.min(100, Math.max(1, n))
+      : backupV2Cloud.DEFAULT_CLOUD_RETENTION;
+  }
+
+  async function pruneCloudAfterUpload(uploadResult, opts = {}) {
+    const keepPath = uploadResult?.remotePath || uploadResult?.path || null;
+    return backupV2Cloud.pruneCloudV2Backups(
+      (provider, prefix) => backupMain.listCloudBackups(provider, prefix),
+      (remotePath, provider) => backupMain.deleteCloudBackup(remotePath, provider),
+      cloudRetentionCount(opts),
+      keepPath
+    );
+  }
+
+  async function stageCloudBackupsForRestore(maxCandidates = 5) {
+    const listed = await backupV2Cloud.listCloudV2Backups(
+      (provider, prefix) => backupMain.listCloudBackups(provider, prefix)
+    );
+    if (!listed.ok || !listed.items.length) return [];
+    const stageDir = path.join(getUserDataPath(), 'Backups', 'V2', 'cloud-staging');
+    fs.mkdirSync(stageDir, { recursive: true });
+    const staged = [];
+    for (const item of listed.items.slice(0, Math.max(1, maxCandidates))) {
+      const remotePath = item.path || item.remotePath;
+      if (!remotePath) continue;
+      const dl = await backupMain.downloadCloudBackup(remotePath, 'google');
+      if (!dl?.ok) continue;
+      const buf = dl.buffer || Buffer.from(String(dl.text || ''), 'utf8');
+      if (!buf?.length) continue;
+      const safeName = path.basename(remotePath).replace(/[^\w.\-]+/g, '_');
+      const destPath = path.join(stageDir, safeName);
+      fs.writeFileSync(destPath, buf);
+      staged.push({
+        ...item,
+        filePath: destPath,
+        createdAt: item.modifiedAt || item.createdAt,
+        source: 'cloud',
+      });
+    }
+    return staged;
+  }
+
+  async function collectRestoreCandidates(opts = {}) {
+    const localDir = opts.dir
+      ? V.asString(opts.dir, { name: 'dir', required: true, allowEmpty: false })
+      : defaultBackupDir();
+    const local = backupV2.listLocalBackupFiles(localDir).map((f) => ({ ...f, source: 'local' }));
+    const explicit = Array.isArray(opts.cloudCandidates) ? opts.cloudCandidates : [];
+    if (explicit.length) return [...local, ...explicit];
+    if (opts.includeCloud === false) return local;
+    const staged = await stageCloudBackupsForRestore(Number(opts.cloudCandidateLimit) || 5);
+    return [...local, ...staged];
+  }
+
   function optionalBackupPassword(opts) {
     if (opts.password == null || opts.password === '') return null;
     const password = V.asString(opts.password, { name: 'password', required: false, allowEmpty: true, max: 256 });
@@ -182,6 +240,7 @@ function registerBackupV2Ipc({
       deviceName: identity.deviceName,
       scopeType: opts.scopeType || 'organization',
       retentionCount: Number(opts.retentionCount) || 20,
+      cloudRetentionCount: cloudRetentionCount(opts),
     };
 
     const uploadRequested = opts.cloud === true || opts.upload === true;
@@ -194,12 +253,11 @@ function registerBackupV2Ipc({
     return backupV2.createBackupWithUpload({
       ...createOpts,
       upload: async ({ path: localPath, buffer, filename, hash, manifest }) => {
-        // Stage with resume support, then upload binary to Drive via existing provider.
         const stageDir = path.join(outDir, 'upload-staging');
         fs.mkdirSync(stageDir, { recursive: true });
         const staged = path.join(stageDir, filename);
         uploadWithResume(localPath, staged, { resume: true });
-        const remotePath = `Backups/V2/${filename}`;
+        const remotePath = `${backupV2Cloud.CLOUD_V2_PREFIX}/${filename}`;
         const uploaded = await backupMain.uploadCloud(buffer, filename, 'google', {
           remotePath,
           overwrite: false,
@@ -212,7 +270,6 @@ function registerBackupV2Ipc({
           if (/quota|storageExceeded/i.test(String(uploaded?.message || ''))) err.code = 'quota_exceeded';
           throw err;
         }
-        // Commit remote only after provider ack; remove staging partials.
         try { fs.unlinkSync(staged); } catch { /* ignore */ }
         try { fs.unlinkSync(`${staged}.partial`); } catch { /* ignore */ }
         return {
@@ -224,7 +281,11 @@ function registerBackupV2Ipc({
           filename,
         };
       },
-      pruneAfterUpload: async () => backupV2.pruneLocalBackups(outDir, createOpts.retentionCount, { keepPath: filePath }).pruned,
+      pruneAfterUpload: async (upload) => {
+        const localPruned = backupV2.pruneLocalBackups(outDir, createOpts.retentionCount, { keepPath: filePath }).pruned;
+        const cloudPruned = await pruneCloudAfterUpload(upload, createOpts);
+        return Number(localPruned || 0) + Number(cloudPruned?.pruned || 0);
+      },
     });
   });
 
@@ -279,17 +340,32 @@ function registerBackupV2Ipc({
     return { ok: true, dir, files: backupV2.listLocalBackupFiles(dir) };
   });
 
+  handle('backup:v2:listCloud', async (_e, options) => {
+    const opts = V.asObject(options || {}, { name: 'options' });
+    const prefix = opts.prefix
+      ? V.asString(opts.prefix, { name: 'prefix', required: true, allowEmpty: false })
+      : backupV2Cloud.CLOUD_V2_PREFIX;
+    return backupV2Cloud.listCloudV2Backups(
+      (provider, p) => backupMain.listCloudBackups(provider, p || prefix),
+      prefix
+    );
+  });
+
+  handle('backup:v2:pruneCloud', async (_e, options) => {
+    const opts = V.asObject(options || {}, { name: 'options' });
+    return pruneCloudAfterUpload(
+      { remotePath: opts.keepRemotePath || opts.remotePath || null },
+      opts
+    );
+  });
+
   handle('backup:v2:pickLatest', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
     const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
-    const localDir = opts.dir
-      ? V.asString(opts.dir, { name: 'dir', required: true, allowEmpty: false })
-      : defaultBackupDir();
-    const local = backupV2.listLocalBackupFiles(localDir);
-    const cloud = Array.isArray(opts.cloudCandidates) ? opts.cloudCandidates : [];
+    const candidates = await collectRestoreCandidates(opts);
     const picked = backupV2.pickLatestAuthorizedBackup(
-      [...local, ...cloud],
+      candidates,
       password,
       identity,
       opts
@@ -307,12 +383,8 @@ function registerBackupV2Ipc({
     const opts = V.asObject(options, { name: 'options', required: true });
     const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
-    const localDir = opts.dir
-      ? V.asString(opts.dir, { name: 'dir', required: true, allowEmpty: false })
-      : defaultBackupDir();
-    const local = backupV2.listLocalBackupFiles(localDir);
-    const cloud = Array.isArray(opts.cloudCandidates) ? opts.cloudCandidates : [];
-    const picked = backupV2.pickLatestAuthorizedBackup([...local, ...cloud], password, identity, opts);
+    const candidates = await collectRestoreCandidates(opts);
+    const picked = backupV2.pickLatestAuthorizedBackup(candidates, password, identity, opts);
     if (!picked.ok || !picked.selected?.filePath) {
       const err = new Error('no_authorized_backup');
       err.code = 'no_authorized_backup';
@@ -412,6 +484,7 @@ function registerBackupV2Ipc({
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filePath = path.join(outDir, `Tadawi-Backup-V2-scheduled-${stamp}.tdw`);
         const retentionCount = Number(meta.retentionCount) || 20;
+        const cloudRetention = cloudRetentionCount(meta);
         const createOpts = {
           userDataDir,
           outputPath: filePath,
@@ -426,13 +499,15 @@ function registerBackupV2Ipc({
           centerName: identity.centerName || meta.centerName,
           deviceName: identity.deviceName || meta.deviceName,
           retentionCount,
+          cloudRetentionCount: cloudRetention,
         };
         if (meta.cloudEnabled === true) {
           return backupV2.createBackupWithUpload({
             ...createOpts,
             upload: async ({ buffer, filename, hash, manifest }) => {
+              const remotePath = `${backupV2Cloud.CLOUD_V2_PREFIX}/${filename}`;
               const uploaded = await backupMain.uploadCloud(buffer, filename, 'google', {
-                remotePath: `Backups/V2/${filename}`,
+                remotePath,
                 overwrite: false,
                 sha256: hash,
                 manifest,
@@ -446,13 +521,17 @@ function registerBackupV2Ipc({
               }
               return {
                 ok: true,
-                remotePath: uploaded.path || `Backups/V2/${filename}`,
+                remotePath: uploaded.path || remotePath,
                 id: uploaded.id || null,
                 expectedHash: hash,
                 remoteHash: uploaded.md5 || hash,
               };
             },
-            pruneAfterUpload: async () => backupV2.pruneLocalBackups(outDir, retentionCount, { keepPath: filePath }).pruned,
+            pruneAfterUpload: async (upload) => {
+              const localPruned = backupV2.pruneLocalBackups(outDir, retentionCount, { keepPath: filePath }).pruned;
+              const cloudPruned = await pruneCloudAfterUpload(upload, createOpts);
+              return Number(localPruned || 0) + Number(cloudPruned?.pruned || 0);
+            },
           });
         }
         const created = await backupV2.createBackupFile(createOpts);
