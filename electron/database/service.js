@@ -12,6 +12,7 @@ const { migrateFromSnapshot, exportSnapshot } = require('../../database/migrate-
 const { createSyncPlatform } = require('../../database/sync-outbox');
 const operationalDbHealth = require('../../database/operational-db-health');
 const operationalReadiness = require('../../database/operational-readiness');
+const operationalScope = require('../../database/operational-scope');
 
 let db = null;
 let repos = null;
@@ -96,25 +97,23 @@ function persistTable(tableKey, records, options = {}) {
   ensureDb();
   const list = Array.isArray(records) ? records : [];
   const branchId = options.branchId ? String(options.branchId) : null;
+  if (operationalScope.isOperationalTable(tableKey)) {
+    if (!branchId) {
+      return { ok: false, error: 'branch_id_required', message: 'Operational table writes require branchId' };
+    }
+    try {
+      operationalScope.assertOperationalRecordsBranch(list, branchId);
+    } catch (err) {
+      return { ok: false, error: err.code || 'branch_scope_denied', message: err.message };
+    }
+  }
   const map = {
-    clientsRegistry: () => branchId
-      ? repos.clients.replaceBranchSlice(list, branchId)
-      : repos.clients.replaceAll(list),
-    cases: () => branchId
-      ? repos.visits.replaceBranchSlice(list, branchId)
-      : repos.visits.replaceAll(list),
-    bookings: () => branchId
-      ? repos.bookings.replaceBranchSlice(list, branchId)
-      : repos.bookings.replaceAll(list),
-    doctors: () => branchId
-      ? repos.employees.replaceBranchSlice(list, branchId)
-      : repos.employees.replaceAll(list),
-    attendance: () => branchId
-      ? repos.attendance.replaceBranchSlice(list, branchId)
-      : repos.attendance.replaceAll(list),
-    expenses: () => branchId
-      ? repos.expenses.replaceBranchSlice(list, branchId)
-      : repos.expenses.replaceAll(list),
+    clientsRegistry: () => repos.clients.replaceBranchSlice(list, branchId),
+    cases: () => repos.visits.replaceBranchSlice(list, branchId),
+    bookings: () => repos.bookings.replaceBranchSlice(list, branchId),
+    doctors: () => repos.employees.replaceBranchSlice(list, branchId),
+    attendance: () => repos.attendance.replaceBranchSlice(list, branchId),
+    expenses: () => repos.expenses.replaceBranchSlice(list, branchId),
   };
   if (!map[tableKey]) return { ok: false, error: 'unknown_table' };
   try {
@@ -204,56 +203,89 @@ function migrateFromBackupObject(snapshot, options = {}) {
   return report;
 }
 
-function querySafe(request) {
+function querySafe(request, sessionContext = null) {
   ensureDb();
   const req = request || {};
+  const session = sessionContext || null;
   // Explicit allowlist — never accept arbitrary SQL from renderer
   switch (req.op) {
     case 'status':
       return getStatus();
     case 'count': {
       const table = String(req.table || '');
-      const branchId = req.branchId ? String(req.branchId) : null;
+      const readScope = operationalScope.resolveReadScope(session, req);
+      if (!readScope.ok) return { ok: false, error: readScope.error };
+      const branchId = readScope.branchId;
       const allowed = {
-        clients: () => branchId ? repos.clients.countForBranch(branchId) : repos.clients.count(),
-        visits: () => branchId ? repos.visits.countForBranch(branchId) : repos.visits.count(),
-        bookings: () => branchId ? repos.bookings.countForBranch(branchId) : repos.bookings.count(),
-        employees: () => branchId ? repos.employees.countForBranch(branchId) : repos.employees.count(),
-        attendance: () => branchId ? repos.attendance.countForBranch(branchId) : repos.attendance.count(),
-        expenses: () => branchId ? repos.expenses.countForBranch(branchId) : repos.expenses.count(),
+        clients: () => readScope.aggregate ? repos.clients.count() : repos.clients.countForBranch(branchId),
+        visits: () => readScope.aggregate ? repos.visits.count() : repos.visits.countForBranch(branchId),
+        bookings: () => readScope.aggregate ? repos.bookings.count() : repos.bookings.countForBranch(branchId),
+        employees: () => readScope.aggregate ? repos.employees.count() : repos.employees.countForBranch(branchId),
+        attendance: () => readScope.aggregate ? repos.attendance.count() : repos.attendance.countForBranch(branchId),
+        expenses: () => readScope.aggregate ? repos.expenses.count() : repos.expenses.countForBranch(branchId),
       };
       if (!allowed[table]) return { ok: false, error: 'table_not_allowed' };
-      return { ok: true, count: allowed[table](), branchId: branchId || null };
+      if (!readScope.aggregate) {
+        const access = operationalScope.assertSessionBranchAccess(session, branchId);
+        if (!access.ok) return { ok: false, error: access.error };
+      }
+      return { ok: true, count: allowed[table](), branchId: branchId || null, aggregate: !!readScope.aggregate };
     }
     case 'getById': {
       const table = String(req.table || '');
       const id = String(req.id || '');
-      const branchId = req.branchId ? String(req.branchId) : null;
+      const readScope = operationalScope.resolveReadScope(session, req);
+      if (!readScope.ok) return { ok: false, error: readScope.error };
       if (!id) return { ok: false, error: 'id_required' };
+      const branchId = readScope.branchId;
       const scoped = {
-        clients: () => branchId
-          ? repos.clients.getByIdScoped(id, branchId)
-          : repos.clients.getById(id),
-        visits: () => branchId
-          ? repos.visits.getByIdScoped(id, branchId)
-          : null,
-        bookings: () => branchId
-          ? repos.bookings.getByIdScoped(id, branchId)
-          : null,
-        employees: () => branchId
-          ? repos.employees.getByIdScoped(id, branchId)
-          : null,
-        expenses: () => branchId
-          ? repos.expenses.getByIdScoped(id, branchId)
-          : null,
+        clients: () => readScope.aggregate ? repos.clients.getById(id) : repos.clients.getByIdScoped(id, branchId),
+        visits: () => readScope.aggregate ? repos.visits.getById(id) : repos.visits.getByIdScoped(id, branchId),
+        bookings: () => readScope.aggregate ? repos.bookings.getById(id) : repos.bookings.getByIdScoped(id, branchId),
+        employees: () => readScope.aggregate ? repos.employees.getById(id) : repos.employees.getByIdScoped(id, branchId),
+        attendance: () => readScope.aggregate
+          ? repos.attendance.getAll().find((r) => String(r.id) === id) || null
+          : repos.attendance.getByIdScoped(id, branchId),
+        expenses: () => readScope.aggregate ? repos.expenses.getById(id) : repos.expenses.getByIdScoped(id, branchId),
       };
       if (!scoped[table]) return { ok: false, error: 'table_not_allowed' };
+      if (!readScope.aggregate) {
+        const access = operationalScope.assertSessionBranchAccess(session, branchId);
+        if (!access.ok) return { ok: false, error: access.error };
+      }
       const record = scoped[table]();
       if (!record) return { ok: false, error: 'not_found_or_branch_denied' };
-      return { ok: true, record, branchId: branchId || null };
+      return { ok: true, record, branchId: branchId || null, aggregate: !!readScope.aggregate };
     }
-    case 'sumVisits':
-      return { ok: true, sum: repos.visits.sumTotal() };
+    case 'listForBranch': {
+      const table = String(req.table || '');
+      const readScope = operationalScope.resolveReadScope(session, req);
+      if (!readScope.ok) return { ok: false, error: readScope.error };
+      if (readScope.aggregate) return { ok: false, error: 'aggregate_read_use_hydrate' };
+      const branchId = readScope.branchId;
+      const access = operationalScope.assertSessionBranchAccess(session, branchId);
+      if (!access.ok) return { ok: false, error: access.error };
+      const listMap = {
+        clients: () => repos.clients.getAllForBranch(branchId),
+        visits: () => repos.visits.getAllForBranch(branchId),
+        bookings: () => repos.bookings.getAllForBranch(branchId),
+        employees: () => repos.employees.getAllForBranch(branchId),
+        attendance: () => repos.attendance.getAllForBranch(branchId),
+        expenses: () => repos.expenses.getAllForBranch(branchId),
+      };
+      if (!listMap[table]) return { ok: false, error: 'table_not_allowed' };
+      return { ok: true, records: listMap[table](), branchId, count: listMap[table]().length };
+    }
+    case 'sumVisits': {
+      const readScope = operationalScope.resolveReadScope(session, req);
+      if (!readScope.ok) return { ok: false, error: readScope.error };
+      if (readScope.aggregate) {
+        return { ok: true, sum: repos.visits.sumTotal(), aggregate: true };
+      }
+      const access = operationalScope.assertSessionBranchAccess(session, readScope.branchId);
+      if (!access.ok) return { ok: false, error: access.error };
+      return { ok: true, sum: repos.visits.sumTotalForBranch(readScope.branchId), branchId: readScope.branchId };
+    }
     default:
       return { ok: false, error: 'op_not_allowed' };
   }
@@ -266,24 +298,12 @@ function ensureSync() {
 }
 
 const TABLE_PERSIST = {
-  clientsRegistry: (list, branchId) => branchId
-    ? repos.clients.replaceBranchSlice(list, branchId)
-    : repos.clients.replaceAll(list),
-  cases: (list, branchId) => branchId
-    ? repos.visits.replaceBranchSlice(list, branchId)
-    : repos.visits.replaceAll(list),
-  bookings: (list, branchId) => branchId
-    ? repos.bookings.replaceBranchSlice(list, branchId)
-    : repos.bookings.replaceAll(list),
-  doctors: (list, branchId) => branchId
-    ? repos.employees.replaceBranchSlice(list, branchId)
-    : repos.employees.replaceAll(list),
-  attendance: (list, branchId) => branchId
-    ? repos.attendance.replaceBranchSlice(list, branchId)
-    : repos.attendance.replaceAll(list),
-  expenses: (list, branchId) => branchId
-    ? repos.expenses.replaceBranchSlice(list, branchId)
-    : repos.expenses.replaceAll(list),
+  clientsRegistry: (list, branchId) => repos.clients.replaceBranchSlice(list, branchId),
+  cases: (list, branchId) => repos.visits.replaceBranchSlice(list, branchId),
+  bookings: (list, branchId) => repos.bookings.replaceBranchSlice(list, branchId),
+  doctors: (list, branchId) => repos.employees.replaceBranchSlice(list, branchId),
+  attendance: (list, branchId) => repos.attendance.replaceBranchSlice(list, branchId),
+  expenses: (list, branchId) => repos.expenses.replaceBranchSlice(list, branchId),
 };
 
 function applyBundleSteps(steps) {
@@ -292,9 +312,13 @@ function applyBundleSteps(steps) {
     if (!step || typeof step !== 'object') continue;
     if (step.type === 'table') {
       const tableKey = String(step.tableKey || '');
+      const branchId = step.branchId ? String(step.branchId) : null;
+      if (operationalScope.isOperationalTable(tableKey)) {
+        operationalScope.assertWriteBranchId(branchId);
+        operationalScope.assertOperationalRecordsBranch(Array.isArray(step.records) ? step.records : [], branchId);
+      }
       const fn = TABLE_PERSIST[tableKey];
       if (!fn) throw Object.assign(new Error('unknown_table'), { code: 'unknown_table' });
-      const branchId = step.branchId ? String(step.branchId) : null;
       fn(Array.isArray(step.records) ? step.records : [], branchId);
     } else if (step.type === 'kv') {
       const key = String(step.key || '');
@@ -327,29 +351,24 @@ function syncOp(request) {
       });
     }
     case 'enqueueAtomicPersistTable': {
-      // SQLite SoT: table replace + outbox in one transaction
       const tableKey = String(req.tableKey || '');
       const records = Array.isArray(req.records) ? req.records : [];
       const branchId = req.branchId ? String(req.branchId) : null;
+      if (operationalScope.isOperationalTable(tableKey)) {
+        if (!branchId) return { ok: false, error: 'branch_id_required' };
+        try {
+          operationalScope.assertOperationalRecordsBranch(records, branchId);
+        } catch (err) {
+          return { ok: false, error: err.code || 'branch_scope_denied', message: err.message };
+        }
+      }
       const map = {
-        clientsRegistry: () => branchId
-          ? repos.clients.replaceBranchSlice(records, branchId)
-          : repos.clients.replaceAll(records),
-        cases: () => branchId
-          ? repos.visits.replaceBranchSlice(records, branchId)
-          : repos.visits.replaceAll(records),
-        bookings: () => branchId
-          ? repos.bookings.replaceBranchSlice(records, branchId)
-          : repos.bookings.replaceAll(records),
-        doctors: () => branchId
-          ? repos.employees.replaceBranchSlice(records, branchId)
-          : repos.employees.replaceAll(records),
-        attendance: () => branchId
-          ? repos.attendance.replaceBranchSlice(records, branchId)
-          : repos.attendance.replaceAll(records),
-        expenses: () => branchId
-          ? repos.expenses.replaceBranchSlice(records, branchId)
-          : repos.expenses.replaceAll(records),
+        clientsRegistry: () => repos.clients.replaceBranchSlice(records, branchId),
+        cases: () => repos.visits.replaceBranchSlice(records, branchId),
+        bookings: () => repos.bookings.replaceBranchSlice(records, branchId),
+        doctors: () => repos.employees.replaceBranchSlice(records, branchId),
+        attendance: () => repos.attendance.replaceBranchSlice(records, branchId),
+        expenses: () => repos.expenses.replaceBranchSlice(records, branchId),
       };
       if (!map[tableKey]) return { ok: false, error: 'unknown_table' };
       return sp.enqueueAtomic(req.entry || {}, () => {

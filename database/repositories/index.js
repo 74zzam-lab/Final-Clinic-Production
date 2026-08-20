@@ -70,6 +70,7 @@ function createClientRepository(db) {
     },
     countForBranch: (branchId) => branchSlice.countForBranch(db, 'clients', branchId),
     getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'clients', id, branchId),
+    getAllForBranch: (branchId) => branchSlice.listForBranch(db, 'clients', branchId),
   };
 }
 
@@ -138,6 +139,8 @@ function createVisitRepository(db) {
     },
     countForBranch: (branchId) => branchSlice.countForBranch(db, 'visits', branchId),
     getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'visits', id, branchId),
+    getAllForBranch: (branchId) => branchSlice.listForBranch(db, 'visits', branchId),
+    sumTotalForBranch: (branchId) => branchSlice.sumTotalForBranch(db, branchId),
   };
 }
 
@@ -188,6 +191,7 @@ function createBookingRepository(db) {
     },
     countForBranch: (branchId) => branchSlice.countForBranch(db, 'appointments', branchId),
     getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'appointments', id, branchId),
+    getAllForBranch: (branchId) => branchSlice.listForBranch(db, 'appointments', branchId),
   };
 }
 
@@ -239,6 +243,7 @@ function createEmployeeRepository(db) {
     },
     countForBranch: (branchId) => branchSlice.countForBranch(db, 'employees', branchId),
     getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'employees', id, branchId),
+    getAllForBranch: (branchId) => branchSlice.listForBranch(db, 'employees', branchId),
   };
 }
 
@@ -295,6 +300,27 @@ function createAttendanceRepository(db) {
       }
       return count;
     },
+    getByIdScoped(id, branchId) {
+      const row = db.prepare('SELECT payload_json FROM attendance WHERE id = ?').get(String(id));
+      if (!row) return null;
+      try {
+        const payload = JSON.parse(row.payload_json);
+        return branchSlice.recordMatchesBranch(payload, branchId) ? payload : null;
+      } catch {
+        return null;
+      }
+    },
+    getAllForBranch(branchId) {
+      const bid = branchSlice.normalizeBranchId(branchId);
+      const out = [];
+      for (const row of db.prepare('SELECT payload_json FROM attendance').all()) {
+        try {
+          const payload = JSON.parse(row.payload_json);
+          if (branchSlice.recordMatchesBranch(payload, bid)) out.push(payload);
+        } catch { /* skip */ }
+      }
+      return out;
+    },
   };
 }
 
@@ -343,6 +369,7 @@ function createExpenseRepository(db) {
     },
     countForBranch: (branchId) => branchSlice.countForBranch(db, 'expenses', branchId),
     getByIdScoped: (id, branchId) => branchSlice.getByIdScoped(db, 'expenses', id, branchId),
+    getAllForBranch: (branchId) => branchSlice.listForBranch(db, 'expenses', branchId),
   };
 }
 

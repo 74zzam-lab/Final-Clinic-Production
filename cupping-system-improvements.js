@@ -28,7 +28,8 @@ function performInvoiceSearch(resetPage) {
     if (typeof renderTablePagination === 'function') renderTablePagination('invoiceSearchPagination', 1, 0, 0, 'goInvoiceSearchPage');
     return;
   }
-  const results = cases.filter(c => {
+  const scopedCases = typeof getUiScopedRecords === 'function' ? getUiScopedRecords(cases || []) : (cases || []);
+  const results = scopedCases.filter(c => {
     if (type === 'name') return (c.name || '').toLowerCase().includes(q);
     if (type === 'phone') return (c.phone || '').includes(q);
     if (type === 'fileNo') return (c.fileNo || '').toLowerCase().includes(q);

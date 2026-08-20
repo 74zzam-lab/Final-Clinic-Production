@@ -77,6 +77,34 @@ function replaceBranchSlice(db, tableName, repo, list, branchId, onBeforeDelete)
   tx(list, bid);
 }
 
+function listForBranch(db, tableName, branchId) {
+  const bid = normalizeBranchId(branchId);
+  const rows = selectIdsForBranch(db, tableName, bid);
+  const out = [];
+  for (const row of rows) {
+    const full = db.prepare(
+      `SELECT payload_json FROM ${tableName} WHERE id = ?`
+    ).get(String(row.id));
+    if (!full) continue;
+    try {
+      out.push(JSON.parse(full.payload_json));
+    } catch { /* skip corrupt */ }
+  }
+  return out;
+}
+
+function sumTotalForBranch(db, branchId) {
+  const bid = normalizeBranchId(branchId);
+  if (bid === DEFAULT_BRANCH_ID) {
+    return db.prepare(
+      `SELECT COALESCE(SUM(total),0) AS s FROM visits WHERE branch_id = ? OR branch_id IS NULL`
+    ).get(bid).s;
+  }
+  return db.prepare(
+    `SELECT COALESCE(SUM(total),0) AS s FROM visits WHERE branch_id = ?`
+  ).get(bid).s;
+}
+
 function replaceAttendanceBranchSlice(db, repo, list, branchId) {
   const bid = normalizeBranchId(branchId);
   const tx = db.transaction((items, b) => {
@@ -108,4 +136,6 @@ module.exports = {
   getByIdScoped,
   replaceBranchSlice,
   replaceAttendanceBranchSlice,
+  listForBranch,
+  sumTotalForBranch,
 };

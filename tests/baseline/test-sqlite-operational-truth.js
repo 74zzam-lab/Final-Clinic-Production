@@ -59,8 +59,8 @@ function makeBridgeSandbox(sqliteData, options = {}) {
     database: {
       status: async () => ({ ok: true, sqlitePrimary: true }),
       enableSqlitePrimary: async () => ({ ok: true, sqlitePrimary: true }),
-      persistTable: async (tableKey, records) => {
-        persistLog.tables.push({ tableKey, records });
+      persistTable: async (tableKey, records, branchId) => {
+        persistLog.tables.push({ tableKey, records, branchId });
         if (persistShouldFail) return { ok: false, error: 'forced_fail' };
         return { ok: true };
       },
@@ -80,6 +80,16 @@ function makeBridgeSandbox(sqliteData, options = {}) {
         data: sqliteData,
       }),
     },
+  };
+  sb.BranchContexts = {
+    getOperationalWriteBranch: () => 'BR-MAIN',
+    assertOperationalWriteContext: () => ({ ok: true, branchId: 'BR-MAIN' }),
+  };
+  sb.DeviceConfig = { isBranchLocked: () => false };
+  sb.BranchScope = {
+    filterForActiveView: (records) => records,
+    filterByBranch: (records) => records,
+    isAggregateBranchView: () => false,
   };
   vm.runInNewContext(registrySrc, sb, { timeout: 2000, filename: 'registry.js' });
   vm.runInNewContext(bridgeSrc, sb, { timeout: 2000, filename: 'bridge.js' });
