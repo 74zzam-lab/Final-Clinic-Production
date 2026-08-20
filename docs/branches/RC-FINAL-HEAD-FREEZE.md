@@ -11,7 +11,7 @@
 |------|-------|
 | **RC branch** | `cursor/final-stable-operational-rc-7c71` |
 | **RUNTIME / BUILD SOURCE COMMIT** | `c2c2ad6650797af8e9769722aaa094f76176459e` |
-| **EVIDENCE / DOC HEAD** | `28d77d91835bda1c551944f0d3e1619e025e82c4` |
+| **EVIDENCE / DOC HEAD** | `1e7800a02293217d0abada64d46bcf3948658dab` |
 | **PR13 base** | `59d443a148fc271b26065f84b5a697f015504f35` |
 | **Version** | `2.0.1` |
 | **EXE SHA-256** | `174ab10a016deddfe3758e08bec59e47cd953a0535b167bbd108e4bbb25747a9` |
@@ -29,7 +29,7 @@ Machine-readable copy: `docs/branches/RC-BUILD-IDENTITY.json`
 |-------|-------|
 | RC branch | `cursor/final-stable-operational-rc-7c71` |
 | Runtime build source | `c2c2ad6` (tree used when EXE was built) |
-| Evidence/doc HEAD | `28d77d9` (manifest, RC report, PR description) |
+| Evidence/doc HEAD | `1e7800a` (identity docs; supersedes `28d77d9`) |
 | PR13 feature base | `59d443a` |
 | Product | Hijama Management System |
 | Electron | 43.2.0 |
@@ -101,13 +101,18 @@ All 14 anchor commits verified as ancestors of Final HEAD (`scripts/rc-consolida
 |-------|-------|
 | Build command | `npm run build:dir` |
 | Build time (UTC) | 2026-08-20T20:38:24Z |
+| Build source commit | `c2c2ad6650797af8e9769722aaa094f76176459e` |
 | EXE | `dist/win-unpacked/Hijama Management System.exe` |
 | EXE SHA-256 | `174ab10a016deddfe3758e08bec59e47cd953a0535b167bbd108e4bbb25747a9` |
 | ASAR | `dist/win-unpacked/resources/app.asar` |
 | ASAR SHA-256 | `f8a02983e7fedf5c8027c18665e6c8a48fdd8aea2302b7b00cb4f8056d6400fe` |
 | NSIS installer | Not produced (`build:dir` unpacked only) |
 
-**Note:** All runtime UAT must use this single EXE build identity.
+**Note:** UAT must use only this EXE SHA-256. Commits after `c2c2ad6` are docs/scripts only — no rebuild.
+
+### Post-build commit audit (`c2c2ad6..1e7800a`)
+
+Packaged runtime paths unchanged. Rebuild **not** required.
 
 ---
 

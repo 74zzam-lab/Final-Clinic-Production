@@ -2,7 +2,7 @@
   "status": "SOURCE VERIFIED / RUNTIME UAT PENDING",
   "rcBranch": "cursor/final-stable-operational-rc-7c71",
   "runtimeBuildSourceCommit": "c2c2ad6650797af8e9769722aaa094f76176459e",
-  "evidenceDocHeadCommit": "28d77d91835bda1c551944f0d3e1619e025e82c4",
+  "evidenceDocHeadCommit": "1e7800a02293217d0abada64d46bcf3948658dab",
   "pr13BaseCommit": "59d443a148fc271b26065f84b5a697f015504f35",
   "version": "2.0.1",
   "productName": "Hijama Management System",
@@ -12,7 +12,7 @@
   "electronVersion": "43.2.0",
   "postBuildVerification": {
     "commitsAfterBuildSourceAreDocOnly": true,
-    "commitRange": "c2c2ad6..28d77d9",
+    "commitRange": "c2c2ad6..1e7800a",
     "filesChangedInRange": [
       "docs/branches/RC-FINAL-HEAD-FREEZE-MANIFEST.json",
       "docs/branches/RC-FINAL-HEAD-FREEZE.md"
