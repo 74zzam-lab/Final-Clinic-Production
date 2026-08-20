@@ -157,6 +157,7 @@ function pickLatestAuthorizedBackup(candidates, password, expectedIdentity = {},
         createdMs,
         backupId: info.manifest?.backupId || null,
         source: info.manifest?.source || null,
+        manifest: info.manifest || null,
         database: info.database,
       });
     } catch (error) {
@@ -384,11 +385,14 @@ function buildManifest(options, entries, databaseInfo) {
       deviceId: String(options.deviceId || '').slice(0, 128),
     },
     scope: {
-      type: String(options.scopeType || 'organization').slice(0, 32),
+      type: String(options.scopeType || 'branch').slice(0, 32),
       organizationId: String(options.organizationId || options.centerId || '').slice(0, 128),
       branchIds: Array.isArray(options.branchIds)
         ? options.branchIds.slice(0, 100).map(value => String(value).slice(0, 128))
-        : (options.branchId ? [String(options.branchId).slice(0, 128)] : [])
+        : (options.branchId ? [String(options.branchId).slice(0, 128)] : []),
+      includedBranchIds: Array.isArray(options.includedBranchIds)
+        ? options.includedBranchIds.slice(0, 100).map(value => String(value).slice(0, 128))
+        : undefined,
     },
     roots: [...RESTORE_ROOTS],
     encryption: { required: false, algorithm: null, note: 'plaintext_zip_v2_plain' },
@@ -555,6 +559,9 @@ async function createBackupBuffer(options) {
     // Phase 3: no clinic field-key / security material in operational backup path.
 
     const manifest = buildManifest(options, entries, databaseInfo);
+    if (options.scopeTruth) {
+      require('./backup-v2-scope-truth').applyScopeTruthToManifest(manifest, options.scopeTruth);
+    }
     entries[MANIFEST_PATH] = fflate.strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
     emitProgress(options, 'compressing', { files: manifest.files.length });
     const zipBuffer = zipEntries(entries);
@@ -929,6 +936,7 @@ function friendlyBackupError(error) {
     restore_branch_missing: 'رُفضت الاستعادة: النسخة لا تتضمن هوية الفرع المطلوبة.',
     restore_request_invalid: 'طلب الاستعادة غير صالح.',
     no_authorized_backup: 'لا توجد نسخة مصرّح بها يمكن استعادتها.',
+    org_backup_not_ready: 'لا يمكن إنشاء نسخة مؤسسة — أكمل مزامنة جميع الفروع وأغلق التعارضات والـOutbox أولاً.',
   };
   return { code, message: messages[code] || `تعذّر إكمال عملية النسخ أو الاستعادة (${code}).` };
 }

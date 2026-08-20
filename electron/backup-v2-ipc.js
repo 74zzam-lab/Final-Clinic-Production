@@ -9,6 +9,7 @@ const fs = require('fs');
 const { dialog } = require('electron');
 const backupV2 = require('./backup-v2-core');
 const backupV2Cloud = require('./backup-v2-cloud');
+const backupV2ScopeTruth = require('./backup-v2-scope-truth');
 const { BackupV2Scheduler } = require('./backup-v2-scheduler');
 const { copyWithResume, uploadWithResume } = require('./backup-v2-transfer');
 const backupMain = require('./backup');
@@ -94,6 +95,45 @@ function registerBackupV2Ipc({
     const fromLive = typeof getLiveIdentity === 'function' ? (getLiveIdentity() || {}) : {};
     return asIdentity({ ...fromLive, ...opts });
   }
+
+  function databasePath() {
+    return path.join(getUserDataPath(), 'database', 'tadawi.db');
+  }
+
+  function buildScopeContext(opts = {}, identity = {}) {
+    return {
+      centerId: identity.centerId,
+      organizationId: identity.organizationId,
+      branchId: identity.branchId,
+      deviceId: identity.deviceId,
+      sourceDeviceId: opts.sourceDeviceId || identity.deviceId,
+      appVersion: appVersion || '2.0.0',
+      licensedBranchIds: Array.isArray(opts.licensedBranchIds) ? opts.licensedBranchIds : [],
+      localBranchIds: Array.isArray(opts.localBranchIds) ? opts.localBranchIds : [],
+      branchNames: opts.branchNames && typeof opts.branchNames === 'object' ? opts.branchNames : {},
+      branchIds: identity.authorizedBranchIds,
+    };
+  }
+
+  function resolveScopeForCreate(opts = {}, identity = {}) {
+    const userDataDir = getUserDataPath();
+    const dbPath = databasePath();
+    const scopeCtx = buildScopeContext(opts, identity);
+    const signals = backupV2ScopeTruth.collectDatabaseSignals(dbPath, userDataDir, scopeCtx);
+    const requestedScope = String(opts.scopeType || SCOPE_BRANCH_DEFAULT).toLowerCase();
+    try {
+      const scopeTruth = backupV2ScopeTruth.resolveBackupScope(requestedScope, signals, scopeCtx);
+      return { scopeTruth, signals, requestedScope: scopeTruth.scopeType };
+    } catch (error) {
+      const friendly = backupV2.friendlyBackupError(error);
+      const err = new Error(friendly.message);
+      err.code = friendly.code;
+      err.details = error.details || null;
+      throw err;
+    }
+  }
+
+  const SCOPE_BRANCH_DEFAULT = 'branch';
 
   function defaultBackupDir() {
     return path.join(getUserDataPath(), 'Backups', 'V2');
@@ -214,10 +254,20 @@ function registerBackupV2Ipc({
     };
   });
 
+  handle('backup:v2:readiness', async (_e, options) => {
+    const opts = V.asObject(options || {}, { name: 'options' });
+    const identity = resolveIdentity(opts);
+    const userDataDir = getUserDataPath();
+    const dbPath = databasePath();
+    const scopeCtx = buildScopeContext(opts, identity);
+    return backupV2ScopeTruth.assessBackupReadiness(userDataDir, dbPath, scopeCtx);
+  });
+
   handle('backup:v2:create', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options' });
     const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
+    const { scopeTruth, requestedScope } = resolveScopeForCreate(opts, identity);
     const userDataDir = getUserDataPath();
     const outDir = opts.outputDir
       ? V.asString(opts.outputDir, { name: 'outputDir', required: true, allowEmpty: false })
@@ -234,11 +284,13 @@ function registerBackupV2Ipc({
       centerId: identity.centerId,
       organizationId: identity.organizationId,
       branchId: identity.branchId,
-      branchIds: identity.authorizedBranchIds,
+      branchIds: scopeTruth.includedBranchIds,
+      includedBranchIds: scopeTruth.includedBranchIds,
       deviceId: identity.deviceId,
       centerName: identity.centerName,
       deviceName: identity.deviceName,
-      scopeType: opts.scopeType || 'organization',
+      scopeType: requestedScope,
+      scopeTruth,
       retentionCount: Number(opts.retentionCount) || 20,
       cloudRetentionCount: cloudRetentionCount(opts),
     };
@@ -316,6 +368,7 @@ function registerBackupV2Ipc({
     return {
       ok: true,
       manifest: inspected.manifest,
+      scope: backupV2ScopeTruth.extractScopeSummaryFromManifest(inspected.manifest),
       database: inspected.database,
       encrypted: inspected.encrypted,
       packageSha256: inspected.packageSha256,
@@ -477,6 +530,10 @@ function registerBackupV2Ipc({
       credentialVault: vault,
       runBackup: async (password, meta = {}) => {
         const identity = resolveIdentity(meta);
+        const { scopeTruth, requestedScope } = resolveScopeForCreate(
+          { ...meta, scopeType: meta.scopeType || SCOPE_BRANCH_DEFAULT },
+          identity
+        );
         const outDir = meta.localPath && String(meta.localPath).trim()
           ? String(meta.localPath).trim()
           : defaultBackupDir();
@@ -494,10 +551,13 @@ function registerBackupV2Ipc({
           centerId: identity.centerId,
           organizationId: identity.organizationId,
           branchId: identity.branchId,
-          branchIds: identity.authorizedBranchIds,
+          branchIds: scopeTruth.includedBranchIds,
+          includedBranchIds: scopeTruth.includedBranchIds,
           deviceId: identity.deviceId,
           centerName: identity.centerName || meta.centerName,
           deviceName: identity.deviceName || meta.deviceName,
+          scopeType: requestedScope,
+          scopeTruth,
           retentionCount,
           cloudRetentionCount: cloudRetention,
         };
@@ -552,6 +612,7 @@ module.exports = {
   isBackupV2Enabled,
   registerBackupV2Ipc,
   backupV2,
+  backupV2ScopeTruth,
   asIdentity,
   createFileCredentialVault,
 };
