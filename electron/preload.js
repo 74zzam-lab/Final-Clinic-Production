@@ -48,6 +48,7 @@ const ALLOWED_INVOKE = new Set([
   'backup:syncDbBackup',
   'backup:verifyDbBackup',
   'backup:v2:health',
+  'backup:v2:readiness',
   'backup:v2:create',
   'backup:v2:verify',
   'backup:v2:inspect',
@@ -203,6 +204,7 @@ const cuppingApi = {
     verifyDbBackup: (remotePath, expectedHash) =>
       invoke('backup:verifyDbBackup', remotePath, expectedHash),
     v2Health: () => invoke('backup:v2:health'),
+    v2Readiness: (options) => invoke('backup:v2:readiness', options),
     v2Create: (options) => invoke('backup:v2:create', options),
     v2Verify: (options) => invoke('backup:v2:verify', options),
     v2Inspect: (options) => invoke('backup:v2:inspect', options),

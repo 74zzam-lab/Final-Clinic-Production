@@ -158,8 +158,9 @@
         const src = e.source === 'cloud' ? '☁️ Drive' : '💻 محلي';
         const when = e.createdAt || e.modifiedAt || '';
         const size = fmtSize(e.size);
+        const scope = e.scopeLabelAr ? `<br><span style="font-size:10px;color:var(--primary)">${e.scopeLabelAr}</span>` : '';
         return `<button type="button" class="btn btn-ghost btn-sm" data-restore-point="${e.id}" aria-label="Select restore point ${e.label}" style="justify-content:space-between;text-align:start;align-items:flex-start">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%">${global.OpsStatus?.truncateName?.(e.label, 42) || e.label}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%">${global.OpsStatus?.truncateName?.(e.label, 42) || e.label}${scope}</span>
         <span dir="ltr" style="font-size:11px;color:var(--text-muted);text-align:end;line-height:1.4">${src}<br>${size} · ${when}</span>
       </button>`;
       }).join('') || '<div class="oh-muted">لا توجد نقاط استعادة — أنشئ نسخة كاملة أو افحص Drive</div>'}
@@ -200,11 +201,18 @@
       willOverwrite: true,
       identity: options.identity || {},
       counts: options.counts || {},
+      scopeSummary: options.scopeSummary || null,
     });
     const pre = preState.preSummary || preState;
+    const scopeLine = options.scopeSummary?.scopeLabelAr
+      ? `<p style="margin:0 0 10px;padding:10px 12px;border-radius:8px;background:rgba(61,90,128,.08);border:1px solid var(--primary-light);font-weight:700">${options.scopeSummary.scopeLabelAr}</p>`
+      : (pre.scopeSummary?.scopeLabelAr
+        ? `<p style="margin:0 0 10px;padding:10px 12px;border-radius:8px;background:rgba(61,90,128,.08);border:1px solid var(--primary-light);font-weight:700">${pre.scopeSummary.scopeLabelAr}</p>`
+        : '');
     if (body) {
       body.innerHTML = `<div style="font-size:13px;line-height:1.6">
         <p><strong>ملخص ما قبل الاستعادة</strong></p>
+        ${scopeLine}
         <pre style="white-space:pre-wrap;background:var(--surface,#f5f5f5);padding:8px;border-radius:8px;font-size:12px" dir="ltr">${JSON.stringify(pre, null, 2)}</pre>
         <label for="ops-ux-typed-confirm">اكتب <b>استعادة</b> للتأكيد</label>
         <input id="ops-ux-typed-confirm" class="form-control" autocomplete="off" aria-label="Type restore confirmation phrase" style="margin-top:6px">

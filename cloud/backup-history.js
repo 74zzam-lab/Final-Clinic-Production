@@ -54,6 +54,9 @@
       label,
       source: raw.source || 'local',
       remotePath: raw.remotePath || (raw.source === 'cloud' ? path : ''),
+      scopeType: raw.scopeType || raw.classification || null,
+      scopeLabelAr: raw.scopeLabelAr || null,
+      includedBranchIds: Array.isArray(raw.includedBranchIds) ? raw.includedBranchIds : [],
     };
   }
 

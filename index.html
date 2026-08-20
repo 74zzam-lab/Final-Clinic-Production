@@ -6515,6 +6515,15 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
           <div class="backup-status-item"><label>البوابة</label><strong id="bk-v2-gate">—</strong></div>
           <div class="backup-status-item"><label>آخر جدولة</label><strong id="bk-v2-sched">—</strong></div>
         </div>
+        <div class="form-group" style="margin-top:12px">
+          <label class="form-label">نطاق النسخة (Scope Truth)</label>
+          <select class="form-control" id="bk-v2-scope-type" onchange="refreshBackupV2ReadinessUi()">
+            <option value="branch" selected>نسخة فرع — الفرع النشط فقط</option>
+            <option value="organization">نسخة مؤسسة — جميع الفروع المرخّصة</option>
+          </select>
+          <p id="bk-v2-scope-label" class="backup-card-desc" style="margin:8px 0 0;font-weight:700">—</p>
+          <div id="bk-v2-readiness-panel" style="margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--surface);border:1px dashed var(--border);font-size:12px;line-height:1.7;color:var(--text-muted)">⏳ جاري فحص جاهزية النسخ...</div>
+        </div>
       </div>
 
       <div class="card" style="grid-column:1/-1">
@@ -17214,6 +17223,7 @@ function getBackupV2Api() {
 }
 
 function getBackupV2IdentityMeta() {
+  const scopeType = document.getElementById('bk-v2-scope-type')?.value || 'branch';
   return {
     organizationId: (typeof Organization !== 'undefined' && Organization.getId?.()) || (typeof CenterId !== 'undefined' && CenterId.getStoredCenterId?.()) || '',
     centerId: (typeof CenterId !== 'undefined' && CenterId.getStoredCenterId?.()) || '',
@@ -17224,8 +17234,85 @@ function getBackupV2IdentityMeta() {
     deviceId: (typeof DeviceConfig !== 'undefined' && DeviceConfig.load?.()?.deviceId) || '',
     centerName: settings?.centerName || '',
     deviceName: settings?.backup?.deviceName || (typeof DeviceConfig !== 'undefined' && DeviceConfig.load?.()?.deviceName) || '',
-    scopeType: 'organization',
+    scopeType,
   };
+}
+
+function getBackupV2ScopeContext() {
+  const meta = getBackupV2IdentityMeta();
+  const lic = (typeof LicenseCloud !== 'undefined' && LicenseCloud.loadLocal) ? LicenseCloud.loadLocal() : null;
+  const branches = Array.isArray(lic?.branches) ? lic.branches.filter(b => b && b.active !== false) : [];
+  const branchNames = {};
+  branches.forEach((b) => { if (b?.id) branchNames[b.id] = b.name || b.id; });
+  const activeBranch = meta.branchId || branches[0]?.id || '';
+  if (activeBranch && !branchNames[activeBranch]) {
+    branchNames[activeBranch] = branches.find(b => b.id === activeBranch)?.name || activeBranch;
+  }
+  let localBranchIds = branches.map(b => b.id).filter(Boolean);
+  if (typeof BranchContexts !== 'undefined' && BranchContexts.listBranchIds) {
+    try {
+      const listed = BranchContexts.listBranchIds();
+      if (Array.isArray(listed) && listed.length) localBranchIds = listed;
+    } catch { /* optional */ }
+  }
+  let syncRevisionByBranch = {};
+  try {
+    const versions = typeof VersionsIndex !== 'undefined' && VersionsIndex.loadLocal
+      ? VersionsIndex.loadLocal(meta.centerId)
+      : null;
+    if (versions?.branches) syncRevisionByBranch = versions.branches;
+  } catch { /* optional */ }
+  return {
+    ...meta,
+    licensedBranchIds: branches.map(b => b.id).filter(Boolean),
+    localBranchIds,
+    branchNames,
+    syncRevisionByBranch,
+    sourceDeviceId: meta.deviceId,
+  };
+}
+
+function formatBackupScopeReadinessHtml(readiness) {
+  if (!readiness) return '—';
+  const scopeType = document.getElementById('bk-v2-scope-type')?.value || 'branch';
+  if (scopeType === 'organization') {
+    const org = readiness.organization || {};
+    if (org.ok) {
+      return '✅ جاهز لنسخة مؤسسة — جميع الفروع محدثة، Outbox=0، تعارضات=0، SQLite PASS';
+    }
+    const reasons = (org.reasons || []).map(r => `• ${r.message || r.code}`).join('<br>');
+    return `⛔ غير جاهز لنسخة مؤسسة:<br>${reasons || '—'}`;
+  }
+  const branch = readiness.branch || {};
+  return branch.ready
+    ? `✅ جاهز لنسخة فرع: ${branch.scopeLabelAr || '—'}`
+    : `⚠️ نسخة فرع ممكنة لكن تحقق من SQLite/Outbox/التعارضات`;
+}
+
+async function refreshBackupV2ReadinessUi() {
+  const panel = document.getElementById('bk-v2-readiness-panel');
+  const labelEl = document.getElementById('bk-v2-scope-label');
+  const scopeType = document.getElementById('bk-v2-scope-type')?.value || 'branch';
+  const ctx = getBackupV2ScopeContext();
+  const branchName = ctx.branchNames?.[ctx.branchId] || ctx.branchId || '—';
+  if (labelEl) {
+    labelEl.textContent = scopeType === 'organization'
+      ? 'نسخة مؤسسة: ' + (ctx.licensedBranchIds || []).map(id => ctx.branchNames?.[id] || id).join('، ') || '—'
+      : 'نسخة فرع: ' + branchName;
+  }
+  const orgOpt = document.querySelector('#bk-v2-scope-type option[value="organization"]');
+  const api = getBackupV2Api();
+  if (!api?.v2Readiness) {
+    if (panel) panel.textContent = 'فحص الجاهزية غير متاح في هذه الجلسة';
+    return;
+  }
+  try {
+    const readiness = await api.v2Readiness(getBackupV2ScopeContext());
+    if (panel) panel.innerHTML = formatBackupScopeReadinessHtml(readiness);
+    if (orgOpt) orgOpt.disabled = readiness?.organizationAllowed !== true;
+  } catch (err) {
+    if (panel) panel.textContent = String(err?.message || err).slice(0, 200);
+  }
 }
 
 function getBackupV2CloudOptions() {
@@ -17322,6 +17409,7 @@ async function refreshBackupV2Status() {
     const schedCloud = document.getElementById('bk-v2-schedule-cloud');
     if (schedCloud && sched) schedCloud.checked = sched.cloudEnabled !== false;
     if (cloudUpload && sched) cloudUpload.checked = sched.cloudEnabled !== false;
+    if (typeof refreshBackupV2ReadinessUi === 'function') await refreshBackupV2ReadinessUi();
   } catch (err) {
     const st = document.getElementById('bk-v2-status');
     if (st) st.textContent = String(err?.message || err).slice(0, 80);
@@ -17348,15 +17436,18 @@ async function runBackupV2Create() {
       backupType: 'manual',
       cloud: uploadDrive,
       upload: uploadDrive,
-      ...getBackupV2IdentityMeta(),
+      ...getBackupV2ScopeContext(),
       ...getBackupV2CloudOptions(),
     });
     if (res?.ok || res?.path || res?.hash) {
+      const scopeLabel = res?.manifest?.scopeTruth?.scopeLabelAr
+        || res?.manifest?.scope?.scopeLabelAr
+        || '';
       const cloudMsg = res?.cloudOk
         ? ' — تم الرفع إلى Drive'
         : (uploadDrive ? ' — محلي فقط (فشل/تخطي Drive)' : ' — محلي فقط');
       const prunedMsg = Number(res?.pruned) > 0 ? ` (حُذفت ${res.pruned} نسخة قديمة)` : '';
-      notify('✅ تم إنشاء نسخة Backup V2' + cloudMsg + prunedMsg, res?.cloudOk === false && uploadDrive ? 'warning' : 'success');
+      notify('✅ ' + (scopeLabel || 'تم إنشاء نسخة Backup V2') + cloudMsg + prunedMsg, res?.cloudOk === false && uploadDrive ? 'warning' : 'success');
       await refreshBackupV2Status();
       if (typeof refreshBackupV2HistoryUi === 'function') await refreshBackupV2HistoryUi();
     } else {
@@ -17472,7 +17563,17 @@ async function runBackupV2RestoreManual() {
     const pwdMeta = await resolveBackupV2PasswordForFile(api, filePath);
     if (pwdMeta.cancelled) return;
     const password = pwdMeta.password;
-    const typed = window.prompt('Type confirmation phrase to overwrite', '');
+    let scopeSummary = null;
+    if (api.v2Inspect) {
+      try {
+        const inspected = await api.v2Inspect({ filePath, ...(password ? { password } : {}) });
+        scopeSummary = inspected?.scope || null;
+      } catch { /* inspect optional */ }
+    }
+    const typed = window.prompt(
+      (scopeSummary?.scopeLabelAr ? scopeSummary.scopeLabelAr + '\n\n' : '') + 'Type confirmation phrase to overwrite',
+      ''
+    );
     if (!window.DangerConfirm?.restoreOverwriteConfirm?.({ typed })?.ok) {
       notify('Restore cancelled — phrase mismatch', 'warning');
       return;
@@ -17481,6 +17582,7 @@ async function runBackupV2RestoreManual() {
       filePath,
       typedPhrase: typed,
       identity: getBackupV2IdentityMeta(),
+      scopeSummary,
       validate: () => ({ ok: true, validation: 'valid' }),
       execute: async () => {
         notify('Restoring...', 'warning');
@@ -17515,10 +17617,29 @@ async function runBackupV2RestoreLatest() {
   }
   try {
     const password = getBackupV2Password();
+    let scopeSummary = null;
+    if (api.v2PickLatest) {
+      try {
+        const picked = await api.v2PickLatest({
+          ...(password ? { password } : {}),
+          includeCloud: true,
+          ...getBackupV2ScopeContext(),
+        });
+        scopeSummary = picked?.selected?.manifest?.scopeTruth
+          ? {
+            scopeLabelAr: picked.selected.manifest.scopeTruth.scopeLabelAr,
+            classification: picked.selected.manifest.scopeTruth.classification,
+            includedBranchIds: picked.selected.manifest.scopeTruth.includedBranchIds,
+          }
+          : null;
+        if (scopeSummary?.scopeLabelAr && !window.confirm(scopeSummary.scopeLabelAr + '\n\nمتابعة الاستعادة؟')) return;
+      } catch { /* pick preview optional */ }
+    }
     const flow = await window.OpsUxBridge.runRestoreWizardFlow({
       filePath: 'latest-authorized',
       typedPhrase: typed,
       identity: getBackupV2IdentityMeta(),
+      scopeSummary,
       validate: () => ({ ok: true, validation: 'valid' }),
       execute: async () => {
         notify('Restoring latest authorized...', 'warning');
