@@ -13,6 +13,8 @@ const { createSyncPlatform } = require('./sync-outbox');
 const pushGuards = require('./sync-push-guards');
 const tombstonePolicy = require('./tombstone-policy');
 const { classify } = require('./sync-error-classify');
+const { createSyncBaseline } = require('./sync-baseline');
+const { createSyncCoordinatorCore } = require('./sync-coordinator-core');
 
 function sha256(s) {
   return crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
@@ -111,39 +113,147 @@ class FileRemote {
   }
 
   getVersions(centerId, branchId) {
-    return this.readJson(this.versionsPath(centerId, branchId)) || {
+    const existing = this.readJson(this.versionsPath(centerId, branchId));
+    if (existing && typeof existing === 'object') {
+      existing.branches = existing.branches || {};
+      existing.branches[branchId] = existing.branches[branchId] || {};
+      if (existing.branches[branchId].databaseVersion == null && existing.databaseVersion != null) {
+        existing.branches[branchId].databaseVersion = existing.databaseVersion;
+      }
+      return existing;
+    }
+    return {
       schemaVersion: 1,
       formatVersion: 1,
       centerId,
       branchId,
+      databaseVersion: 0,
+      branches: { [branchId]: { databaseVersion: 0 } },
       tables: {},
       updatedAt: null,
     };
   }
 
-  putTable(centerId, branchId, table, revision, records, deviceId) {
+  getBranchDatabaseRevision(versions, branchId) {
+    return Number(
+      versions?.branches?.[branchId]?.databaseVersion
+      ?? versions?.databaseVersion
+      ?? 0
+    );
+  }
+
+  putTable(centerId, branchId, table, revision, records, deviceId, options = {}) {
+    options = options || {};
+    const versionsBefore = this.getVersions(centerId, branchId);
+    const currentDbRev = this.getBranchDatabaseRevision(versionsBefore, branchId);
+    const expectedRemoteRevision = options.expectedRemoteRevision != null
+      ? Number(options.expectedRemoteRevision)
+      : null;
+
+    if (expectedRemoteRevision != null) {
+      const cas = pushGuards.evaluateCasPushGuard({
+        expectedRemoteRevision,
+        actualRemoteRevision: currentDbRev,
+        baseRevision: options.baseRevision,
+      });
+      if (!cas.ok) {
+        const err = new Error(cas.code || 'remote_revision_mismatch');
+        err.code = cas.code || 'remote_revision_mismatch';
+        err.expectedRemoteRevision = expectedRemoteRevision;
+        err.actualRemoteRevision = currentDbRev;
+        err.retry = cas.retry === true;
+        throw err;
+      }
+    }
+
+    const putRev = Math.max(currentDbRev + 1, Number(revision || 0));
     const payload = {
       centerId,
       branchId,
       table,
-      revision,
+      revision: putRev,
       deviceId,
       updatedAt: new Date().toISOString(),
       records,
       payloadHash: sha256(JSON.stringify(records)),
+      operationId: options.operationId || null,
     };
     const written = this.writeAtomic(this.tablePath(centerId, branchId, table), payload);
-    const versions = this.getVersions(centerId, branchId);
-    versions.tables[table] = {
-      revision,
+
+    const versionsAfterRead = this.getVersions(centerId, branchId);
+    const manifestExpected = options.expectedManifestRevision != null
+      ? Number(options.expectedManifestRevision)
+      : currentDbRev;
+    const manifestActual = this.getBranchDatabaseRevision(versionsAfterRead, branchId);
+    const manifestCas = pushGuards.evaluateManifestCasGuard({
+      expectedManifestRevision: manifestExpected,
+      actualManifestRevision: manifestActual,
+    });
+    if (!manifestCas.ok) {
+      const err = new Error(manifestCas.code || 'manifest_revision_mismatch');
+      err.code = manifestCas.code || 'manifest_revision_mismatch';
+      err.retry = manifestCas.retry === true;
+      throw err;
+    }
+
+    const nextVersions = { ...versionsAfterRead };
+    nextVersions.tables = nextVersions.tables || {};
+    nextVersions.tables[table] = {
+      revision: putRev,
       checksum: payload.payloadHash,
       fileId: written.fileId,
       updatedAt: payload.updatedAt,
       lastWriter: deviceId,
+      operationId: options.operationId || null,
     };
-    versions.updatedAt = payload.updatedAt;
-    this.writeAtomic(this.versionsPath(centerId, branchId), versions);
-    return { ...written, payloadHash: payload.payloadHash, revision };
+    nextVersions.branches = nextVersions.branches || {};
+    nextVersions.branches[branchId] = nextVersions.branches[branchId] || {};
+    nextVersions.branches[branchId].databaseVersion = putRev;
+    nextVersions.databaseVersion = putRev;
+    nextVersions.updatedAt = payload.updatedAt;
+    nextVersions.writerDeviceId = deviceId;
+    nextVersions.operationId = options.operationId || null;
+    this.writeAtomic(this.versionsPath(centerId, branchId), nextVersions);
+    return {
+      ...written,
+      payloadHash: payload.payloadHash,
+      revision: putRev,
+      databaseVersion: putRev,
+    };
+  }
+
+  verifyTableCommit(centerId, branchId, table, expected = {}) {
+    const remoteTable = this.getTable(centerId, branchId, table);
+    if (!remoteTable) {
+      return { ok: false, code: 'remote_verify_missing_table' };
+    }
+    const versions = this.getVersions(centerId, branchId);
+    const dbRev = this.getBranchDatabaseRevision(versions, branchId);
+    if (expected.revision != null && Number(remoteTable.revision) !== Number(expected.revision)) {
+      return {
+        ok: false,
+        code: 'remote_verify_revision_mismatch',
+        expectedRevision: expected.revision,
+        actualRevision: remoteTable.revision,
+      };
+    }
+    if (expected.payloadHash && remoteTable.payloadHash !== expected.payloadHash) {
+      return {
+        ok: false,
+        code: 'remote_verify_hash_mismatch',
+        expectedHash: expected.payloadHash,
+        actualHash: remoteTable.payloadHash,
+      };
+    }
+    if (expected.databaseVersion != null && dbRev !== Number(expected.databaseVersion)) {
+      return {
+        ok: false,
+        code: 'remote_verify_manifest_mismatch',
+        expectedDatabaseVersion: expected.databaseVersion,
+        actualDatabaseVersion: dbRev,
+      };
+    }
+    return { ok: true, databaseVersion: dbRev, revision: remoteTable.revision };
   }
 
   getTable(centerId, branchId, table) {
@@ -158,6 +268,19 @@ function createDevice(options) {
   const db = openDatabase(dbPath);
   const sync = createSyncPlatform(db);
   let deviceStatus = options.deviceStatus || 'approved';
+  let baselineState = null;
+  try {
+    const raw = sync.metaGet('sync_baseline_state');
+    if (raw) baselineState = JSON.parse(raw);
+  } catch { /* start uninitialized */ }
+  const baseline = createSyncBaseline({
+    load: () => baselineState,
+    save: (state) => {
+      baselineState = state;
+      try { sync.metaSet('sync_baseline_state', JSON.stringify(state)); } catch { /* ignore */ }
+    },
+  });
+  const coordinator = createSyncCoordinatorCore();
   const state = {
     centerId: options.centerId,
     branchId: options.branchId || 'BR-MAIN',
@@ -279,137 +402,221 @@ function createDevice(options) {
     return setAll(table, list, actorId);
   }
 
-  async function flush(remote, options = {}) {
-    const gate = canSync();
-    if (!gate.ok) {
-      sync.audit({
-        action: 'sync.push.blocked',
-        center_id: state.centerId,
-        branch_id: state.branchId,
-        device_id: state.deviceId,
-        result: 'blocked',
-        metadata_json: { reason: gate.error || 'device_sync_blocked' },
-      });
-      return [{ ok: false, blocked: true, reason: gate.error || 'device_sync_blocked' }];
-    }
-    const claimed = sync.claimPending({
-      branch_id: state.branchId,
-      limit: 100,
-      ignoreBackoff: !!options.ignoreBackoff,
+  async function bootstrapFromRemote(remote, bootstrapOptions = {}) {
+    baseline.markHydrating({
+      organizationResolved: true,
+      branchResolved: true,
     });
-    const results = [];
-    for (const row of claimed) {
-      try {
-        let records = row.payload_json ? JSON.parse(row.payload_json) : getAll(row.table_name);
-        const versions = await Promise.resolve(remote.getVersions(state.centerId, state.branchId));
-        const remoteMeta = versions.tables?.[row.table_name];
-        const remoteRev = Number(remoteMeta?.revision || 0);
-        if (remoteMeta && remoteRev > Number(row.base_revision || 0)) {
-          const remoteTable = await Promise.resolve(
-            remote.getTable(state.centerId, state.branchId, row.table_name)
-          );
-          const remoteRecords = remoteTable?.records || [];
-          let opened = 0;
-          for (const localRec of records) {
-            if (!localRec?.id) continue;
-            const rr = remoteRecords.find((x) => x && x.id === localRec.id);
-            if (!rr) continue; // full-table snapshots may omit peers' unrelated rows; not a conflict by itself
-            if (tombstonePolicy.recordsConflict(localRec, rr)) {
-              sync.openConflict({
-                center_id: state.centerId,
-                branch_id: state.branchId,
-                table_name: row.table_name,
-                record_id: localRec.id,
-                base_revision: row.base_revision,
-                local_json: localRec,
-                remote_json: rr,
-                device_id: state.deviceId,
-              });
-              opened += 1;
-            }
-          }
-          if (opened > 0) {
-            sync.fail(row.event_id, 'conflict_detected_push', { maxAttempts: 99 });
-            db.prepare(
-              `UPDATE sync_outbox SET status='pending', last_error=?, next_attempt_at=? WHERE event_id=?`
-            ).run('conflict_detected_push', new Date().toISOString(), row.event_id);
-            results.push({ eventId: row.event_id, ok: false, conflict: true, opened });
-            continue;
-          }
-          // Non-overlapping concurrent edits: union merge (local wins on same id when equal)
-          const byId = new Map();
-          for (const r of remoteRecords) {
-            if (r?.id) byId.set(r.id, r);
-          }
-          for (const l of records) {
-            if (l?.id) byId.set(l.id, l);
-          }
-          records = [...byId.values()];
-          state.tables[row.table_name] = records;
-          persistTableState(row.table_name);
-        }
-        const localRev = Number(state.revisions[row.table_name] || row.base_revision || 0);
-        const pushGuard = pushGuards.evaluatePushGuard({
-          localRevision: localRev,
-          remoteRevision: remoteRev,
-          recordCount: records.length,
+    const pullRes = await pull(remote);
+    if (pullRes.blocked || pullRes.error) {
+      return { ok: false, error: pullRes.error || pullRes.reason || 'bootstrap_pull_failed', pullRes };
+    }
+    const versions = await Promise.resolve(remote.getVersions(state.centerId, state.branchId));
+    const remoteRevision = remote.getBranchDatabaseRevision(versions, state.branchId);
+    const marked = baseline.markBaselineKnown({
+      branchId: state.branchId,
+      remoteRevision,
+      integrityPass: bootstrapOptions.integrityPass !== false,
+      organizationResolved: true,
+      branchResolved: true,
+      operationId: bootstrapOptions.operationId || null,
+    });
+    if (!marked.ok) return { ok: false, error: marked.code || 'baseline_mark_failed', pullRes };
+    baseline.markReady({ operationId: bootstrapOptions.operationId || null });
+    return { ok: true, remoteRevision, pullRes };
+  }
+
+  async function flush(remote, options = {}) {
+    return coordinator.withMutex(async ({ operationId }) => {
+      const gate = canSync();
+      if (!gate.ok) {
+        sync.audit({
+          action: 'sync.push.blocked',
+          center_id: state.centerId,
+          branch_id: state.branchId,
+          device_id: state.deviceId,
+          result: 'blocked',
+          metadata_json: { reason: gate.error || 'device_sync_blocked', operationId },
         });
-        if (!pushGuard.ok) {
-          sync.fail(row.event_id, pushGuard.code, { maxAttempts: 99 });
+        return [{ ok: false, blocked: true, reason: gate.error || 'device_sync_blocked' }];
+      }
+
+      const baselineGate = baseline.assertPushAllowed({ branchId: state.branchId, force: options.force === true });
+      if (!baselineGate.ok) {
+        return [{
+          ok: false,
+          blocked: true,
+          reason: baselineGate.code || baselineGate.reason || 'baseline_push_blocked',
+          operationId,
+        }];
+      }
+
+      const claimed = sync.claimPending({
+        branch_id: state.branchId,
+        limit: 100,
+        ignoreBackoff: !!options.ignoreBackoff,
+      });
+      const results = [];
+
+      for (const row of claimed) {
+        const rowResult = await coordinator.runWithBoundedRetry(async ({ attempt }) => {
+          await pull(remote);
+          const versions = await Promise.resolve(remote.getVersions(state.centerId, state.branchId));
+          const remoteDbRev = remote.getBranchDatabaseRevision(versions, state.branchId);
+          const baseRevision = Number(row.base_revision || 0);
+
+          let records = row.payload_json ? JSON.parse(row.payload_json) : getAll(row.table_name);
+          const remoteMeta = versions.tables?.[row.table_name];
+          const remoteRev = Number(remoteMeta?.revision || 0);
+          if (remoteMeta && remoteRev > Number(row.base_revision || 0)) {
+            const remoteTable = await Promise.resolve(
+              remote.getTable(state.centerId, state.branchId, row.table_name)
+            );
+            const remoteRecords = remoteTable?.records || [];
+            let opened = 0;
+            for (const localRec of records) {
+              if (!localRec?.id) continue;
+              const rr = remoteRecords.find((x) => x && x.id === localRec.id);
+              if (!rr) continue;
+              if (tombstonePolicy.recordsConflict(localRec, rr)) {
+                sync.openConflict({
+                  center_id: state.centerId,
+                  branch_id: state.branchId,
+                  table_name: row.table_name,
+                  record_id: localRec.id,
+                  base_revision: row.base_revision,
+                  local_json: localRec,
+                  remote_json: rr,
+                  device_id: state.deviceId,
+                });
+                opened += 1;
+              }
+            }
+            if (opened > 0) {
+              sync.fail(row.event_id, 'conflict_detected_push', { maxAttempts: 99 });
+              db.prepare(
+                `UPDATE sync_outbox SET status='pending', last_error=?, next_attempt_at=? WHERE event_id=?`
+              ).run('conflict_detected_push', new Date().toISOString(), row.event_id);
+              return { eventId: row.event_id, ok: false, conflict: true, opened, operationId };
+            }
+            const byId = new Map();
+            for (const r of remoteRecords) {
+              if (r?.id) byId.set(r.id, r);
+            }
+            for (const l of records) {
+              if (l?.id) byId.set(l.id, l);
+            }
+            records = [...byId.values()];
+            state.tables[row.table_name] = records;
+            persistTableState(row.table_name);
+          }
+
+          const localRev = Number(state.revisions[row.table_name] || row.base_revision || 0);
+          const pushGuard = pushGuards.evaluatePushGuard({
+            localRevision: localRev,
+            remoteRevision: remoteDbRev,
+            recordCount: records.length,
+          });
+          if (!pushGuard.ok) {
+            sync.fail(row.event_id, pushGuard.code, { maxAttempts: 99 });
+            return {
+              eventId: row.event_id,
+              ok: false,
+              blocked: true,
+              reason: pushGuard.code,
+              operationId,
+            };
+          }
+
+          const putRev = remoteDbRev + 1;
+          let put;
+          try {
+            put = await Promise.resolve(
+              remote.putTable(
+                state.centerId,
+                state.branchId,
+                row.table_name,
+                putRev,
+                records,
+                state.deviceId,
+                {
+                  expectedRemoteRevision: remoteDbRev,
+                  expectedManifestRevision: remoteDbRev,
+                  operationId,
+                }
+              )
+            );
+          } catch (err) {
+            if (err.retry === true || err.code === 'remote_revision_mismatch' || err.code === 'manifest_revision_mismatch') {
+              return {
+                eventId: row.event_id,
+                ok: false,
+                reason: err.code || err.message,
+                retry: true,
+                attempt,
+                operationId,
+              };
+            }
+            sync.fail(row.event_id, err.message || String(err));
+            return {
+              eventId: row.event_id,
+              ok: false,
+              error: String(err.message || err),
+              operationId,
+            };
+          }
+
+          const verified = remote.verifyTableCommit(state.centerId, state.branchId, row.table_name, {
+            revision: put.revision,
+            payloadHash: put.payloadHash,
+            databaseVersion: put.databaseVersion,
+          });
+          if (!verified.ok) {
+            sync.fail(row.event_id, verified.code || 'remote_verify_failed', { maxAttempts: 99 });
+            return {
+              eventId: row.event_id,
+              ok: false,
+              reason: verified.code || 'remote_verify_failed',
+              retry: true,
+              attempt,
+              operationId,
+            };
+          }
+
+          state.revisions[row.table_name] = putRev;
+          persistTableState(row.table_name);
+          sync.ack(row.event_id, put.fileId);
+          baseline.updateBaselineAfterVerifiedPush(state.branchId, put.databaseVersion, operationId);
           sync.audit({
-            action: 'sync.push.blocked',
+            action: 'sync.push.ack',
             center_id: state.centerId,
             branch_id: state.branchId,
             device_id: state.deviceId,
             entity: row.table_name,
-            result: 'blocked',
-            metadata_json: { reason: pushGuard.code, localRev, remoteRev },
+            entity_id: row.record_id,
+            result: 'ok',
+            metadata_json: {
+              remoteFileId: put.fileId,
+              revision: putRev,
+              databaseVersion: put.databaseVersion,
+              operationId,
+            },
           });
-          results.push({
+          return {
             eventId: row.event_id,
-            ok: false,
-            blocked: true,
-            reason: pushGuard.code,
-          });
-          continue;
-        }
-        const putRev = Math.max(Number(row.new_revision || 0), remoteRev + 1);
-        const put = await Promise.resolve(
-          remote.putTable(
-            state.centerId,
-            state.branchId,
-            row.table_name,
-            putRev,
-            records,
-            state.deviceId
-          )
-        );
-        state.revisions[row.table_name] = putRev;
-        persistTableState(row.table_name);
-        sync.ack(row.event_id, put.fileId);
-        sync.audit({
-          action: 'sync.push.ack',
-          center_id: state.centerId,
-          branch_id: state.branchId,
-          device_id: state.deviceId,
-          entity: row.table_name,
-          entity_id: row.record_id,
-          result: 'ok',
-          metadata_json: { remoteFileId: put.fileId, revision: putRev },
-        });
-        results.push({ eventId: row.event_id, ok: true, fileId: put.fileId, revision: putRev });
-      } catch (err) {
-        const classified = classify(err);
-        sync.fail(row.event_id, err.message || String(err));
-        results.push({
-          eventId: row.event_id,
-          ok: false,
-          error: String(err.message || err),
-          classified,
-        });
+            ok: true,
+            fileId: put.fileId,
+            revision: putRev,
+            databaseVersion: put.databaseVersion,
+            operationId,
+          };
+        }, { operationId, maxAttempts: options.maxAttempts || 4 });
+
+        results.push(rowResult);
       }
-    }
-    return results;
+
+      return results;
+    }, { operationId: options.operationId, prefix: 'flush' });
   }
 
   async function pull(remote) {
@@ -523,7 +730,15 @@ function createDevice(options) {
         metadata_json: { revision: remoteRev },
       });
     }
-    return { versions, applied };
+    return { versions, applied, remoteDatabaseRevision: remote.getBranchDatabaseRevision(versions, state.branchId) };
+  }
+
+  function getBaseline() {
+    return baseline;
+  }
+
+  function getCoordinator() {
+    return coordinator;
   }
 
   function close() {
@@ -544,10 +759,13 @@ function createDevice(options) {
     softDeleteRecord,
     flush,
     pull,
+    bootstrapFromRemote,
     close,
     dbPath,
     canSync,
     setDeviceStatus,
+    getBaseline,
+    getCoordinator,
   };
 }
 

@@ -91,6 +91,7 @@
    */
   async function reconcileAfterRestore(options) {
     options = options || {};
+    try { global.SyncBaseline?.enterReconciliationRequired?.({ operationId: options.operationId || null }); } catch { /* empty */ }
     const snapshotCheckpoint = options.snapshotCheckpoint || getLocalCheckpoint();
     const state = {
       phase: 'reconciling',

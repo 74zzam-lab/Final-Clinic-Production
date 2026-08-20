@@ -85,6 +85,9 @@ async function main() {
     deviceId: 'DEV-B',
   });
 
+  await deviceA.bootstrapFromRemote(remote);
+  await deviceB.bootstrapFromRemote(remote);
+
   deviceA.upsertRecord('clientsRegistry', { id: 'c1', name: 'Client One', phone: '0500000001' });
   deviceA.upsertRecord('clientsRegistry', { id: 'c2', name: 'Client Two', phone: '0500000002' });
   const flushA = await deviceA.flush(remote);
@@ -97,6 +100,7 @@ async function main() {
   check(deviceB.getAll('clientsRegistry').find((c) => c.id === 'c1')?.name === 'Client One', 'B client name');
 
   deviceB.upsertRecord('clientsRegistry', { id: 'c3', name: 'Client Three', phone: '0500000003' });
+  await deviceB.bootstrapFromRemote(remote);
   await deviceB.flush(remote);
   await deviceA.pull(remote);
   check(deviceA.getAll('clientsRegistry').length === 3, 'A received B create');
@@ -113,6 +117,7 @@ async function main() {
   });
   check(deviceA2.sync.countByStatus('BR-A').pending >= 1, 'pending survives process restart');
   check(deviceA2.getAll('clientsRegistry').some((c) => c.id === 'c4'), 'table state rehydrated after restart');
+  await deviceA2.bootstrapFromRemote(remote);
   await deviceA2.flush(remote);
   await deviceB.pull(remote);
   check(deviceB.getAll('clientsRegistry').some((c) => c.id === 'c4'), 'B got offline queued record');
@@ -131,11 +136,14 @@ async function main() {
     deviceId: 'DEV-Y',
   });
   deviceX.setAll('clientsRegistry', [{ id: 'cx', name: 'Base' }]);
+  await deviceX.bootstrapFromRemote(remote);
   await deviceX.flush(remote);
+  await deviceY.bootstrapFromRemote(remote);
   await deviceY.pull(remote);
   deviceX.upsertRecord('clientsRegistry', { id: 'cx', name: 'From-X' });
   deviceY.upsertRecord('clientsRegistry', { id: 'cx', name: 'From-Y' });
   await deviceX.flush(remote);
+  await deviceY.bootstrapFromRemote(remote);
   const flushY = await deviceY.flush(remote);
   check(flushY.some((x) => x.conflict), 'Y push detects conflict against remote X');
   const openConflicts = deviceY.db
@@ -150,17 +158,23 @@ async function main() {
     branchId: 'BR-B',
     deviceId: 'DEV-BRB',
   });
+  await deviceBranchB.bootstrapFromRemote(remote);
   await deviceBranchB.pull(remote);
   check(deviceBranchB.getAll('clientsRegistry').length === 0, 'BR-B pull must not see BR-A clients');
 
   // Failed push does not delete outbox
   {
     const badRemote = {
+      getVersions: (...args) => remote.getVersions(...args),
+      getBranchDatabaseRevision: (...args) => remote.getBranchDatabaseRevision(...args),
+      getTable: (...args) => remote.getTable(...args),
+      verifyTableCommit: (...args) => remote.verifyTableCommit(...args),
       putTable() {
         throw new Error('network_down');
       },
     };
     deviceBranchB.upsertRecord('clientsRegistry', { id: 'bb1', name: 'BB' });
+    await deviceBranchB.bootstrapFromRemote(remote);
     const before = deviceBranchB.sync.countByStatus('BR-B');
     await deviceBranchB.flush(badRemote);
     const after = deviceBranchB.sync.countByStatus('BR-B');

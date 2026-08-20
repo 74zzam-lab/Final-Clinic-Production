@@ -118,14 +118,81 @@
     branchId = getBranchId(branchId);
     const centerId = getCenterId();
     if (!centerId || !global.DriveAdapter?.downloadVersions) {
-      return { ok: false, remoteRevision: 0 };
+      return { ok: false, remoteRevision: 0, error: 'remote_revision_unconfirmed' };
     }
     const res = await global.DriveAdapter.downloadVersions(centerId, branchId);
-    if (!res?.ok || !res.data) return { ok: false, remoteRevision: 0, error: res?.error };
+    if (!res?.ok || !res.data) {
+      if (isBenignSyncError(res?.error)) {
+        return { ok: true, remoteRevision: 0, versions: null, emptyRemote: true };
+      }
+      return { ok: false, remoteRevision: 0, error: res?.error || 'remote_revision_unconfirmed' };
+    }
     const remoteRev = Number(
       res.data?.branches?.[branchId]?.databaseVersion || res.data?.databaseVersion || 0
     );
     return { ok: true, versions: res.data, remoteRevision: remoteRev };
+  }
+
+  function hashPayload(data) {
+    try {
+      if (global.crypto?.subtle) {
+        /* browser path handled in verify step via JSON stringify compare */
+      }
+    } catch { /* empty */ }
+    const text = typeof data === 'string' ? data : JSON.stringify(data);
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+    }
+    return `h${Math.abs(hash)}-${text.length}`;
+  }
+
+  async function verifyRemoteTableCommit(centerId, branchId, table, remotePath, expected) {
+    expected = expected || {};
+    const dl = await global.DriveAdapter.downloadJson(remotePath);
+    if (!dl?.ok || !dl.data) {
+      return { ok: false, code: 'remote_verify_download_failed', error: dl?.error };
+    }
+    if (expected.revision != null && Number(dl.data?.revision) !== Number(expected.revision)) {
+      return {
+        ok: false,
+        code: 'remote_verify_revision_mismatch',
+        expectedRevision: expected.revision,
+        actualRevision: dl.data?.revision,
+      };
+    }
+    const records = dl.data?.records || dl.data;
+    const payloadHash = hashPayload(records);
+    if (expected.payloadHash && payloadHash !== expected.payloadHash && expected.payloadHashAlt) {
+      if (payloadHash !== expected.payloadHashAlt) {
+        return { ok: false, code: 'remote_verify_hash_mismatch' };
+      }
+    }
+    if (expected.verifyManifest === true) {
+      const remoteHead = await getRemoteBranchDatabaseRevision(branchId);
+      if (!remoteHead.ok) {
+        return { ok: false, code: 'remote_verify_manifest_unconfirmed', error: remoteHead.error };
+      }
+      if (expected.databaseVersion != null && Number(remoteHead.remoteRevision) !== Number(expected.databaseVersion)) {
+        return {
+          ok: false,
+          code: 'remote_verify_manifest_mismatch',
+          expectedDatabaseVersion: expected.databaseVersion,
+          actualDatabaseVersion: remoteHead.remoteRevision,
+        };
+      }
+      return {
+        ok: true,
+        databaseVersion: remoteHead.remoteRevision,
+        revision: dl.data?.revision,
+        fileId: dl.data?.fileId || null,
+      };
+    }
+    return {
+      ok: true,
+      revision: dl.data?.revision,
+      fileId: dl.data?.fileId || null,
+    };
   }
 
   async function assertPushAllowed(table, branchId, recordCount, options) {
@@ -194,7 +261,11 @@
 
     _pushTimers.set(key, setTimeout(() => {
       _pushTimers.delete(key);
-      pushTable(table, branchId).catch(err => queueFailedPush(table, branchId, err));
+      if (global.SyncCoordinator?.scheduleDebounced) {
+        global.SyncCoordinator.scheduleDebounced({ branchId, table, source: 'schedulePush' });
+      } else {
+        pushTable(table, branchId, { _internalPush: true }).catch(err => queueFailedPush(table, branchId, err));
+      }
     }, PUSH_DEBOUNCE_MS));
   }
 
@@ -221,7 +292,8 @@
     return { ok: true };
   }
 
-  async function pushTable(table, branchId) {
+  async function pushTableOnce(table, branchId, options) {
+    options = options || {};
     const opGate = checkOperationalWriteGate();
     if (!opGate.ok) {
       return {
@@ -235,30 +307,79 @@
     if (global.LegacyBranchMigration?.isPushBlocked?.()) {
       return { ok: false, blocked: true, reason: 'legacy_branch_migration_required' };
     }
-    const guard = checkSyncGuard();
+    const guard = checkSyncGuard(options);
     if (!guard.ok && !guard.skipped) return { ok: false, blocked: true, reason: guard.reason };
     if (!isEnabled()) return { ok: false, skipped: true };
+
+    const baselineGate = global.SyncBaseline?.assertPushAllowed?.({
+      branchId: getBranchId(branchId),
+      force: options.force === true,
+    });
+    if (baselineGate && !baselineGate.ok && !options.force) {
+      return { ok: false, blocked: true, reason: baselineGate.code || baselineGate.reason, ...baselineGate };
+    }
+
+    const restoreGate = global.RestoreReconciliation?.assertPostRestorePushAllowed?.(
+      options.afterRestore ? 'after-restore' : (options.trigger || '')
+    );
+    if (restoreGate && !restoreGate.ok) {
+      return { ok: false, blocked: true, ...restoreGate };
+    }
+
     if (global.LicenseIdentity?.verifyGoogleBinding) {
       const idCheck = await global.LicenseIdentity.verifyGoogleBinding();
-    if (!idCheck.ok) {
-      const handled = global.DriveErrors?.handleFailure?.(idCheck) || {};
-      global.SyncState?.setError?.(idCheck.error || 'google_identity_transfer');
-      return { ok: false, error: idCheck.error, identity: idCheck, ...handled };
-    }
+      if (!idCheck.ok) {
+        const handled = global.DriveErrors?.handleFailure?.(idCheck) || {};
+        global.SyncState?.setError?.(idCheck.error || 'google_identity_transfer');
+        return { ok: false, error: idCheck.error, identity: idCheck, ...handled };
+      }
       if (idCheck.needsBind && global.LicenseIdentity.getConnectedGoogleEmail?.()) {
         await global.LicenseIdentity.bindGoogleAccount(global.LicenseIdentity.getConnectedGoogleEmail());
       }
     }
+
     branchId = getBranchId(branchId);
+    if (!shouldSyncBranch(branchId)) {
+      return { ok: false, blocked: true, reason: 'branch_scope_blocked', branchId };
+    }
+
     const centerId = getCenterId();
     if (!centerId) return { ok: false, error: 'no_center_id' };
 
     const meta = TABLE_LAYER[table];
     if (!meta) return { ok: false, error: 'unknown_table' };
 
+    const remoteHead = await getRemoteBranchDatabaseRevision(branchId);
+    if (!remoteHead.ok && !remoteHead.emptyRemote) {
+      return {
+        ok: false,
+        blocked: true,
+        code: 'remote_revision_unconfirmed',
+        reason: 'remote_revision_unconfirmed',
+        error: remoteHead.error,
+      };
+    }
+    const remoteDbRev = Number(remoteHead.remoteRevision || 0);
+    if (options.baseRevision != null && Number(options.baseRevision) < remoteDbRev) {
+      await pullOperationalTable(branchId, table);
+      return {
+        ok: false,
+        retry: true,
+        code: 'remote_revision_mismatch',
+        reason: 'remote_revision_mismatch',
+        expectedRemoteRevision: Number(options.baseRevision),
+        actualRemoteRevision: remoteDbRev,
+      };
+    }
+
     let remotePath;
     let payload;
     let operationalRecordCount = 0;
+    let payloadHash = null;
+    const deviceId =
+      global.DeviceConfig?.getDeviceId?.()
+      || global.LicenseIdentity?.getDeviceId?.()
+      || 'unknown-device';
 
     if (meta.layer === 'config' || (meta.file === 'settings.json' && table === 'settings')) {
       const pack = global.ConfigLayer?.exportBranchPack?.(branchId);
@@ -269,7 +390,14 @@
           { path: global.ConfigLayer.drivePathForFile(centerId, branchId, 'prices.json'), data: pack.prices }
         ];
         for (const item of paths) {
-          const r = await global.DriveAdapter.uploadJson(item.path, item.data, { overwrite: true });
+          const r = await global.DriveAdapter.uploadJson(item.path, item.data, {
+            overwrite: true,
+            expectedDatabaseVersion: remoteDbRev,
+            operationId: options.operationId,
+          });
+          if (r?.code === 'remote_revision_mismatch') {
+            return { ok: false, retry: true, ...r };
+          }
           if (!r?.ok) {
             queueFailedPush(table, branchId, new Error(r?.message || r?.error || 'upload_failed'));
             return r;
@@ -282,7 +410,14 @@
         else if (meta.file === 'packages.json') payload = pack.packages;
         else if (meta.file === 'users.json') payload = pack.users;
         remotePath = global.ConfigLayer?.drivePathForFile?.(centerId, branchId, meta.file);
-        const up = await global.DriveAdapter.uploadJson(remotePath, payload, { overwrite: true });
+        const up = await global.DriveAdapter.uploadJson(remotePath, payload, {
+          overwrite: true,
+          expectedDatabaseVersion: remoteDbRev,
+          operationId: options.operationId,
+        });
+        if (up?.code === 'remote_revision_mismatch') {
+          return { ok: false, retry: true, ...up };
+        }
         if (!up?.ok) {
           queueFailedPush(table, branchId, new Error(up?.message || up?.error || 'upload_failed'));
           return up;
@@ -291,34 +426,117 @@
     } else {
       payload = global.OperationalLayer?.exportTable?.(table, branchId);
       operationalRecordCount = Array.isArray(payload?.records) ? payload.records.length : 0;
-      const pushGuard = await assertPushAllowed(table, branchId, operationalRecordCount);
+      payloadHash = hashPayload(payload?.records || payload);
+      const pushGuard = await assertPushAllowed(table, branchId, operationalRecordCount, {
+        ...options,
+        remoteRevision: remoteDbRev,
+        skipRemoteFetch: true,
+      });
       if (!pushGuard.ok) {
         return { ok: false, blocked: true, reason: pushGuard.code || pushGuard.reason, guard: pushGuard };
       }
       remotePath = global.OperationalLayer?.drivePathForTable?.(centerId, branchId, table);
-      const upOp = await global.DriveAdapter.uploadJson(remotePath, payload, { overwrite: true });
+      const nextRevision = Math.max(Number(payload?.revision || 0), remoteDbRev + 1);
+      const payloadWithRev = { ...(payload || {}), revision: nextRevision, operationId: options.operationId || null };
+      const upOp = await global.DriveAdapter.uploadJson(remotePath, payloadWithRev, {
+        overwrite: true,
+        expectedDatabaseVersion: remoteDbRev,
+        operationId: options.operationId,
+        atomicReplace: true,
+      });
+      if (upOp?.code === 'remote_revision_mismatch' || upOp?.code === 'manifest_revision_mismatch') {
+        await pullOperationalTable(branchId, table);
+        return { ok: false, retry: true, ...upOp };
+      }
       if (!upOp?.ok) {
         queueFailedPush(table, branchId, new Error(upOp?.message || upOp?.error || 'upload_failed'));
         return upOp;
       }
+
+      const verified = await verifyRemoteTableCommit(centerId, branchId, table, remotePath, {
+        revision: nextRevision,
+        payloadHash,
+      });
+      if (!verified.ok) {
+        return { ok: false, retry: true, code: verified.code || 'remote_verify_failed', verified };
+      }
+      payload = payloadWithRev;
     }
 
     global.SyncState?.dequeuePush?.(meta.layer, meta.table || table, branchId);
     global.SyncState?.touchPush?.();
-    global.AuditLogger?.logSyncEvent?.('LOCAL_PUSH', {
-      entity: table,
-      entityId: branchId,
-      summary: `رفع ${table} إلى Google Drive`
-    });
 
+    const newDbRev = remoteDbRev + 1;
     const versions = global.VersionsIndex?.toDriveJson?.(
       global.VersionsIndex?.syncFromRepository?.(global.Repository, centerId, branchId)
     );
-    await global.DriveAdapter.uploadVersions(centerId, versions, branchId);
-    global.DeviceCache?.snapshotFromLocal?.(branchId).catch(() => {});
+    const manifestUp = await global.DriveAdapter.uploadVersionsConditional?.(centerId, versions, branchId, {
+      expectedDatabaseVersion: remoteDbRev,
+      newDatabaseVersion: newDbRev,
+      operationId: options.operationId,
+      writerDeviceId: deviceId,
+    }) || await global.DriveAdapter.uploadVersions(centerId, versions, branchId);
 
-    emit('synced', { direction: 'push', table, branchId });
-    return { ok: true, table, branchId, remotePath };
+    if (manifestUp?.code === 'manifest_revision_mismatch') {
+      return { ok: false, retry: true, ...manifestUp };
+    }
+    if (manifestUp?.ok === false) {
+      queueFailedPush(table, branchId, new Error(manifestUp?.message || manifestUp?.error || 'manifest_upload_failed'));
+      return manifestUp;
+    }
+
+    const manifestVerified = await verifyRemoteTableCommit(centerId, branchId, table, remotePath, {
+      verifyManifest: true,
+      databaseVersion: newDbRev,
+    });
+    if (!manifestVerified.ok && meta.layer === 'operational') {
+      return { ok: false, retry: true, code: manifestVerified.code || 'remote_verify_manifest_failed', manifestVerified };
+    }
+
+    global.SyncBaseline?.updateBaselineAfterVerifiedPush?.(branchId, newDbRev, options.operationId);
+    global.DeviceCache?.snapshotFromLocal?.(branchId).catch(() => {});
+    global.AuditLogger?.logSyncEvent?.('LOCAL_PUSH', {
+      entity: table,
+      entityId: branchId,
+      summary: `رفع ${table} إلى Google Drive`,
+      operationId: options.operationId || null,
+    });
+
+    emit('synced', { direction: 'push', table, branchId, operationId: options.operationId || null });
+    return {
+      ok: true,
+      table,
+      branchId,
+      remotePath,
+      databaseVersion: newDbRev,
+      remoteFileId: manifestUp?.id || manifestUp?.fileId || null,
+      verified: true,
+      operationId: options.operationId || null,
+    };
+  }
+
+  async function pushTable(table, branchId, options) {
+    options = options || {};
+    if (!options._coordinator && !options._internalPush) {
+      if (global.SyncCoordinator?.withMutex) {
+        return global.SyncCoordinator.withMutex(
+          ({ operationId }) => pushTable(table, branchId, { ...options, _coordinator: true, operationId }),
+          { prefix: 'push', operationId: options.operationId }
+        );
+      }
+      return { ok: false, blocked: true, reason: 'coordinator_required' };
+    }
+    if (options._coordinator && global.SyncCoordinator?.runWithBoundedRetry) {
+      return global.SyncCoordinator.runWithBoundedRetry(
+        async () => {
+          const result = await pushTableOnce(table, branchId, options);
+          if (result?.retry === true) return result;
+          return result;
+        },
+        { operationId: options.operationId, maxAttempts: options.maxAttempts || 4 }
+      );
+    }
+    return pushTableOnce(table, branchId, options);
   }
 
   async function pushConfigField(field, branchId) {
@@ -444,12 +662,11 @@
     return { ok: true, changes: changes.length, pulled };
   }
 
-  async function poll() {
+  async function _pollInternal(options) {
+    options = options || {};
     if (!global.CloudMeta?.isCloudV2Enabled?.()) return { ok: false, skipped: true };
-    const guard = checkSyncGuard();
+    const guard = checkSyncGuard(options);
     if (!guard.ok && !guard.skipped) return { ok: false, blocked: true, reason: guard.reason };
-    if (_running) return { ok: false, busy: true };
-    _running = true;
     try {
       const centerId = getCenterId();
       if (!centerId) return { ok: false, error: 'no_center_id' };
@@ -491,12 +708,18 @@
           if (!handled.classified?.pauseSync) global.SyncState?.setError?.(msg);
         }
       return { ok: false, error: msg };
-    } finally {
-      _running = false;
     }
   }
 
-  async function flushPending() {
+  async function poll(options) {
+    if (global.SyncCoordinator?.isLocked?.()) {
+      return { ok: false, busy: true, reason: 'sync_mutex_locked' };
+    }
+    return _pollInternal(options);
+  }
+
+  async function _flushPendingInternal(options) {
+    options = options || {};
     if (!isEnabled()) return { ok: false, skipped: true };
     const guard = checkSyncGuard();
     const blocked = !!(guard && guard.ok === false && !guard.skipped);
@@ -518,7 +741,12 @@
     for (const item of pending) {
       const table = item.table;
       if (table) {
-        const r = await pushTable(table, item.branchId);
+        const r = await pushTable(table, item.branchId, {
+          ...options,
+          _coordinator: true,
+          _internalPush: true,
+          operationId: options.operationId,
+        });
         results.push({ table, ok: !!r?.ok, source: 'memory_queue' });
       }
     }
@@ -535,12 +763,23 @@
         for (const row of rows) {
           try {
             const table = row.table_name || row.table;
-            const r = await pushTable(table, row.branch_id || branchId);
-            if (r?.ok) {
+            const r = await pushTable(table, row.branch_id || branchId, {
+              ...options,
+              _coordinator: true,
+              _internalPush: true,
+              baseRevision: row.base_revision,
+              operationId: options.operationId || row.operation_id || null,
+            });
+            if (r?.ok && r?.verified === true) {
               if (global.SqliteOutboxBridge.ack) {
-                await global.SqliteOutboxBridge.ack(row.event_id, r.fileId || r.remoteFileId || null);
+                await global.SqliteOutboxBridge.ack(row.event_id, r.remoteFileId || r.fileId || null);
               }
-              results.push({ table, ok: true, source: 'sqlite_outbox', eventId: row.event_id });
+              results.push({ table, ok: true, source: 'sqlite_outbox', eventId: row.event_id, verified: true });
+            } else if (r?.ok && r?.verified !== true) {
+              if (global.SqliteOutboxBridge.fail) {
+                await global.SqliteOutboxBridge.fail(row.event_id, 'remote_verify_pending');
+              }
+              results.push({ table, ok: false, source: 'sqlite_outbox', eventId: row.event_id, reason: 'remote_verify_pending' });
             } else {
               if (global.SqliteOutboxBridge.fail) {
                 await global.SqliteOutboxBridge.fail(row.event_id, r?.error || r?.reason || 'push_failed');
@@ -564,7 +803,19 @@
       }
     }
 
-    return { ok: true, flushed: results.length, results };
+    return { ok: true, flushed: results.length, results, operationId: options.operationId || null };
+  }
+
+  async function flushPending(options) {
+    options = options || {};
+    if (options._coordinator) {
+      return _flushPendingInternal(options);
+    }
+    if (global.SyncCoordinator?.runCycle) {
+      const cycle = await global.SyncCoordinator.runCycle({ ...options, source: 'flushPending' });
+      return cycle.push || cycle;
+    }
+    return _flushPendingInternal(options);
   }
 
   function setPollIntervalMs(ms) {
@@ -587,13 +838,23 @@
       || global.SyncState?.load?.()?.pollIntervalMs
       || DEFAULT_POLL_MS;
 
-    _pollTimer = setInterval(() => { poll().catch(() => {}); }, interval);
+    _pollTimer = setInterval(() => {
+      if (global.SyncCoordinator?.runCycle) {
+        global.SyncCoordinator.runCycle({ source: 'poll' }).catch(() => {});
+      } else {
+        poll().catch(() => {});
+      }
+    }, interval);
 
     if (typeof window !== 'undefined') {
       _handlers.online = () => {
         global.SyncState?.setOnline?.(true);
-        flushPending().catch(() => {});
-        poll().catch(() => {});
+        if (global.SyncCoordinator?.runCycle) {
+          global.SyncCoordinator.runCycle({ source: 'online' }).catch(() => {});
+        } else {
+          flushPending().catch(() => {});
+          poll().catch(() => {});
+        }
       };
       _handlers.offline = () => global.SyncState?.setOnline?.(false);
       window.addEventListener('online', _handlers.online);
@@ -601,8 +862,12 @@
     }
 
     setTimeout(() => {
-      flushPending().catch(() => {});
-      poll().catch(() => {});
+      if (global.SyncCoordinator?.runCycle) {
+        global.SyncCoordinator.runCycle({ source: 'startup' }).catch(() => {});
+      } else {
+        flushPending().catch(() => {});
+        poll().catch(() => {});
+      }
     }, 3000);
 
     return { ok: true, pollIntervalMs: interval };
@@ -783,20 +1048,26 @@
       return { ok: false, blocked: true, ...guard, readiness };
     }
 
+    if (global.SyncCoordinator?.runCycle) {
+      return global.SyncCoordinator.runCycle(options);
+    }
+
     let pull = { ok: true, skipped: true };
     let push = { ok: true, skipped: true };
     try {
-      pull = await poll();
+      pull = await _pollInternal(options);
     } catch (err) {
       pull = { ok: false, error: err.message || String(err) };
     }
-    try {
-      push = await flushPending();
-    } catch (err) {
-      push = { ok: false, error: err.message || String(err) };
+    if (options.afterRestore !== true && options.direction !== 'pull') {
+      try {
+        push = await _flushPendingInternal(options);
+      } catch (err) {
+        push = { ok: false, error: err.message || String(err) };
+      }
     }
 
-    const ok = pull?.ok !== false || push?.ok !== false;
+    const ok = pull?.ok !== false && push?.ok !== false;
     return {
       ok,
       pull,
@@ -834,7 +1105,9 @@
     push: pushTable,
     pushTable,
     poll,
+    _pollInternal,
     flushPending,
+    _flushPendingInternal,
     start,
     stop,
     isRunning,
@@ -850,6 +1123,9 @@
     pullConfigFile,
     pullOperationalTable,
     pullBranchDatabase,
-    applyRemoteVersions
+    applyRemoteVersions,
+    getRemoteBranchDatabaseRevision,
+    getBranchId,
+    verifyRemoteTableCommit,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

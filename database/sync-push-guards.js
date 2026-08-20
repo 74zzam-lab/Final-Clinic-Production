@@ -1,9 +1,11 @@
 'use strict';
 
 /**
- * Sync push/pull guards — empty push, localRev=0, stale overwrite.
+ * Sync push/pull guards — empty push, localRev=0, stale overwrite, CAS.
  * Used by peer-sync-engine (Node) and mirrored in cloud/sync-push-guards.js (renderer).
  */
+
+const casGuards = require('./sync-cas-guards');
 
 function parseRecordCount(payload) {
   if (payload == null) return 0;
@@ -118,4 +120,6 @@ module.exports = {
   parseRecordCount,
   evaluatePushGuard,
   evaluatePullApplyGuard,
+  evaluateCasPushGuard: casGuards.evaluateCasPushGuard,
+  evaluateManifestCasGuard: casGuards.evaluateManifestCasGuard,
 };
