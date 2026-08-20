@@ -21,6 +21,34 @@
     return Number.isFinite(t) ? t : 0;
   }
 
+  const TOMBSTONE_RETENTION = Object.freeze({
+    MIN_RETENTION_DAYS: 90,
+    REQUIRE_ALL_DEVICES_PASSED: true,
+    CLEANUP_ENABLED: false,
+  });
+
+  function recordRevision(record) {
+    return Number(record?.revision) || 0;
+  }
+
+  function recordUpdatedTime(record) {
+    const t = new Date(record?.updatedAt || record?.createdAt || 0).getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
+
+  function assertNotResurrecting(prev, next, options) {
+    options = options || {};
+    if (options.revive === true || options.hard === true) return { ok: true };
+    if (!isTombstone(prev)) return { ok: true };
+    if (isTombstone(next)) return { ok: true };
+    return {
+      ok: false,
+      error: 'tombstone_resurrection_blocked',
+      code: 'TOMBSTONE_RESURRECTION_BLOCKED',
+      recordId: prev?.id || next?.id || null,
+    };
+  }
+
   function decideTombstone(local, remote, table) {
     const localT = isTombstone(local);
     const remoteT = isTombstone(remote);
@@ -38,8 +66,8 @@
       if (rt > lt) {
         return { action: ACTIONS.PULL, reason: 'tombstone_newer_remote', tombstone: remote, table };
       }
-      const lr = Number(local?.revision) || 0;
-      const rr = Number(remote?.revision) || 0;
+      const lr = recordRevision(local);
+      const rr = recordRevision(remote);
       if (lr >= rr) {
         return { action: ACTIONS.PUSH, reason: 'tombstone_revision_local', tombstone: local, table };
       }
@@ -47,24 +75,34 @@
     }
 
     if (localT && !remoteT) {
+      const localDelRev = recordRevision(local);
+      const remoteRev = recordRevision(remote);
+      if (remoteRev > localDelRev) {
+        return {
+          action: ACTIONS.CONFLICT,
+          reason: 'delete_vs_update',
+          fields: ['deletedAt'],
+          local,
+          remote,
+          table,
+        };
+      }
+      return { action: ACTIONS.PUSH, reason: 'tombstone_wins_over_stale_remote', tombstone: local, table };
+    }
+
+    const localRev = recordRevision(local);
+    const remoteDelRev = recordRevision(remote);
+    if (localRev > remoteDelRev) {
       return {
         action: ACTIONS.CONFLICT,
-        reason: 'delete_vs_update',
+        reason: 'update_vs_delete',
         fields: ['deletedAt'],
         local,
         remote,
         table,
       };
     }
-
-    return {
-      action: ACTIONS.CONFLICT,
-      reason: 'update_vs_delete',
-      fields: ['deletedAt'],
-      local,
-      remote,
-      table,
-    };
+    return { action: ACTIONS.PULL, reason: 'tombstone_wins_over_stale_live', tombstone: remote, table };
   }
 
   function shouldOpenConflict(local, remote) {
@@ -87,6 +125,9 @@
       deletedAt: record?.deletedAt || ts,
       updatedAt: ts,
     };
+    if (ctx.operationId || ctx.operation_id) {
+      row.operationId = ctx.operationId || ctx.operation_id;
+    }
     if (global.RecordMetadata?.stampUpdate) {
       row = global.RecordMetadata.stampUpdate(row, prev || record, ctx);
     } else if (prev && typeof prev === 'object') {
@@ -123,9 +164,13 @@
   }
 
   global.TombstonePolicy = {
+    TOMBSTONE_RETENTION,
     ACTIONS,
     isTombstone,
     tombstoneTime,
+    recordRevision,
+    recordUpdatedTime,
+    assertNotResurrecting,
     decideTombstone,
     shouldOpenConflict,
     recordsConflict,

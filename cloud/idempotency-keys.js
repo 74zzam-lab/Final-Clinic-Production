@@ -41,6 +41,17 @@
   }
 
   function buildRecordOpKey(entry) {
+    const opId = entry.operation_id || entry.operationId || '';
+    if (opId) {
+      return [
+        String(entry.center_id || ''),
+        String(entry.branch_id || 'BR-MAIN'),
+        String(entry.table_name || ''),
+        String(entry.record_id || ''),
+        String(entry.operation || 'UPDATE'),
+        String(opId),
+      ].join(':');
+    }
     const payloadHash = payloadHashFromEntry(entry);
     return [
       String(entry.center_id || ''),
