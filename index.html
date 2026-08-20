@@ -9557,6 +9557,16 @@ function ensureOwnerSeedAccount(list) {
   const branchId = (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getLoginBranchId)
     ? BranchDataIsolation.getLoginBranchId()
     : (typeof DeviceConfig !== 'undefined' ? DeviceConfig.getLockedBranchId?.() : null) || 'BR-MAIN';
+
+  const orgWideOwner = list.some((u) => u && String(u.role || '').toLowerCase() === 'owner');
+  const lifecycleMode = typeof OwnerLifecycleAuthority !== 'undefined'
+    ? OwnerLifecycleAuthority.getMode?.()
+    : null;
+  const lifecycleBlocksSeed = lifecycleMode === 'existing'
+    || lifecycleMode === 'restore'
+    || lifecycleMode === 'replacement'
+    || (typeof OwnerLifecycleAuthority !== 'undefined' && OwnerLifecycleAuthority.isCreateBlocked?.());
+
   const ownersInBranch = list.filter((u) => u
     && String(u.role || '').toLowerCase() === 'owner'
     && (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.userBelongsToBranch
@@ -9584,6 +9594,9 @@ function ensureOwnerSeedAccount(list) {
     }
     if (out.length !== list.length) DB.set('users', out);
     return out;
+  }
+  if (orgWideOwner || lifecycleBlocksSeed) {
+    return list;
   }
   const seed = defaultUsers.find((u) => u.role === 'owner');
   if (!seed) return list;
@@ -16533,6 +16546,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/meta.js"></script>
 <script src="cloud/organization.js"></script>
 <script src="cloud/owner-setup-state.js"></script>
+<script src="cloud/owner-lifecycle-authority.js"></script>
 <script src="cloud/owner-migration.js"></script>
 <script src="cloud/owner-bootstrap.js"></script>
 <script src="cloud/device-config.js"></script>

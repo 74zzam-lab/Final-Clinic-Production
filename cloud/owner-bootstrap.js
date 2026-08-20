@@ -246,6 +246,9 @@
     const gate = await verifySetupToken(token);
     if (!gate.ok) return gate;
     if (global.OwnerProfile?.hasProfile?.()) return { ok: false, error: 'owner_already_exists' };
+    if (global.OwnerLifecycleAuthority?.isCreateBlocked?.()) {
+      return { ok: false, error: 'owner_create_blocked', code: 'EXISTING_NO_CREATE' };
+    }
 
     const username = String(profileInput?.username || '').trim();
     const password = String(profileInput?.password || '').trim();
@@ -297,6 +300,9 @@
     const match = matchPreProvisionedEmail(email);
     if (!match.ok) return match;
     if (global.OwnerProfile?.hasProfile?.()) return { ok: false, error: 'owner_already_exists' };
+    if (global.OwnerLifecycleAuthority?.isCreateBlocked?.()) {
+      return { ok: false, error: 'owner_create_blocked', code: 'EXISTING_NO_CREATE' };
+    }
 
     const user = global.currentUser;
     const allow =

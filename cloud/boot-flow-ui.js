@@ -862,6 +862,17 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
       setStatus('✅ حساب المالك جاهز');
       return { ok: true, already: true };
     }
+    const mode = global.OwnerLifecycleAuthority?.getMode?.();
+    const w = loadWizard();
+    if (
+      w.path === PATHS.EXISTING
+      || mode === 'existing'
+      || mode === 'restore'
+      || mode === 'replacement'
+    ) {
+      setStatus('⚠️ مسار العميل الحالي — استرداد فقط، لا إنشاء مالك جديد', true);
+      return { ok: false, error: 'owner_create_blocked', code: 'EXISTING_NO_CREATE', mode };
+    }
     const busy = global.OwnerManagement?.getSystemBusyReason?.();
     if (busy === 'restore' || busy === 'sync' || busy === 'license_refresh') {
       setStatus('⚠️ انتظر انتهاء ' + busy + ' قبل إنشاء Owner', true);
@@ -869,9 +880,11 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
     }
     setStatus('⏳ جارٍ إنشاء حساب المالك...');
     try {
-      // Single create path + single lock inside OwnerManagement.createOwner
+      // PR11: canonical first-owner commit (idempotent retry/restart).
       let res;
-      if (global.OwnerManagement?.createOwner) {
+      if (global.OwnerManagement?.setupCommitOwner) {
+        res = await global.OwnerManagement.setupCommitOwner({ idPrefix: 'ocf' });
+      } else if (global.OwnerManagement?.createOwner) {
         res = await global.OwnerManagement.createOwner({ idPrefix: 'ocf' });
       } else {
         res = await global.OwnerCreateForm?.createOwnerFromForm?.('ocf');
@@ -1021,12 +1034,20 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
       }
       case 'owner': {
         const st = global.OwnerManagement?.getOwnerState?.()?.state;
+        const mode = global.OwnerLifecycleAuthority?.getMode?.();
+        const recoverOnly = w.path === PATHS.EXISTING
+          || mode === 'existing'
+          || mode === 'restore'
+          || mode === 'replacement';
         if (st === 'OWNER_EXISTS' || hasOwnerPasswordAccount()) {
           content.innerHTML = '<p>✅ حساب المالك (Owner) موجود بكلمة مرور. يمكنك المتابعة.</p>';
           setStatus('✅ Owner جاهز');
         } else if (st === 'OWNER_CREATION_IN_PROGRESS') {
           content.innerHTML = '<p>⏳ إنشاء المالك جارٍ — لا تبدأ عملية ثانية.</p>';
           setStatus('⏳ OWNER_CREATION_IN_PROGRESS', true);
+        } else if (recoverOnly) {
+          content.innerHTML = '<p>مسار استرداد — لا يمكن إنشاء مالك جديد. استعد من النسخة الاحتياطية أو سجّل الدخول بحساب المالك الموجود.</p>';
+          setStatus('⚠️ EXISTING/RESTORE: استرداد فقط — لا create', true);
         } else {
           const label = (st === 'OWNER_CORRUPTED' || st === 'OWNER_RECOVERY_REQUIRED')
             ? 'استرداد / إصلاح حساب المالك — كلمة المرور إلزامية.'
@@ -1360,6 +1381,9 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
               ok = !!r?.ok || r?.skipped;
             }
             if (ok) {
+              if (loadWizard().path === PATHS.EXISTING) {
+                try { global.OwnerLifecycleAuthority?.markReplacementHydrate?.(); } catch { /* empty */ }
+              }
               const bootstrap = await global.ensureCloudBootstrapReady?.();
               if (bootstrap?.runNewDeviceBootstrap) {
                 await bootstrap.runNewDeviceBootstrap({
@@ -1440,6 +1464,14 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
 
   function startPath(path) {
     const w = resetWizard(path);
+    try {
+      if (path === PATHS.NEW) {
+        global.OwnerLifecycleAuthority?.setMode?.('new', { createBlocked: false });
+      } else if (path === PATHS.EXISTING) {
+        global.OwnerLifecycleAuthority?.setMode?.('existing', { createBlocked: true });
+        global.OwnerLifecycleAuthority?.reconcileExistingCustomer?.();
+      }
+    } catch { /* empty */ }
     showStep('bf-step-wizard');
     renderProgress(w);
     renderStepUI(w);

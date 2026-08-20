@@ -41,6 +41,8 @@ const KV_OPERATIONAL = [
   '__tdw_owner_profile__',
   '__tdw_owner_setup__',
   '__tdw_owner_migration__',
+  '__tdw_owner_lifecycle__',
+  '__tdw_owner_lifecycle_commit__',
   'activityLog',
   'messageLog',
   'systemLogs',

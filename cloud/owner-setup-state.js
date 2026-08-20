@@ -86,6 +86,12 @@
    * Call after restore / migration / device transfer / DB upgrade / license rebinding.
    */
   function ensureMissingOwner(reason) {
+    if (global.OwnerLifecycleAuthority?.ownerExistsInDb?.()) {
+      return clearRequired();
+    }
+    if (global.OwnerLifecycleAuthority?.isCreateBlocked?.()) {
+      return clearRequired();
+    }
     if (!needsSetup()) return clearRequired();
     return markRequired(reason || REASONS.missing_owner);
   }

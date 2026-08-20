@@ -29,6 +29,7 @@ const KV_KEYS = [
   '__tdw_conflict_queue__', '__tdw_conflict_archive__', '__tdw_attachment_manifest__',
   '__tdw_branch_settings_store__', '__tdw_branch_counters_store__',
   '__tdw_owner_profile__', '__tdw_owner_setup__', '__tdw_owner_migration__',
+  '__tdw_owner_lifecycle__', '__tdw_owner_lifecycle_commit__',
 ];
 
 function asArray(value) {

@@ -86,6 +86,15 @@
         if (idx >= 0) list[idx] = user;
         else list.push(user);
       } else if (uname) {
+        const lcMode = global.OwnerLifecycleAuthority?.getMode?.();
+        if (
+          lcMode === 'existing'
+          || lcMode === 'restore'
+          || lcMode === 'replacement'
+          || global.OwnerLifecycleAuthority?.isCreateBlocked?.()
+        ) {
+          return;
+        }
         user = {
           id: 'owner-' + Date.now().toString(36),
           username: String(username).trim(),
@@ -148,6 +157,9 @@
   }
 
   async function runInteractiveMigration() {
+    if (global.OwnerLifecycleAuthority?.isCreateBlocked?.()) {
+      return { ok: false, error: 'owner_create_blocked', code: 'EXISTING_NO_CREATE' };
+    }
     const setupRequired = !!global.OwnerSetupState?.isRequired?.() && !global.OwnerProfile?.hasProfile?.();
     if (!shouldMigrate() && !setupRequired) {
       if (global.OwnerProfile?.hasProfile?.()) return { ok: false, error: 'not_required' };

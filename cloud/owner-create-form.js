@@ -165,6 +165,24 @@
     }
 
     const v = validated.value;
+
+    if (global.OwnerLifecycleAuthority) {
+      const prior = global.OwnerLifecycleAuthority.findCommittedOwner?.(v);
+      if (prior?.ok) return prior;
+      if (global.OwnerLifecycleAuthority.isCreateBlocked?.()) {
+        showFieldError(idPrefix, 'form', 'مسار استرداد — لا يمكن إنشاء مالك جديد');
+        return { ok: false, error: 'owner_create_blocked', code: 'EXISTING_NO_CREATE' };
+      }
+    }
+
+    if (global.OwnerManagement?.setupCommitOwner) {
+      return global.OwnerManagement.setupCommitOwner({
+        ...v,
+        passwordConfirm: v.password,
+        idPrefix,
+      });
+    }
+
     const res = await global.OwnerProfile.createProfile({
       username: v.username,
       password: v.password,
