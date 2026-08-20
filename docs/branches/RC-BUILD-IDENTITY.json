@@ -2,7 +2,8 @@
   "status": "SOURCE VERIFIED / RUNTIME UAT PENDING",
   "rcBranch": "cursor/final-stable-operational-rc-7c71",
   "runtimeBuildSourceCommit": "c2c2ad6650797af8e9769722aaa094f76176459e",
-  "evidenceDocHeadCommit": "70468aba361a5e9e2c8fb4609f9dbc0bd87c33cf",
+  "evidenceDocHeadCommit": "9472bbfb534b0b4942761b9c21d265f11f1ee896",
+  "priorEvidenceDocHeadBeforeIdentityFix": "28d77d91835bda1c551944f0d3e1619e025e82c4",
   "pr13BaseCommit": "59d443a148fc271b26065f84b5a697f015504f35",
   "version": "2.0.1",
   "productName": "Hijama Management System",
@@ -10,8 +11,12 @@
   "buildCommand": "npm run build:dir",
   "platform": "win32-x64",
   "electronVersion": "43.2.0",
-  "postBuildCommitsDocOnly": true,
-  "postBuildCommitRange": "c2c2ad6..28d77d9",
+  "postBuildVerification": {
+    "commitsAfterBuildSourceAreDocOnly": true,
+    "commitRange": "c2c2ad6..88506d2",
+    "packagedRuntimePathsChanged": false,
+    "rebuildRequired": false
+  },
   "artifacts": {
     "exe": {
       "path": "dist/win-unpacked/Hijama Management System.exe",
@@ -25,6 +30,6 @@
   },
   "identityRules": {
     "uatMustUseExeSha256": "174ab10a016deddfe3758e08bec59e47cd953a0535b167bbd108e4bbb25747a9",
-    "rebuildRequiredIf": "any commit after runtimeBuildSourceCommit changes packaged runtime paths (index.html, cloud/, electron/, database/, cupping-*.js, package.json build/files)"
+    "rebuildRequiredIf": "any commit after runtimeBuildSourceCommit changes packaged runtime paths"
   }
 }

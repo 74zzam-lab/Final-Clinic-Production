@@ -11,13 +11,14 @@
 |------|-------|
 | **RC branch** | `cursor/final-stable-operational-rc-7c71` |
 | **RUNTIME / BUILD SOURCE COMMIT** | `c2c2ad6650797af8e9769722aaa094f76176459e` |
-| **EVIDENCE / DOC HEAD** | `70468aba361a5e9e2c8fb4609f9dbc0bd87c33cf` |
+| **EVIDENCE / DOC HEAD** | `9472bbfb534b0b4942761b9c21d265f11f1ee896` |
+| **Prior doc HEAD (pre-identity-fix)** | `28d77d91835bda1c551944f0d3e1619e025e82c4` |
 | **PR13 base** | `59d443a148fc271b26065f84b5a697f015504f35` |
 | **Version** | `2.0.1` |
 | **EXE SHA-256** | `174ab10a016deddfe3758e08bec59e47cd953a0535b167bbd108e4bbb25747a9` |
 | **ASAR SHA-256** | `f8a02983e7fedf5c8027c18665e6c8a48fdd8aea2302b7b00cb4f8056d6400fe` |
 
-**UAT rule:** use only the EXE with the SHA-256 above. Commits after `c2c2ad6` through `28d77d9` are **docs/evidence only** — no rebuild required.
+**UAT rule:** use only the EXE with the SHA-256 above. All commits after `c2c2ad6` are **docs/evidence/scripts only** — packaged runtime unchanged, **no rebuild**.
 
 Machine-readable copy: `docs/branches/RC-BUILD-IDENTITY.json`
 
@@ -28,8 +29,8 @@ Machine-readable copy: `docs/branches/RC-BUILD-IDENTITY.json`
 | Field | Value |
 |-------|-------|
 | RC branch | `cursor/final-stable-operational-rc-7c71` |
-| Runtime build source | `c2c2ad6` (tree used when EXE was built) |
-| Evidence/doc HEAD | `1e7800a` (identity docs; supersedes `28d77d9`) |
+| Runtime build source | `c2c2ad6` (EXE built from this tree) |
+| Evidence/doc HEAD | `88506d2` (identity + UAT runbook; supersedes `28d77d9`) |
 | PR13 feature base | `59d443a` |
 | Product | Hijama Management System |
 | Electron | 43.2.0 |
