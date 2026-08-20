@@ -11,7 +11,7 @@ const root = path.join(__dirname, '..');
 const failures = [];
 
 const STEPS = [
-  { phase: 1, script: 'scripts/verify-sqlite-sot-readpath.js' },
+  { phase: 1, script: 'scripts/verify-sqlite-operational-truth.js' },
   { phase: 2, script: 'scripts/verify-atomic-bundle.js' },
   { phase: 3, script: 'scripts/verify-backup-v2-plain.js' },
   { phase: 4, script: 'scripts/verify-branch-sql-isolation.js' },

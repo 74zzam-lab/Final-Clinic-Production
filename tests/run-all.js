@@ -91,6 +91,7 @@ const baseline = [
   ['tests/baseline/test-hybrid-backup-v2.js', 'hybrid:backup-v2'],
   ['tests/baseline/test-backup-v2-cloud-retention.js', 'backup-v2-cloud-retention'],
   ['tests/baseline/test-backup-v2-scope-truth.js', 'backup-v2-scope-truth'],
+  ['tests/baseline/test-sqlite-operational-truth.js', 'sqlite-operational-truth'],
   ['tests/backup/backup-restore-v2.test.js', 'v2-5.1:backup-restore-v2'],
   ['tests/backup/backup-sync-harden-v2.test.js', 'v2-5.2:backup-sync-harden'],
   ['tests/baseline/test-v2-5-3-owner-identity-license.js', 'v2-5.3:owner-identity-license'],

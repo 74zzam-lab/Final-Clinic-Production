@@ -9,24 +9,29 @@
 (function (global) {
   'use strict';
 
-  const CORE_TABLES = ['clientsRegistry', 'cases', 'bookings', 'doctors', 'attendance', 'expenses'];
-  const KV_MIRROR = [
+  const REG = global.SqliteOperationalRegistry || {};
+  const CORE_TABLES = REG.CORE_TABLES || [
+    'clientsRegistry', 'cases', 'bookings', 'doctors', 'attendance', 'expenses',
+  ];
+  const KV_MIRROR = REG.KV_MIRROR || REG.KV_OPERATIONAL || [
     'users', 'settings', 'packages', 'services', 'otRecords', 'budget', 'invoiceCounter',
     'clientFileCounter', 'nextSessions', 'employeeLeaveRequests', 'employeeLedgerAccruals',
     'employeeLedgerPayments', 'employeeLedgerEntries', 'importHistory',
     'inventoryItems', 'inventorySuppliers', 'inventoryMovements',
     'attachments_meta',
-    '__tdw_conflict_queue__',
-    '__tdw_conflict_archive__',
-    '__tdw_attachment_manifest__',
-    'activityLog',
-    'messageLog',
-    'backupLog',
+    '__tdw_conflict_queue__', '__tdw_conflict_archive__', '__tdw_attachment_manifest__',
+    '__tdw_branch_settings_store__', '__tdw_branch_counters_store__',
+    '__tdw_owner_profile__', '__tdw_owner_setup__', '__tdw_owner_migration__',
+    'activityLog', 'messageLog', 'systemLogs', 'cashDrawerSession',
+    'communicationWebhookLog', 'communicationQueue', 'backupLog',
   ];
-  const OPERATIONAL_KEYS = new Set(CORE_TABLES.concat(KV_MIRROR));
-  const UI_ONLY_KEYS = new Set([
+  const OPERATIONAL_PREFIXES = REG.OPERATIONAL_PREFIXES || [
+    '__tdw_owner_', '__tdw_conflict_', '__tdw_attachment_',
+  ];
+  const OPERATIONAL_KEYS = REG.OPERATIONAL_KEYS || new Set(CORE_TABLES.concat(KV_MIRROR));
+  const UI_ONLY_KEYS = new Set(REG.UI_ONLY_KEYS || [
     '__tdw_ui_theme__', '__tdw_ui_lang__', '__tdw_last_tab__', '__tdw_wizard_ui__',
-    'tdw_sidebar_collapsed',
+    'tdw_sidebar_collapsed', 'tablePageSize', 'logsPageSize', 'devContact',
   ]);
 
   const state = {
@@ -39,6 +44,7 @@
     pendingKeys: new Set(),
     bundleActive: false,
     bundleOps: [],
+    staleLsOverridden: [],
   };
 
   function api() {
@@ -46,13 +52,32 @@
   }
 
   function isOperationalKey(key) {
-    return OPERATIONAL_KEYS.has(key) || CORE_TABLES.includes(key);
+    if (REG.isOperationalKey) return REG.isOperationalKey(key);
+    if (OPERATIONAL_KEYS.has(key) || CORE_TABLES.includes(key)) return true;
+    return OPERATIONAL_PREFIXES.some((p) => String(key).startsWith(p));
   }
 
   function defaultForKey(key) {
+    if (REG.defaultForOperationalKey) return REG.defaultForOperationalKey(key);
     if (key.endsWith('Counter')) return 0;
     if (key === 'settings') return {};
+    if (key === 'budget') return 0;
+    if (key === 'cashDrawerSession') return null;
     return [];
+  }
+
+  function shouldBlockLocalStorage(key) {
+    const db = api();
+    if (!db) return false;
+    if (REG.shouldBlockLocalStorageForKey) {
+      return REG.shouldBlockLocalStorageForKey(key, true);
+    }
+    if (UI_ONLY_KEYS.has(key)) return false;
+    return isOperationalKey(key);
+  }
+
+  function hasElectronDatabase() {
+    return !!api();
   }
 
   function readFromLocalStorageOnly(k, def) {
@@ -141,7 +166,8 @@
 
     const db = api();
     if (db) {
-      if (state.ready) return def !== undefined ? def : defaultForKey(key);
+      // Electron: never delegate authority to localStorage for operational keys.
+      if (!state.ready) return def !== undefined ? def : defaultForKey(key);
       return def !== undefined ? def : defaultForKey(key);
     }
 
@@ -172,6 +198,23 @@
     else if (tableKey === 'messageLog') global.messageLog = value;
     else if (tableKey === 'backupLog') global.backupLog = value;
     else if (tableKey === 'cashDrawerSession') global.cashDrawerSession = value;
+    else if (tableKey === 'systemLogs') global.systemLogs = value;
+    else if (tableKey === 'attachments_meta') global.attachments_meta = value;
+    else if (tableKey === 'employeeLeaveRequests') global.employeeLeaveRequests = value;
+    else if (tableKey === 'importHistory') global.importHistory = value;
+    else if (tableKey === 'otRecords') global.otRecords = value;
+    else if (tableKey === 'nextSessions') global.nextSessions = value;
+  }
+
+  function noteStaleLocalStorageOverride(key, sqliteValue) {
+    try {
+      const lsRaw = localStorage.getItem(key);
+      if (!lsRaw) return;
+      const lsVal = JSON.parse(lsRaw);
+      if (JSON.stringify(lsVal) !== JSON.stringify(sqliteValue)) {
+        if (!state.staleLsOverridden.includes(key)) state.staleLsOverridden.push(key);
+      }
+    } catch { /* empty */ }
   }
 
   function isBundledOperationalKey(key) {
@@ -428,7 +471,9 @@
       } catch { /* empty */ }
     }
 
+    state.staleLsOverridden = [];
     const apply = (k, v) => {
+      noteStaleLocalStorageOverride(k, v);
       rememberCommit(k, v);
       const viewVal = filterForActiveViewIfNeeded(k, v);
       rawSet(k, viewVal);
@@ -464,7 +509,9 @@
     state.status = res.status;
     state.sqlitePrimary = !!(res.status && res.status.sqlitePrimary);
 
+    state.staleLsOverridden = [];
     const apply = (k, v) => {
+      noteStaleLocalStorageOverride(k, v);
       rememberCommit(k, v);
       const viewVal = filterForActiveViewIfNeeded(k, v);
       rawSet(k, viewVal);
@@ -792,6 +839,9 @@
     isBundleActive,
     restoreLastCommit,
     readOperational,
+    shouldBlockLocalStorage,
+    hasElectronDatabase,
+    isOperationalKey,
     status,
     isPrimary,
     getOperationalReadiness,
@@ -807,6 +857,7 @@
       bundleActive: state.bundleActive,
       bundleQueued: state.bundleOps.length,
       hasLastCommitted: Object.keys(state.lastCommitted),
+      staleLsOverridden: state.staleLsOverridden.slice(),
     }),
     getLastError: () => state.lastError,
     getCommittedRaw,
