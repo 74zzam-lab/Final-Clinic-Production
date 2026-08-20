@@ -20,10 +20,18 @@
     return getRegistered(doc).find(d => d && d.deviceUuid === deviceUuid) || null;
   }
 
-  /** Owner / HQ Admin — not branch admin alone. */
+  /** Owner / HQ Admin — trusted session + DB role (PR12). */
   function canManageDevicesAsOwner(options) {
     options = options || {};
     if (options.force === true) return true;
+    if (global.OwnerTrustedAuthority?.assertOwnerMutation) {
+      return global.OwnerTrustedAuthority.assertOwnerMutation({
+        action: options.action || 'manage_devices',
+        branchId: options.branchId,
+        deviceUuid: options.deviceUuid,
+        user: options.user,
+      }).ok;
+    }
     const user = global.Auth?.getCurrentUser?.() || global.currentUser;
     if (global.RolePolicy?.canManageOrganization?.(user)) return true;
     if (global.OwnerProfile?.currentUserIsOwner?.()) return true;

@@ -95,6 +95,19 @@
       return { ok: false, error: 'owner_hub_required' };
     }
 
+    if (options.source === 'owner_hub') {
+      const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({
+        action: 'enrollBranch',
+        branchId: options.branchId,
+      });
+      if (ownerGate && !ownerGate.ok) return ownerGate;
+    } else {
+      const bootGate = global.OwnerTrustedAuthority?.assertOwnerOrBootstrap?.({
+        action: 'enrollBranch_activation',
+      });
+      if (bootGate && !bootGate.ok) return bootGate;
+    }
+
     // Block double-submit while another creation is pending.
     const existingPending = loadPending();
     if (existingPending && existingPending.status === 'BRANCH_CREATION_PENDING' && !options.resumePending) {
