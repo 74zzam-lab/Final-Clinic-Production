@@ -11,7 +11,7 @@
 |------|-------|
 | **RC branch** | `cursor/final-stable-operational-rc-7c71` |
 | **RUNTIME / BUILD SOURCE COMMIT** | `c2c2ad6650797af8e9769722aaa094f76176459e` |
-| **EVIDENCE / DOC HEAD** | `30ecf66be8b1482a59423e9a9e1cf3dc3ea1fd0a` |
+| **EVIDENCE / DOC HEAD** | `a3bfb74f460736cd6925bf5cccd4085bf060466c` |
 | **Prior doc HEAD (pre-identity-fix)** | `28d77d91835bda1c551944f0d3e1619e025e82c4` |
 | **PR13 base** | `59d443a148fc271b26065f84b5a697f015504f35` |
 | **Version** | `2.0.1` |
@@ -30,7 +30,7 @@ Machine-readable copy: `docs/branches/RC-BUILD-IDENTITY.json`
 |-------|-------|
 | RC branch | `cursor/final-stable-operational-rc-7c71` |
 | Runtime build source | `c2c2ad6` (EXE built from this tree) |
-| Evidence/doc HEAD | `30ecf66` (final identity pin; supersedes `28d77d9`) |
+| Evidence/doc HEAD | `a3bfb74` (final identity pin; supersedes `28d77d9`) |
 | PR13 feature base | `59d443a` |
 | Product | Hijama Management System |
 | Electron | 43.2.0 |
@@ -111,7 +111,7 @@ All 14 anchor commits verified as ancestors of Final HEAD (`scripts/rc-consolida
 
 **Note:** UAT must use only this EXE SHA-256. Commits after `c2c2ad6` are docs/scripts only — no rebuild.
 
-### Post-build commit audit (`c2c2ad6..30ecf66`)
+### Post-build commit audit (`c2c2ad6..a3bfb74`)
 
 Files changed: `docs/branches/*`, `scripts/verify-tombstone-idempotency.js` (verifier only — not packaged).  
 Packaged runtime paths unchanged. Rebuild **not** required.

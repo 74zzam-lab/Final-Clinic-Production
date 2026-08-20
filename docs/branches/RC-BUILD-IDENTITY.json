@@ -2,7 +2,7 @@
   "status": "SOURCE VERIFIED / RUNTIME UAT PENDING",
   "rcBranch": "cursor/final-stable-operational-rc-7c71",
   "runtimeBuildSourceCommit": "c2c2ad6650797af8e9769722aaa094f76176459e",
-  "evidenceDocHeadCommit": "30ecf66be8b1482a59423e9a9e1cf3dc3ea1fd0a",
+  "evidenceDocHeadCommit": "a3bfb74f460736cd6925bf5cccd4085bf060466c",
   "priorEvidenceDocHeadBeforeIdentityFix": "28d77d91835bda1c551944f0d3e1619e025e82c4",
   "pr13BaseCommit": "59d443a148fc271b26065f84b5a697f015504f35",
   "version": "2.0.1",
@@ -13,7 +13,7 @@
   "electronVersion": "43.2.0",
   "postBuildVerification": {
     "commitsAfterBuildSourceAreDocOnly": true,
-    "commitRange": "c2c2ad6..30ecf66",
+    "commitRange": "c2c2ad6..a3bfb74",
     "packagedRuntimePathsChanged": false,
     "rebuildRequired": false
   },
