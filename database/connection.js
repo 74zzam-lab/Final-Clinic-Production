@@ -6,9 +6,10 @@ const Database = require('better-sqlite3');
 const initial = require('./migrations/001_initial');
 const syncPlatform = require('./migrations/002_sync_platform');
 const conflictAuthority = require('./migrations/003_conflict_authority');
+const upgradeMarkers = require('./migrations/004_upgrade_markers');
 const { applyOpenPragmas } = require('./db-maintenance');
 
-const MIGRATIONS = [initial, syncPlatform, conflictAuthority];
+const MIGRATIONS = [initial, syncPlatform, conflictAuthority, upgradeMarkers];
 
 class DatabaseOpenError extends Error {
   constructor(code, message, details) {

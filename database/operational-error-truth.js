@@ -5,6 +5,14 @@
  */
 const REDACTED = '[REDACTED]';
 
+const CODE_ALIASES = Object.freeze({
+  owner_count_invariant_violation: 'owner_corrupted',
+  DUPLICATE_PRIMARY_OWNER: 'owner_corrupted',
+  branch_id_required: 'branch_context_missing',
+  branch_scope_denied: 'branch_access_denied',
+  backup_legacy_encrypted_direct_restore_blocked: 'restore_encrypted_import_only',
+});
+
 const CATALOG = Object.freeze({
   generic: {
     category: 'generic',
@@ -105,6 +113,7 @@ const CATALOG = Object.freeze({
   rbac_session_required: {
     category: 'rbac',
     severity: 'warning',
+    requiresAction: true,
     userMessageAr: 'جلسة الصلاحيات غير مربوطة — أعد تسجيل الدخول ثم حاول مجدداً.',
     userMessageEn: 'RBAC session not bound — sign in again and retry.',
   },
@@ -141,8 +150,91 @@ const CATALOG = Object.freeze({
   branch_access_denied: {
     category: 'rbac',
     severity: 'denied',
+    requiresAction: true,
     userMessageAr: 'لا يمكنك الوصول إلى هذا الفرع.',
     userMessageEn: 'Branch access denied.',
+  },
+  branch_context_missing: {
+    category: 'rbac',
+    severity: 'warning',
+    requiresAction: true,
+    userMessageAr: 'سياق الفرع غير محدد — اختر فرعاً نشطاً ثم أعد المحاولة.',
+    userMessageEn: 'Branch context missing — select an active branch and retry.',
+  },
+  sqlite_busy: {
+    category: 'sqlite',
+    severity: 'warning',
+    retryable: true,
+    userMessageAr: 'قاعدة البيانات مشغولة — سيتم إعادة المحاولة تلقائياً.',
+    userMessageEn: 'Database is busy — retrying automatically.',
+  },
+  sync_baseline_required: {
+    category: 'sync',
+    severity: 'warning',
+    requiresAction: true,
+    userMessageAr: 'يلزم سحب baseline من السحابة قبل الرفع.',
+    userMessageEn: 'Pull cloud baseline before push.',
+  },
+  remote_revision_mismatch: {
+    category: 'sync',
+    severity: 'warning',
+    requiresAction: true,
+    userMessageAr: 'إصدار السحابة لا يطابق المحلي — اسحب أو حل التعارضات.',
+    userMessageEn: 'Remote revision mismatch — pull or resolve conflicts.',
+  },
+  owner_corrupted: {
+    category: 'rbac',
+    severity: 'error',
+    requiresAction: true,
+    userMessageAr: 'حالة المالك تالفة — راجع المدير أو استعد من نسخة احتياطية.',
+    userMessageEn: 'Owner state corrupted — contact admin or restore from backup.',
+  },
+  migration_pending: {
+    category: 'migration',
+    severity: 'warning',
+    requiresAction: true,
+    userMessageAr: 'ترحيل بيانات معلّق — أكمل الترقية قبل التشغيل.',
+    userMessageEn: 'Data migration pending — complete upgrade before operations.',
+  },
+  migration_in_progress: {
+    category: 'migration',
+    severity: 'warning',
+    retryable: true,
+    userMessageAr: 'ترحيل البيانات قيد التنفيذ — انتظر اكتماله.',
+    userMessageEn: 'Data migration in progress — wait for completion.',
+  },
+  restore_failed: {
+    category: 'restore',
+    severity: 'error',
+    userMessageAr: 'فشلت الاستعادة — لم تُستبدل البيانات المحلية.',
+    userMessageEn: 'Restore failed — local data was not replaced.',
+  },
+  restore_backup_invalid: {
+    category: 'restore',
+    severity: 'error',
+    requiresAction: true,
+    userMessageAr: 'ملف النسخة الاحتياطية غير صالح أو تالف.',
+    userMessageEn: 'Backup file is invalid or corrupt.',
+  },
+  restore_encrypted_import_only: {
+    category: 'restore',
+    severity: 'warning',
+    requiresAction: true,
+    userMessageAr: 'النسخة المشفّرة legacy — استخدم الاستيراد فقط وليس الاستعادة المباشرة.',
+    userMessageEn: 'Legacy encrypted backup — use import only, not direct restore.',
+  },
+  restore_scope_mismatch: {
+    category: 'restore',
+    severity: 'error',
+    requiresAction: true,
+    userMessageAr: 'نطاق النسخة الاحتياطية لا يطابق المركز/الفرع الحالي.',
+    userMessageEn: 'Backup scope does not match current center/branch.',
+  },
+  programmer_error: {
+    category: 'system',
+    severity: 'error',
+    userMessageAr: 'خطأ داخلي غير متوقع — أبلغ الدعم مع وقت الحدوث.',
+    userMessageEn: 'Unexpected internal error — contact support with timestamp.',
   },
   sqlite_primary_required: {
     category: 'sqlite',
@@ -252,12 +344,17 @@ function redactString(s) {
   return out;
 }
 
+function normalizeCode(raw) {
+  const code = String(raw || '').trim() || 'generic';
+  return CODE_ALIASES[code] || code;
+}
+
 function extractCode(input) {
   if (input == null || input === '') return 'generic';
-  if (typeof input === 'string') return String(input).trim() || 'generic';
-  if (input.code) return String(input.code);
-  if (input.error) return String(input.error);
-  if (input.reason) return String(input.reason);
+  if (typeof input === 'string') return normalizeCode(input);
+  if (input.code) return normalizeCode(input.code);
+  if (input.error) return normalizeCode(input.error);
+  if (input.reason) return normalizeCode(input.reason);
   return 'generic';
 }
 
@@ -282,10 +379,35 @@ function present(input, options) {
   };
 }
 
-function enrichResult(result) {
+function buildEnvelope(input, options) {
+  options = options || {};
+  const truth = present(input, options);
+  const entry = CATALOG[truth.code] || CATALOG.generic;
+  const envelope = {
+    ok: false,
+    code: truth.code,
+    stage: options.stage || input?.stage || 'operational',
+    userMessageAr: truth.userMessageAr,
+    userMessageEn: truth.userMessageEn,
+    category: truth.category,
+    severity: truth.severity,
+    retryable: options.retryable === true || entry.retryable === true,
+    requiresAction: options.requiresAction === true || entry.requiresAction === true,
+    leakSafe: true,
+  };
+  if (truth.technical) envelope.diagnostic = truth.technical;
+  return envelope;
+}
+
+function enrichResult(result, options) {
   if (!result || result.ok !== false) return result;
-  const truth = present(result);
-  return { ...result, ...truth, error: result.error || truth.code };
+  const envelope = buildEnvelope(result, options);
+  return {
+    ...result,
+    ...envelope,
+    error: normalizeCode(result.error || envelope.code),
+    message: result.message || envelope.userMessageEn,
+  };
 }
 
 function labelsForCodes(codes) {
@@ -294,10 +416,13 @@ function labelsForCodes(codes) {
 
 module.exports = {
   CATALOG,
+  CODE_ALIASES,
   REDACTED,
   redactString,
+  normalizeCode,
   extractCode,
   present,
+  buildEnvelope,
   enrichResult,
   labelsForCodes,
 };

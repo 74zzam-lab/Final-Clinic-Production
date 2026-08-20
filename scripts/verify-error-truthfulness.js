@@ -30,6 +30,18 @@ assert(rbacSess.userMessageAr.includes('جلسة'), 'rbac_session_required actio
 const enriched = truth.enrichResult({ ok: false, error: 'commit_failed' });
 assert(enriched.userMessageAr && enriched.code === 'commit_failed', 'enrichResult');
 
+const envelope = truth.buildEnvelope({ error: 'sqlite_busy', stage: 'ipc' });
+assert(envelope.retryable === true && envelope.stage === 'ipc', 'buildEnvelope retryable');
+
+const benignPath = path.join(root, 'cloud/benign-operational-errors.js');
+assert(fs.existsSync(benignPath), 'benign-operational-errors.js exists');
+const benignCtx = { window: {}, globalThis: {}, console };
+benignCtx.window = benignCtx;
+benignCtx.globalThis = benignCtx;
+vm.createContext(benignCtx);
+vm.runInContext(fs.readFileSync(benignPath, 'utf8'), benignCtx);
+assert(!benignCtx.BenignOperationalErrors.isBenignOperationalError('someRandomVar is not defined'), 'programmer error not benign');
+
 const red = truth.redactString('token ya29.abc password=secret Bearer xyz');
 assert(!/ya29|secret|xyz/i.test(red), 'secrets redacted');
 

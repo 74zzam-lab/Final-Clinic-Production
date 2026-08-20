@@ -8,6 +8,18 @@
   const ARCHIVE_KEY = '__tdw_conflict_archive__';
   const MAX_ARCHIVE = 300;
 
+  /** Telemetry-only: mirror failures must not block queue UX. */
+  function logBenignMirrorFailure(stage, err) {
+    try {
+      global.AuditLogger?.logSyncEvent?.('CONFLICT_MIRROR_BENIGN', {
+        entity: 'conflict_queue',
+        entityId: stage,
+        summary: String(err?.message || err || 'mirror_failed').slice(0, 120),
+        meta: { stage, code: err?.code || 'sqlite_mirror_fallback' },
+      });
+    } catch { /* telemetry only */ }
+  }
+
   const TABLE_LABELS = {
     cases: 'فاتورة',
     clientsRegistry: 'عميل',
@@ -48,8 +60,9 @@
   function saveQueue(list) {
     // V2-5.10: prefer authoritative SQLite KV when bridge is primary
     if (typeof global.SqliteBridge?.setAuthoritative === 'function' && global.SqliteBridge?.isPrimary?.()) {
-      Promise.resolve(global.SqliteBridge.setAuthoritative(QUEUE_KEY, list)).catch(() => {
-        try { global.DB?.set?.(QUEUE_KEY, list); } catch { /* empty */ }
+      Promise.resolve(global.SqliteBridge.setAuthoritative(QUEUE_KEY, list)).catch((err) => {
+        logBenignMirrorFailure('saveQueue_sqlite', err);
+        try { global.DB?.set?.(QUEUE_KEY, list); } catch (lsErr) { logBenignMirrorFailure('saveQueue_ls_fallback', lsErr); }
       });
       try { global.DB?.__rawSet?.(QUEUE_KEY, list); } catch {
         try { global.DB?.set?.(QUEUE_KEY, list); } catch { /* empty */ }
@@ -67,8 +80,9 @@
   function saveArchive(list) {
     const trimmed = list.slice(0, MAX_ARCHIVE);
     if (typeof global.SqliteBridge?.setAuthoritative === 'function' && global.SqliteBridge?.isPrimary?.()) {
-      Promise.resolve(global.SqliteBridge.setAuthoritative(ARCHIVE_KEY, trimmed)).catch(() => {
-        try { global.DB?.set?.(ARCHIVE_KEY, trimmed); } catch { /* empty */ }
+      Promise.resolve(global.SqliteBridge.setAuthoritative(ARCHIVE_KEY, trimmed)).catch((err) => {
+        logBenignMirrorFailure('saveArchive_sqlite', err);
+        try { global.DB?.set?.(ARCHIVE_KEY, trimmed); } catch (lsErr) { logBenignMirrorFailure('saveArchive_ls_fallback', lsErr); }
       });
       try { global.DB?.__rawSet?.(ARCHIVE_KEY, trimmed); } catch {
         try { global.DB?.set?.(ARCHIVE_KEY, trimmed); } catch { /* empty */ }
@@ -130,7 +144,7 @@
         item.sqliteConflictId = result.conflictId || item.id;
         return item;
       }
-    } catch { /* non-blocking */ }
+    } catch (err) { logBenignMirrorFailure('openConflictSqlite', err); }
     return null;
   }
 
@@ -148,7 +162,8 @@
         if (options.status && item.status !== options.status) return false;
         return true;
       });
-    } catch {
+    } catch (err) {
+      logBenignMirrorFailure('listOpenFromSqlite', err);
       return [];
     }
   }
