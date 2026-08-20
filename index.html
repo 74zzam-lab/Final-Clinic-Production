@@ -17384,29 +17384,31 @@ function getBackupV2Password() {
   return null;
 }
 
-/** Prompt only when a backup file is legacy encrypted (CDB2/CDBK envelope). */
+/** Plaintext V2 restore — legacy encrypted files must use runBackupV2ImportLegacy. */
 async function resolveBackupV2PasswordForFile(api, filePath) {
   if (!filePath || !api?.v2Inspect) return { password: null, legacyEncrypted: false };
   try {
     const inspected = await api.v2Inspect({ filePath });
     if (inspected?.encrypted) {
-      const pwd = window.prompt('نسخة مشفّرة قديمة — أدخل كلمة مرور النسخة (8+)', '');
-      if (!pwd || pwd.length < 8) {
-        notify('كلمة مرور النسخة القديمة مطلوبة (8+)', 'warning');
-        return { password: null, legacyEncrypted: true, cancelled: true };
-      }
-      return { password: pwd, legacyEncrypted: true };
+      notify(
+        'نسخة مشفّرة قديمة — لا تُستعاد مباشرة. استخدم «نسخة مشفّرة قديمة» للاستيراد والتحقق.',
+        'warning'
+      );
+      return { password: null, legacyEncrypted: true, blocked: true };
     }
     return { password: null, legacyEncrypted: false };
   } catch (err) {
     const code = String(err?.code || err?.message || '');
-    if (/backup_legacy_encrypted_password_required/i.test(code)) {
-      const pwd = window.prompt('نسخة مشفّرة قديمة — أدخل كلمة مرور النسخة (8+)', '');
-      if (!pwd || pwd.length < 8) {
-        notify('كلمة مرور النسخة القديمة مطلوبة (8+)', 'warning');
-        return { password: null, legacyEncrypted: true, cancelled: true };
-      }
-      return { password: pwd, legacyEncrypted: true };
+    if (/backup_legacy_encrypted_password_required|backup_legacy_encrypted_direct_restore_blocked/i.test(code)) {
+      notify(
+        'نسخة مشفّرة قديمة — لا تُستعاد مباشرة. استخدم «نسخة مشفّرة قديمة» للاستيراد والتحقق.',
+        'warning'
+      );
+      return { password: null, legacyEncrypted: true, blocked: true };
+    }
+    if (/invalid_backup_format|backup_version_unsupported/i.test(code)) {
+      notify('صيغة النسخة غير مدعومة أو تالفة.', 'danger');
+      return { password: null, legacyEncrypted: false, blocked: true, invalidFormat: true };
     }
     throw err;
   }
@@ -17453,10 +17455,8 @@ async function runBackupV2Create() {
   }
   notify('⏳ جاري إنشاء نسخة كاملة Backup V2...', 'warning');
   try {
-    const password = getBackupV2Password();
     const uploadDrive = document.getElementById('bk-v2-upload-drive')?.checked !== false;
     const res = await api.v2Create({
-      ...(password ? { password } : {}),
       backupType: 'manual',
       cloud: uploadDrive,
       upload: uploadDrive,
@@ -17585,12 +17585,11 @@ async function runBackupV2RestoreManual() {
       return;
     }
     const pwdMeta = await resolveBackupV2PasswordForFile(api, filePath);
-    if (pwdMeta.cancelled) return;
-    const password = pwdMeta.password;
+    if (pwdMeta.blocked || pwdMeta.cancelled) return;
     let scopeSummary = null;
     if (api.v2Inspect) {
       try {
-        const inspected = await api.v2Inspect({ filePath, ...(password ? { password } : {}) });
+        const inspected = await api.v2Inspect({ filePath });
         scopeSummary = inspected?.scope || null;
       } catch { /* inspect optional */ }
     }
@@ -17612,7 +17611,6 @@ async function runBackupV2RestoreManual() {
         notify('Restoring...', 'warning');
         const res = await api.v2Restore({
           filePath,
-          ...(password ? { password } : {}),
           relaunch: true,
           ...getBackupV2IdentityMeta(),
         });
@@ -17640,12 +17638,10 @@ async function runBackupV2RestoreLatest() {
     return;
   }
   try {
-    const password = getBackupV2Password();
     let scopeSummary = null;
     if (api.v2PickLatest) {
       try {
         const picked = await api.v2PickLatest({
-          ...(password ? { password } : {}),
           includeCloud: true,
           ...getBackupV2ScopeContext(),
         });
@@ -17668,7 +17664,6 @@ async function runBackupV2RestoreLatest() {
       execute: async () => {
         notify('Restoring latest authorized...', 'warning');
         return await api.v2RestoreLatest({
-          ...(password ? { password } : {}),
           relaunch: true,
           includeCloud: true,
           ...getBackupV2IdentityMeta(),
@@ -17704,7 +17699,11 @@ async function runBackupV2ImportLegacy() {
     notify('⏳ جاري فحص النسخة المشفّرة القديمة...', 'warning');
     const res = await api.v2ImportLegacy({ filePath, password });
     if (res?.ok) {
-      notify('✅ النسخة المشفّرة القديمة صالحة — يمكنك استعادتها من «استعادة من ملف»', 'success');
+      const staging = res.stagingPath ? `\nمسار التحقق: ${res.stagingPath}` : '';
+      notify(
+        '✅ تم فك النسخة المشفّرة القديمة ووضعها في مجلد استيراد للتحقق — لم تُستعد فوق قاعدة الإنتاج.' + staging,
+        'success'
+      );
     } else {
       notify('⚠️ ' + (res?.error || 'فشل الاستيراد'), 'danger');
     }

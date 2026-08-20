@@ -96,6 +96,20 @@ async function main() {
     check(false, `restore did not create DB; result=${JSON.stringify(restored && { ok: restored.ok, error: restored.error })}`);
   }
 
+  // Direct restore of legacy encrypted backup must be blocked on operational path
+  let directRestoreBlocked = false;
+  try {
+    await backupV2.restoreBackupFile({
+      userDataDir: restoreDir,
+      filePath: encPath,
+      password: legacyPassword,
+      skipEmergencyBackup: true,
+    });
+  } catch (err) {
+    directRestoreBlocked = err.code === 'backup_legacy_encrypted_direct_restore_blocked';
+  }
+  check(directRestoreBlocked, 'legacy encrypted direct restore blocked');
+
   // CSP / remote QR must remain rejected in protected tree
   const csp = fs.readFileSync(path.join(__dirname, '..', '..', 'electron', 'security', 'window-policy.js'), 'utf8');
   check(!csp.includes('api.qrserver.com'), 'Backup V2 port must not loosen CSP for QR');

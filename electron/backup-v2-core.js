@@ -112,6 +112,18 @@ function assertRestoreIdentityAllowed(manifest, expected = {}) {
   };
 }
 
+/**
+ * Operational restore is plaintext Backup V2 only.
+ * Legacy encrypted envelopes must use migration/import staging — never direct production swap.
+ */
+function assertOperationalRestoreAllowed(inspected, options = {}) {
+  if (!inspected?.encrypted) return { ok: true, plaintext: true };
+  if (options.legacyMigrationImport === true) return { ok: true, legacy: true };
+  const err = new Error('backup_legacy_encrypted_direct_restore_blocked');
+  err.code = 'backup_legacy_encrypted_direct_restore_blocked';
+  throw err;
+}
+
 function listLocalBackupFiles(backupDir) {
   const dir = path.resolve(backupDir || '');
   if (!dir || !fs.existsSync(dir)) return [];
@@ -148,6 +160,10 @@ function pickLatestAuthorizedBackup(candidates, password, expectedIdentity = {},
     try {
       const buf = fs.readFileSync(filePath);
       const info = inspectBackupBuffer(buf, password, options);
+      if (info.encrypted && options.legacyMigrationImport !== true) {
+        rejected.push({ filePath, reason: 'backup_legacy_encrypted_direct_restore_blocked' });
+        continue;
+      }
       assertRestoreIdentityAllowed(info.manifest, expectedIdentity);
       const createdAt = String(info.manifest?.createdAt || item?.createdAt || '') || null;
       const createdMs = Date.parse(createdAt || '') || fs.statSync(filePath).mtimeMs;
@@ -793,6 +809,7 @@ async function restoreBackupFile(options) {
     try { saveRestoreDiagnosticCopy(filePath, userDataDir, error.code || error.message); } catch { /* best effort */ }
     throw error;
   }
+  assertOperationalRestoreAllowed(inspected, options);
   if (options.requireSecurityMaterial && !inspected.securityMaterial?.fieldKey) {
     throw new Error('backup_field_key_missing');
   }
@@ -928,7 +945,9 @@ function friendlyBackupError(error) {
     backup_field_key_missing: 'هذه النسخة لا تحتوي مفتاح حماية البيانات المطلوب لاستعادة قاعدة البيانات المشفرة.',
     backup_disk_space_insufficient: 'لا توجد مساحة قرص كافية لإكمال العملية.',
     restored_sqlite_integrity_failed: 'قاعدة البيانات المستعادة لم تجتز فحص السلامة.',
-    backup_legacy_encrypted_password_required: 'نسخة مشفّرة قديمة — استخدم أداة الاستيراد أو أدخل كلمة مرور النسخة القديمة.',
+    backup_legacy_encrypted_password_required: 'نسخة مشفّرة قديمة — استخدم «نسخة مشفّرة قديمة» للاستيراد (لا تُستعاد مباشرة فوق قاعدة الإنتاج).',
+    backup_legacy_encrypted_direct_restore_blocked: 'رُفضت الاستعادة: النسخ المشفّرة القديمة لا تُستعاد مباشرة — استخدم «نسخة مشفّرة قديمة» ثم التحقق والدمج.',
+    invalid_backup_format: 'صيغة النسخة غير مدعومة أو تالفة.',
     password_too_short: 'كلمة مرور النسخة القديمة يجب ألا تقل عن 8 أحرف.',
     restore_center_mismatch: 'رُفضت الاستعادة: النسخة تخص مركزاً مختلفاً عن الجهاز الحالي.',
     restore_center_missing: 'رُفضت الاستعادة: النسخة لا تتضمن هوية المركز المطلوبة.',
@@ -965,6 +984,7 @@ module.exports = {
   buildEmergencyPath,
   buildManifest,
   assertRestoreIdentityAllowed,
+  assertOperationalRestoreAllowed,
   listLocalBackupFiles,
   pickLatestAuthorizedBackup,
   saveRestoreDiagnosticCopy,

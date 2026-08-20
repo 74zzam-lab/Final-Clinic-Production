@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { writeFileAtomicSync } = require('./atomic-file');
 
+/** @deprecated Plaintext V2 backups no longer use a schedule password — kept for vault cleanup only. */
 const PASSWORD_CREDENTIAL = 'backup-v2-schedule-password';
 const DEFAULT_INTERVAL_MINUTES = 60;
 const MIN_INTERVAL_MINUTES = 15;
@@ -71,25 +72,19 @@ class BackupV2Scheduler {
   }
 
   configure(input = {}) {
-    if (typeof input.password === 'string' && input.password && input.password.length < 8) {
-      throw new Error('password_too_short');
-    }
     const current = this.readConfig();
     const next = this.writeConfig({ ...current, ...input, lastStatus: input.enabled === false ? 'disabled' : current.lastStatus });
-    if (typeof input.password === 'string' && input.password) {
-      this.credentialVault.set(PASSWORD_CREDENTIAL, input.password);
-    }
-    if (!next.enabled) this.credentialVault.remove(PASSWORD_CREDENTIAL);
+    // Plaintext V2: purge any legacy schedule password from vault.
+    this.credentialVault.remove(PASSWORD_CREDENTIAL);
     return this.status(next);
   }
 
   status(config = this.readConfig()) {
-    const passwordAvailable = this.credentialVault.has(PASSWORD_CREDENTIAL);
     const last = Date.parse(config.lastAttemptAt || config.lastSuccessAt || '');
     const nextRunAt = config.enabled
       ? new Date((Number.isFinite(last) ? last : this.now()) + config.intervalMinutes * 60 * 1000).toISOString()
       : null;
-    return { ...config, passwordAvailable, running: this.running, nextRunAt };
+    return { ...config, running: this.running, nextRunAt };
   }
 
   isDue(config = this.readConfig()) {
@@ -108,8 +103,7 @@ class BackupV2Scheduler {
     const attemptedAt = new Date(this.now()).toISOString();
     config = this.writeConfig({ ...config, lastAttemptAt: attemptedAt, lastStatus: 'running', lastError: null });
     try {
-      const legacyPassword = this.credentialVault.get(PASSWORD_CREDENTIAL);
-      const result = await this.runBackup(legacyPassword || null, { ...config, trigger: 'scheduled', backupMode: 'scheduled' });
+      const result = await this.runBackup({ ...config, trigger: 'scheduled', backupMode: 'scheduled' });
       if (!result?.ok) throw new Error(result?.message || result?.error || 'scheduled_backup_failed');
       const completedAt = new Date(this.now()).toISOString();
       config = this.writeConfig({ ...config, lastSuccessAt: completedAt, lastStatus: result.cloudOk === false && config.cloudEnabled ? 'local_only' : 'success', lastError: result.uploadError || null });
