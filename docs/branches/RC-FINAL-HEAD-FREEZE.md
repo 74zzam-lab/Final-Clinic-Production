@@ -2,7 +2,7 @@
 
 **Status:** `SOURCE VERIFIED / RUNTIME UAT PENDING`  
 **Branch:** `cursor/final-stable-operational-rc-7c71`  
-**Commit:** `59d443a148fc271b26065f84b5a697f015504f35` (PR13 HEAD + RC gate scripts)  
+**Commit:** `c2c2ad6650797af8e9769722aaa094f76176459e` (PR13 + RC gate scripts)  
 **Version:** `2.0.1`  
 **Freeze eligible:** **NO** — runtime UAT on Windows/Google/Device A/B pending
 

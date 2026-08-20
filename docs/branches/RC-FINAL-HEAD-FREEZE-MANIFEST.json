@@ -1,7 +1,7 @@
 {
   "status": "SOURCE VERIFIED / RUNTIME UAT PENDING",
   "branch": "cursor/final-stable-operational-rc-7c71",
-  "commitSha": "59d443a148fc271b26065f84b5a697f015504f35",
+  "commitSha": "c2c2ad6650797af8e9769722aaa094f76176459e",
   "version": "2.0.1",
   "productName": "Hijama Management System",
   "buildTimeUtc": "2026-08-20T20:38:24Z",
