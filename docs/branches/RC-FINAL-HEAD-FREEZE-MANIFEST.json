@@ -1,14 +1,24 @@
 {
   "status": "SOURCE VERIFIED / RUNTIME UAT PENDING",
-  "branch": "cursor/final-stable-operational-rc-7c71",
-  "commitSha": "6f773054e93f98cdbda3e687af0558aa1cc9e37b",
-  "buildSourceCommitSha": "c2c2ad6650797af8e9769722aaa094f76176459e",
+  "rcBranch": "cursor/final-stable-operational-rc-7c71",
+  "runtimeBuildSourceCommit": "c2c2ad6650797af8e9769722aaa094f76176459e",
+  "evidenceDocHeadCommit": "28d77d91835bda1c551944f0d3e1619e025e82c4",
+  "pr13BaseCommit": "59d443a148fc271b26065f84b5a697f015504f35",
   "version": "2.0.1",
   "productName": "Hijama Management System",
   "buildTimeUtc": "2026-08-20T20:38:24Z",
   "buildCommand": "npm run build:dir",
   "platform": "win32-x64",
   "electronVersion": "43.2.0",
+  "postBuildVerification": {
+    "commitsAfterBuildSourceAreDocOnly": true,
+    "commitRange": "c2c2ad6..28d77d9",
+    "filesChangedInRange": [
+      "docs/branches/RC-FINAL-HEAD-FREEZE-MANIFEST.json",
+      "docs/branches/RC-FINAL-HEAD-FREEZE.md"
+    ],
+    "rebuildRequired": false
+  },
   "artifacts": {
     "exe": {
       "path": "dist/win-unpacked/Hijama Management System.exe",
@@ -49,27 +59,18 @@
   "uatMatrix": {
     "status": "PENDING",
     "singleBuildRequired": true,
-    "scenarios": [
+    "authorizedExeSha256": "174ab10a016deddfe3758e08bec59e47cd953a0535b167bbd108e4bbb25747a9",
+    "executionOrder": [
       "Clean install",
-      "Existing install upgrade",
-      "LS-only legacy profile migration",
-      "Owner login",
-      "Admin login",
+      "Owner/Admin login",
       "Branch A/B switching",
-      "Device lock",
-      "Device A/B same branch",
-      "Offline/reconnect",
-      "Concurrent writes",
-      "Tombstone delete/reconnect",
-      "Backup branch",
-      "Backup organization",
-      "Restore Backup V2",
-      "Restart after restore",
+      "Migration/Existing upgrade",
+      "Backup/Restore",
+      "Device A/B",
+      "Offline/Reconnect",
       "Google OAuth",
       "Live Drive CAS",
-      "Cloud hydrate",
-      "Scope isolation",
-      "Owner/Admin forged IPC"
+      "Final restart/integrity checks"
     ]
   },
   "finalInvariants": {
@@ -85,7 +86,7 @@
   },
   "freezeEligible": false,
   "freezeBlockers": [
-    "Windows/Google/Device A/B runtime UAT not executed on this build",
+    "Windows/Google/Device A/B runtime UAT not executed on authorized EXE",
     "NSIS installer not produced (build:dir unpacked only)"
   ]
 }

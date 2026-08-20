@@ -1,21 +1,36 @@
 # RC Consolidation / Final HEAD Freeze
 
 **Status:** `SOURCE VERIFIED / RUNTIME UAT PENDING`  
-**Branch:** `cursor/final-stable-operational-rc-7c71`  
-**Commit:** `6f773054e93f98cdbda3e687af0558aa1cc9e37b` (Final RC HEAD)  
-**Build source commit:** `c2c2ad6` (app binary; doc-only delta after build)  
-**Version:** `2.0.1`  
-**Freeze eligible:** **NO** — runtime UAT on Windows/Google/Device A/B pending
+**Freeze eligible:** **NO** — runtime UAT on authorized Windows build pending
 
 ---
 
-## 1. Final branch + SHA
+## Canonical build identity (authoritative)
+
+| Role | Value |
+|------|-------|
+| **RC branch** | `cursor/final-stable-operational-rc-7c71` |
+| **RUNTIME / BUILD SOURCE COMMIT** | `c2c2ad6650797af8e9769722aaa094f76176459e` |
+| **EVIDENCE / DOC HEAD** | `28d77d91835bda1c551944f0d3e1619e025e82c4` |
+| **PR13 base** | `59d443a148fc271b26065f84b5a697f015504f35` |
+| **Version** | `2.0.1` |
+| **EXE SHA-256** | `174ab10a016deddfe3758e08bec59e47cd953a0535b167bbd108e4bbb25747a9` |
+| **ASAR SHA-256** | `f8a02983e7fedf5c8027c18665e6c8a48fdd8aea2302b7b00cb4f8056d6400fe` |
+
+**UAT rule:** use only the EXE with the SHA-256 above. Commits after `c2c2ad6` through `28d77d9` are **docs/evidence only** — no rebuild required.
+
+Machine-readable copy: `docs/branches/RC-BUILD-IDENTITY.json`
+
+---
+
+## 1. Branch roles
 
 | Field | Value |
 |-------|-------|
-| Branch | `cursor/final-stable-operational-rc-7c71` |
-| Base | PR13 `cursor/error-truth-migration-safety-7c71` |
-| HEAD | `c2c2ad6650797af8e9769722aaa094f76176459e` |
+| RC branch | `cursor/final-stable-operational-rc-7c71` |
+| Runtime build source | `c2c2ad6` (tree used when EXE was built) |
+| Evidence/doc HEAD | `28d77d9` (manifest, RC report, PR description) |
+| PR13 feature base | `59d443a` |
 | Product | Hijama Management System |
 | Electron | 43.2.0 |
 
