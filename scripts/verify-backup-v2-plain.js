@@ -25,7 +25,12 @@ const checks = [
   { name: 'UI no schedule password gate', ok: !/فعّل الجدولة يتطلب كلمة مرور Backup V2/.test(html) },
   { name: 'UI legacy import action', ok: /runBackupV2ImportLegacy/.test(html) },
   { name: 'restore-reconcile no pre_restore_password_required', ok: !/pre_restore_password_required/.test(reconcile) },
-  { name: 'getBackupV2Password returns null without field', ok: /return null;\s*\}/.test(html.split('function getBackupV2Password')[1]?.slice(0, 200) || '') },
+  { name: 'assertOperationalRestoreAllowed exported', ok: /function assertOperationalRestoreAllowed/.test(core) },
+  { name: 'direct encrypted restore blocked in restoreBackupFile', ok: /assertOperationalRestoreAllowed\(inspected/.test(core) },
+  { name: 'legacy import stages migration folder', ok: /legacy-migration-staging/.test(fs.readFileSync(path.join(root, 'electron', 'backup-v2-legacy-import.js'), 'utf8')) },
+  { name: 'IPC runRestore rejects encrypted buffer', ok: /isEncryptedBackupBuffer\(buf\)/.test(ipc) },
+  { name: 'scheduler no password tick', ok: !/credentialVault\.get\(PASSWORD_CREDENTIAL\)/.test(fs.readFileSync(path.join(root, 'electron', 'backup-v2-scheduler.js'), 'utf8')) },
+  { name: 'UI restore blocks legacy encrypted', ok: /blocked:\s*true/.test(html.split('resolveBackupV2PasswordForFile')[1]?.slice(0, 800) || '') },
 ];
 
 let failed = 0;

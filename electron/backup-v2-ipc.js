@@ -207,13 +207,19 @@ function registerBackupV2Ipc({
     return password || null;
   }
 
-  async function runRestore(filePath, password, opts = {}) {
+  async function runRestore(filePath, opts = {}) {
     const identity = resolveIdentity(opts);
     const progress = [];
+    const buf = fs.readFileSync(filePath);
+    if (backupV2.isEncryptedBackupBuffer(buf)) {
+      const friendly = backupV2.friendlyBackupError({ code: 'backup_legacy_encrypted_direct_restore_blocked' });
+      const err = new Error(friendly.message);
+      err.code = friendly.code;
+      throw err;
+    }
     try {
       const result = await backupV2.restoreBackupFile({
         filePath,
-        password,
         userDataDir: opts.targetUserDataDir || getUserDataPath(),
         expectedIdentity: identity,
         closeDatabase: closeDatabase || undefined,
@@ -265,7 +271,6 @@ function registerBackupV2Ipc({
 
   handle('backup:v2:create', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options' });
-    const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
     const { scopeTruth, requestedScope } = resolveScopeForCreate(opts, identity);
     const userDataDir = getUserDataPath();
@@ -278,7 +283,6 @@ function registerBackupV2Ipc({
     const createOpts = {
       userDataDir,
       outputPath: filePath,
-      password,
       appVersion: appVersion || '2.0.0',
       backupType: opts.backupType || 'manual',
       centerId: identity.centerId,
@@ -381,8 +385,7 @@ function registerBackupV2Ipc({
   handle('backup:v2:restore', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
     const filePath = V.asString(opts.filePath, { name: 'filePath', required: true, allowEmpty: false });
-    const password = optionalBackupPassword(opts);
-    return runRestore(filePath, password, opts);
+    return runRestore(filePath, opts);
   });
 
   handle('backup:v2:listLocal', async (_e, options) => {
@@ -414,12 +417,11 @@ function registerBackupV2Ipc({
 
   handle('backup:v2:pickLatest', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
-    const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
     const candidates = await collectRestoreCandidates(opts);
     const picked = backupV2.pickLatestAuthorizedBackup(
       candidates,
-      password,
+      null,
       identity,
       opts
     );
@@ -434,16 +436,15 @@ function registerBackupV2Ipc({
 
   handle('backup:v2:restoreLatest', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
-    const password = optionalBackupPassword(opts);
     const identity = resolveIdentity(opts);
     const candidates = await collectRestoreCandidates(opts);
-    const picked = backupV2.pickLatestAuthorizedBackup(candidates, password, identity, opts);
+    const picked = backupV2.pickLatestAuthorizedBackup(candidates, null, identity, opts);
     if (!picked.ok || !picked.selected?.filePath) {
       const err = new Error('no_authorized_backup');
       err.code = 'no_authorized_backup';
       throw err;
     }
-    return runRestore(picked.selected.filePath, password, { ...opts, selected: picked.selected });
+    return runRestore(picked.selected.filePath, { ...opts, selected: picked.selected });
   });
 
   handle('backup:v2:pickFile', async () => {
@@ -466,7 +467,12 @@ function registerBackupV2Ipc({
       err.code = 'password_too_short';
       throw err;
     }
-    return legacyImport.importLegacyEncryptedBackup({ ...opts, filePath, password });
+    return legacyImport.importLegacyEncryptedBackup({
+      ...opts,
+      filePath,
+      password,
+      userDataDir: getUserDataPath(),
+    });
   });
 
   handle('backup:v2:gate', async () => backupV2.readRestoreGate(getUserDataPath()));
@@ -493,7 +499,6 @@ function registerBackupV2Ipc({
   handle('backup:v2:downloadAndRestore', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
     const sourcePath = V.asString(opts.sourcePath, { name: 'sourcePath', required: true, allowEmpty: false });
-    const password = optionalBackupPassword(opts);
     const stageDir = path.join(getUserDataPath(), 'Backups', 'V2', 'staging');
     fs.mkdirSync(stageDir, { recursive: true });
     const destPath = path.join(stageDir, path.basename(sourcePath).replace(/[^\w.\-]+/g, '_'));
@@ -502,7 +507,7 @@ function registerBackupV2Ipc({
       resume: opts.resume !== false,
       onProgress: (evt) => progress.push(evt),
     });
-    const restored = await runRestore(staged.path, password, opts);
+    const restored = await runRestore(staged.path, opts);
     return { ...restored, staged, downloadProgress: progress };
   });
 
@@ -528,7 +533,7 @@ function registerBackupV2Ipc({
     scheduler = new BackupV2Scheduler({
       userDataDir,
       credentialVault: vault,
-      runBackup: async (password, meta = {}) => {
+      runBackup: async (meta = {}) => {
         const identity = resolveIdentity(meta);
         const { scopeTruth, requestedScope } = resolveScopeForCreate(
           { ...meta, scopeType: meta.scopeType || SCOPE_BRANCH_DEFAULT },
@@ -545,7 +550,6 @@ function registerBackupV2Ipc({
         const createOpts = {
           userDataDir,
           outputPath: filePath,
-          password,
           appVersion: appVersion || '2.0.0',
           backupType: 'scheduled',
           centerId: identity.centerId,
