@@ -799,13 +799,15 @@
         <div class="oh-grid" style="margin-bottom:0">
           <div class="oh-card"><h4>الترخيص</h4><div class="oh-val" style="font-size:15px">${m.licLabel}</div><div class="oh-muted">${escapeHtml(m.license.centerName || '')}</div></div>
           <div class="oh-card"><h4>معرّف المركز</h4><div class="oh-val" style="font-size:13px;word-break:break-all" dir="ltr">${escapeHtml(m.centerId)}</div></div>
-          <div class="oh-card"><h4>الباقة / الاشتراك</h4><div class="oh-val" style="font-size:14px">${escapeHtml(m.license?.packageId || '—')}</div><div class="oh-muted" dir="ltr">${escapeHtml(m.license?.subscriptionId || '—')}</div></div>
-          <div class="oh-card"><h4>الانتهاء / التفعيل</h4><div class="oh-val" style="font-size:14px">${escapeHtml(m.license?.expiresAt || '—')}</div><div class="oh-muted">${escapeHtml(activationLabel)}</div></div>
+          <div class="oh-card" data-field="Package"><h4>Package — الباقة</h4><div class="oh-val" style="font-size:14px">${escapeHtml(m.license?.packageId || '—')}</div></div>
+          <div class="oh-card" data-field="Subscription"><h4>Subscription — الاشتراك</h4><div class="oh-val" style="font-size:14px" dir="ltr">${escapeHtml(m.license?.subscriptionId || '—')}</div></div>
+          <div class="oh-card" data-field="Expiry"><h4>Expiry — الانتهاء</h4><div class="oh-val" style="font-size:14px">${escapeHtml(m.license?.expiresAt || '—')}</div><div class="oh-muted">${escapeHtml(activationLabel)}</div></div>
           <div class="oh-card"><h4>Google المركز</h4><div class="oh-val" style="font-size:13px;word-break:break-all" dir="ltr">${escapeHtml(id.boundGoogleEmail || id.authorizedEmail || '—')}</div><div class="oh-muted">${idStateLabel}</div></div>
           <div class="oh-card"><h4>ملف المالك</h4><div class="oh-val" style="font-size:14px">${(global.OwnerManagement?.getOwnerState?.()?.state === 'OWNER_EXISTS') ? '✅ جاهز' : '⚠️ مطلوب'}</div></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
           <button type="button" class="btn btn-secondary btn-sm" onclick="openLicenseScreen('licensing')">🔑 إدارة الترخيص</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="openLicenseScreen('developer')">🛠️ Developer renewal</button>
           ${(ownerCanManage || canBootstrapOwner) ? '<button type="button" class="btn btn-primary btn-sm" onclick="OwnerHub.pushLicenseToDriveNow()">☁️ رفع الترخيص إلى Drive</button>' : ''}
           <button type="button" class="btn btn-ghost btn-sm" onclick="showPage(\'settings\');setTimeout(function(){switchSettingsTab(\'backup\')},200)">☁️ النسخ والمزامنة</button>
         </div>

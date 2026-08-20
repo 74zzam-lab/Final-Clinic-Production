@@ -43,7 +43,8 @@ async function main() {
   context.LicenseLimits = {
     canRegisterDevice: () => ({ ok: true }),
   };
-  context.OwnerProfile = { getRole: () => 'owner' };
+  context.OwnerProfile = { getRole: () => 'owner', currentUserIsOwner: () => true };
+  context.currentUser = { id: 'owner-1', role: 'owner', fullName: 'Owner' };
   context.AuditLogger = { log: () => {} };
   context.CommercialLicense = null;
 
@@ -70,6 +71,8 @@ async function main() {
   check(stillThere && stillThere.status === 'revoked', 'device row preserved (no DB wipe)');
 
   context.OwnerProfile.getRole = () => 'employee';
+  context.OwnerProfile.currentUserIsOwner = () => false;
+  context.currentUser = { id: 'emp-1', role: 'employee', fullName: 'Employee' };
   const denied = await DR.approveDevice('DEV-NEW');
   check(denied.ok === false && denied.error === 'owner_required', 'employee cannot approve');
 

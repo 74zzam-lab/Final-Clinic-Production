@@ -21,6 +21,9 @@ async function main() {
   const A = createDevice({ userDataDir: path.join(root, 'A'), centerId: 'CTR', branchId: 'BR-A', deviceId: 'A' });
   const B = createDevice({ userDataDir: path.join(root, 'B'), centerId: 'CTR', branchId: 'BR-A', deviceId: 'B' });
 
+  await A.bootstrapFromRemote(remote);
+  await B.bootstrapFromRemote(remote);
+
   const N = 120;
   const records = [];
   for (let i = 0; i < N; i++) {

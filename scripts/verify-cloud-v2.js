@@ -107,6 +107,9 @@ vm.createContext(context);
   'cloud/record-merger.js',
   'cloud/data-state-analyzer.js',
   'cloud/sync-guard.js',
+  'cloud/sync-push-guards.js',
+  'cloud/sync-baseline.js',
+  'cloud/sync-coordinator.js',
   'cloud/drive-errors.js',
   'cloud/restore-staging.js',
   'cloud/synced-write.js',
@@ -239,6 +242,14 @@ assert(!syncedTables.includes('activityLog'), 'activityLog is local-only not clo
 
   const versions = VersionsIndex.toDriveJson(VersionsIndex.syncFromRepository(repo, cid, 'BR-MAIN'));
   await DriveAdapter.uploadVersions(cid, versions);
+
+  context.SyncBaseline?.markHydrating?.({ organizationResolved: true, branchResolved: true });
+  context.SyncBaseline?.markBaselineKnown?.({
+    branchId: 'BR-MAIN',
+    remoteRevision: Number(versions?.branches?.['BR-MAIN']?.databaseVersion || versions?.databaseVersion || 0),
+    integrityPass: true,
+  });
+  context.SyncBaseline?.markReady?.();
 
   const pushRes = await SyncEngine.pushTable('cases', 'BR-MAIN');
   assert(pushRes.ok, 'sync push cases');

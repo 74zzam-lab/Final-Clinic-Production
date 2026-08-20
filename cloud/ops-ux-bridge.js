@@ -143,13 +143,26 @@
       box.style.cssText = 'margin-top:12px';
       host.appendChild(box);
     }
+    const fmtSize = (bytes) => {
+      const n = Number(bytes) || 0;
+      if (!n) return '—';
+      if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+      if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+      if (n >= 1024) return Math.round(n / 1024) + ' KB';
+      return n + ' B';
+    };
     const list = global.BackupHistory.sortByNewest((entries || []).map((e) => global.BackupHistory.normalizeEntry(e)));
-    box.innerHTML = `<div class="card-title" style="font-size:14px;margin-bottom:8px">سجل Backup V2 / Restore points</div>
-      <div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto">
-      ${list.map((e) => `<button type="button" class="btn btn-ghost btn-sm" data-restore-point="${e.id}" aria-label="Select restore point ${e.label}" style="justify-content:space-between;text-align:start">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%">${global.OpsStatus?.truncateName?.(e.label, 48) || e.label}</span>
-        <span dir="ltr" style="font-size:11px;color:var(--text-muted)">${e.validation} · ${e.createdAt || ''}</span>
-      </button>`).join('') || '<div class="oh-muted">لا توجد نقاط استعادة محلية</div>'}
+    box.innerHTML = `<div class="card-title" style="font-size:14px;margin-bottom:8px">سجل Backup V2 — محلي + Google Drive</div>
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto">
+      ${list.map((e) => {
+        const src = e.source === 'cloud' ? '☁️ Drive' : '💻 محلي';
+        const when = e.createdAt || e.modifiedAt || '';
+        const size = fmtSize(e.size);
+        return `<button type="button" class="btn btn-ghost btn-sm" data-restore-point="${e.id}" aria-label="Select restore point ${e.label}" style="justify-content:space-between;text-align:start;align-items:flex-start">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%">${global.OpsStatus?.truncateName?.(e.label, 42) || e.label}</span>
+        <span dir="ltr" style="font-size:11px;color:var(--text-muted);text-align:end;line-height:1.4">${src}<br>${size} · ${when}</span>
+      </button>`;
+      }).join('') || '<div class="oh-muted">لا توجد نقاط استعادة — أنشئ نسخة كاملة أو افحص Drive</div>'}
       </div>`;
     return list;
   }

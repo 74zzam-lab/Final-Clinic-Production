@@ -82,11 +82,11 @@ const ConflictQueue = context.ConflictQueue;
 const RepositoryFactory = context.RepositoryFactory;
 
 const reception = { id: '2', role: 'reception', username: 'rec', active: true, branchScope: ['BR-MAIN'] };
-const admin = { id: '1', role: 'admin', username: 'admin', active: true, branchScope: ['*'] };
+const hqAdmin = { id: '1', role: 'hq_admin', username: 'hq', active: true, branchScope: ['*'] };
 
 check(BranchScope.userCanAccessBranch(reception, 'BR-MAIN'), 'reception should access BR-MAIN');
 check(!BranchScope.userCanAccessBranch(reception, 'BR-JED'), 'reception must not access BR-JED');
-check(BranchScope.userCanAccessBranch(admin, 'BR-JED'), 'admin should access all branches');
+check(BranchScope.userCanAccessBranch(hqAdmin, 'BR-JED'), 'hq_admin should access all branches');
 
 const denied = BranchScope.assertWriteAllowed(reception, 'BR-JED', {});
 check(!denied.ok && denied.error === 'branch_access_denied', 'write guard must deny out-of-scope branch');
@@ -140,7 +140,7 @@ const forReception = ConflictQueue.listForUser(reception, { status: 'pending' })
 check(forReception.length === 1 && forReception[0].recordId === 'bk-y', 'conflict list must be branch-scoped for reception');
 check(ConflictQueue.countPending({ branchId: 'BR-MAIN' }) === 1, 'countPending must honor branchId filter');
 
-context.currentUser = admin;
+context.currentUser = hqAdmin;
 const pendingJed = ConflictQueue.list({ status: 'pending', branchId: 'BR-JED' })[0];
 check(!!pendingJed, 'admin can list other-branch conflicts');
 const deniedResolveAsReception = (() => {

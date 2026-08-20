@@ -19,7 +19,8 @@
     attendance: 'attendance',
     inventoryItems: 'inventoryItems',
     inventorySuppliers: 'inventorySuppliers',
-    inventoryMovements: 'inventoryMovements'
+    inventoryMovements: 'inventoryMovements',
+    attachments_meta: 'attachments_meta'
   };
 
   function stageBackup(data, meta) {

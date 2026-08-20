@@ -206,7 +206,11 @@ async function main() {
     const dbPath = tmpDb();
     const snap = makeSnapshot();
     const r1 = migrateFromSnapshot({ snapshot: snap, dbPath });
-    const r2 = migrateFromSnapshot({ snapshot: snap, dbPath });
+    const r2 = migrateFromSnapshot({
+      snapshot: snap,
+      dbPath,
+      backupPath: dbPath + '.pre-rerun.bak',
+    });
     ensureMigrationOk(r1, 're-run migration first');
     ensureMigrationOk(r2, 're-run migration second');
     check(r1.ok && r2.ok, 're-runnable migration');

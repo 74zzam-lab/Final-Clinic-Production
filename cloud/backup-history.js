@@ -48,9 +48,12 @@
       id,
       path,
       createdAt,
+      modifiedAt: asIso(raw.modifiedAt) || createdAt,
       size,
       validation,
-      label
+      label,
+      source: raw.source || 'local',
+      remotePath: raw.remotePath || (raw.source === 'cloud' ? path : ''),
     };
   }
 

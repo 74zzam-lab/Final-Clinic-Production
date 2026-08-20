@@ -22,6 +22,9 @@ async function main() {
   const A = createDevice({ userDataDir: path.join(root, 'A'), centerId: 'CTR', branchId: 'BR-A', deviceId: 'A' });
   const B = createDevice({ userDataDir: path.join(root, 'B'), centerId: 'CTR', branchId: 'BR-A', deviceId: 'B' });
 
+  await A.bootstrapFromRemote(remote);
+  await B.bootstrapFromRemote(remote);
+
   A.setAll('clientsRegistry', [{ id: 'c1', name: 'Base', phone: '1' }]);
   await A.flush(remote);
   await B.pull(remote);
@@ -36,7 +39,7 @@ async function main() {
   check(!!conflict, 'open conflict row');
 
   // Resolve: keep remote (Alice), align base_revision to remote so flush does not re-conflict
-  const remoteRev = Number(remote.getVersions('CTR', 'BR-A').tables.clientsRegistry.revision || 0);
+  const remoteRev = Number(remote.getVersions('CTR', 'BR-A')?.tables?.clientsRegistry?.revision || 0);
   const resolved = { id: 'c1', name: 'Alice', phone: '1', resolved: true };
   check(B.sync.resolveConflictById(conflict.conflict_id, 'keep_remote', remoteRev + 1, 'owner').ok, 'resolve ok');
   // Clear stuck conflicted outbox rows for this table

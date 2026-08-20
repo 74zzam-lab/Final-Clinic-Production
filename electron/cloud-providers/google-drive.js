@@ -471,7 +471,7 @@ async function collectBackupFiles(oauth2, parentId, basePath, items) {
       const relPath = `${basePath}/${f.name}`;
       if (f.mimeType === 'application/vnd.google-apps.folder') {
         await collectBackupFiles(oauth2, f.id, relPath, items);
-      } else if (/backup-.*\.tdw$/i.test(f.name) || drivePaths.isDbBackupName(f.name) || f.name.endsWith('.json')) {
+      } else if (/Tadawi-Backup-V2/i.test(f.name) || /backup-.*\.tdw$/i.test(f.name) || drivePaths.isDbBackupName(f.name) || f.name.endsWith('.json')) {
         if (!f.name.endsWith('.meta.json')) {
           items.push({
             id: f.id,

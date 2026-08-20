@@ -19,7 +19,8 @@
     doctors: 'databaseVersion',
     inventoryItems: 'databaseVersion',
     inventorySuppliers: 'databaseVersion',
-    inventoryMovements: 'databaseVersion'
+    inventoryMovements: 'databaseVersion',
+    attachments_meta: 'databaseVersion'
   };
 
   const BRANCH_CONFIG_FIELDS = ['settingsVersion', 'pricesVersion', 'servicesVersion', 'packagesVersion', 'usersVersion'];

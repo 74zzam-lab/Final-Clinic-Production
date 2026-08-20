@@ -89,6 +89,7 @@ const baseline = [
   ['tests/baseline/test-nsis-cupping-center-wipe.js', 'ux:nsis-cupping-center-wipe'],
   ['tests/baseline/test-hybrid-icon-packaging.js', 'hybrid:icon-packaging'],
   ['tests/baseline/test-hybrid-backup-v2.js', 'hybrid:backup-v2'],
+  ['tests/baseline/test-backup-v2-cloud-retention.js', 'backup-v2-cloud-retention'],
   ['tests/backup/backup-restore-v2.test.js', 'v2-5.1:backup-restore-v2'],
   ['tests/backup/backup-sync-harden-v2.test.js', 'v2-5.2:backup-sync-harden'],
   ['tests/baseline/test-v2-5-3-owner-identity-license.js', 'v2-5.3:owner-identity-license'],
