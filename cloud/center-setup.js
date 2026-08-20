@@ -112,6 +112,12 @@
     if (!options.skipOwnerCheck && !global.RolePolicy?.isOrganizationOwner?.(global.currentUser)) {
       return { ok: false, error: 'owner_required', message: 'حذف الفروع وإلغاء ربط الجهاز للمالك فقط' };
     }
+    const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({
+      action: 'removeBranch',
+      branchId,
+      centerId: options.centerId,
+    });
+    if (ownerGate && !ownerGate.ok) return ownerGate;
 
     let doc = global.LicenseCloud?.loadLocal?.();
     if (!doc?.centerId) return { ok: false, error: 'no_license' };
@@ -163,6 +169,13 @@
     options = options || {};
     deviceUuid = String(deviceUuid || '').trim();
     if (!deviceUuid) return { ok: false, error: 'device_uuid_required' };
+
+    const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({
+      action: 'deactivateDevice',
+      deviceUuid,
+      branchId: options.branchId,
+    });
+    if (ownerGate && !ownerGate.ok) return ownerGate;
 
     const selfUuid = global.DeviceConfig?.load?.()?.deviceUuid;
     if (deviceUuid === selfUuid && !options.allowSelf) {

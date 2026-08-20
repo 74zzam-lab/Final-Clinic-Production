@@ -1,6 +1,6 @@
 'use strict';
 
-const { SYNC_OP_MIN_RANK } = require('../database/operational-rbac-policy');
+const { SYNC_OP_MIN_RANK, isOwnerKvKey, isOwnerRole } = require('../database/operational-rbac-policy');
 
 /**
  * V2-5.4 — Electron main RBAC session + channel policy.
@@ -49,8 +49,7 @@ const PUBLIC_CHANNELS = new Set([
   'cache:readLicense',
   'cache:readVersions',
   'cache:readBranchConfig',
-  // Pre-login / activation may snapshot license into Electron cache before RBAC bind.
-  'cache:writeLicense',
+  // Pre-login activation may snapshot license into Electron cache before RBAC bind.
   'cache:writeVersions',
   'cache:writeBranchConfig',
   'communication:getStatus',
@@ -96,7 +95,8 @@ const CHANNEL_POLICY = {
   'attachments:writeLocal': { minRank: 2 },
   'attachments:readLocal': { minRank: 2 },
   'attachments:existsLocal': { minRank: 2 },
-  'app:wipePersistentLicenseData': { minRank: 6, roles: ['owner'] },
+  'cache:writeLicense': { minRank: 5, roles: ['owner', 'hq_admin'], allowWithoutSession: true },
+  'app:wipePersistentLicenseData': { minRank: 5, roles: ['owner', 'hq_admin'] },
   'license:writeLicenseShard': { minRank: 4 },
   'license:writeActivationBundle': { minRank: 4 },
   'license:updateLicenseIndex': { minRank: 4 },
@@ -188,7 +188,10 @@ function sessionAllowsChannel(session, channel) {
     if (!session) return { ok: false, error: 'rbac_session_required' };
     return { ok: true };
   }
-  if (!session) return { ok: false, error: 'rbac_session_required' };
+  if (!session) {
+    if (policy.allowWithoutSession === true) return { ok: true, bootstrap: true };
+    return { ok: false, error: 'rbac_session_required' };
+  }
   if (Array.isArray(policy.roles) && policy.roles.length) {
     if (!policy.roles.includes(session.role)) {
       return { ok: false, error: 'rbac_role_denied', required: policy.roles, role: session.role };
@@ -251,6 +254,24 @@ function assertBranchInSession(event, branchId) {
   return { ok: false, error: 'branch_access_denied', branchId };
 }
 
+function assertOwnerKvWrite(event, key) {
+  if (!isOwnerKvKey(key)) return { ok: true };
+  const session = getSession(event);
+  if (!session) {
+    const err = new Error('rbac_session_required');
+    err.code = 'rbac_session_required';
+    err.ok = false;
+    throw err;
+  }
+  if (!isOwnerRole(session.role)) {
+    const err = new Error('owner_kv_denied');
+    err.code = 'owner_kv_denied';
+    err.ok = false;
+    throw err;
+  }
+  return { ok: true, session };
+}
+
 module.exports = {
   ROLE_RANK,
   PUBLIC_CHANNELS,
@@ -262,5 +283,6 @@ module.exports = {
   assertChannelAllowed,
   assertSyncOpAllowed,
   assertBranchInSession,
+  assertOwnerKvWrite,
   rankOf,
 };

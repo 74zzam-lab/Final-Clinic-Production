@@ -860,8 +860,9 @@ handle('database:persistTable', (e, tableKey, records, branchId) => {
   }
   return dbService.persistTable(key, records, { branchId: scopedBranchId || undefined });
 });
-handle('database:persistKv', (_e, key, value) => {
+handle('database:persistKv', (e, key, value) => {
   const k = V.asString(key, { name: 'key', max: 128, required: true, allowEmpty: false });
+  rbacSession.assertOwnerKvWrite(e, k);
   return dbService.persistKv(k, value);
 });
 handle('database:seedUsersIfEmpty', (_e, users) => {

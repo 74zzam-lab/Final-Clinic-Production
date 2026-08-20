@@ -334,6 +334,8 @@
    */
   async function transferOwnership(input) {
     input = input || {};
+    const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({ action: 'transferOwnership' });
+    if (ownerGate && !ownerGate.ok) return ownerGate;
     const profile = loadProfile();
     if (!profile) return { ok: false, error: 'profile_missing' };
 

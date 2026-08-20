@@ -111,8 +111,17 @@
     return { ...body, signature: sig };
   }
 
-  async function pushToDrive(doc) {
+  async function pushToDrive(doc, options) {
+    options = options || {};
     doc = doc || loadLocal();
+    if (!options.skipOwnerGate) {
+      const gate = global.OwnerTrustedAuthority?.assertOwnerOrBootstrap?.({
+        action: 'pushToDrive',
+        centerId: doc?.centerId,
+        doc,
+      });
+      if (gate && !gate.ok) return gate;
+    }
     if (!doc?.centerId) return { ok: false, error: 'no_center_id' };
 
     if (typeof global.DriveAdapter?.ensureConnected === 'function') {

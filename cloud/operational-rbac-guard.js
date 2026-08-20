@@ -76,6 +76,23 @@
 
   function requireOwner(options) {
     options = options || {};
+    if (global.OwnerTrustedAuthority?.assertOwnerMutation) {
+      const trusted = global.OwnerTrustedAuthority.assertOwnerMutation({
+        user: options.user,
+        action: options.action,
+        centerId: options.centerId,
+        branchId: options.branchId,
+        deviceUuid: options.deviceUuid,
+        entity: options.entity,
+      });
+      if (!trusted.ok) {
+        if (options.notify && typeof global.notify === 'function') {
+          global.notify(`⛔ صلاحية المالك مطلوبة — ${options.action || ''}`.trim(), 'danger');
+        }
+        return trusted;
+      }
+      return trusted;
+    }
     const auth = requireAuthenticated(options);
     if (!auth.ok) return auth;
     const user = auth.user;
@@ -96,6 +113,21 @@
 
   function requireOwnerOrBootstrap(options) {
     options = options || {};
+    if (global.OwnerTrustedAuthority?.assertOwnerOrBootstrap) {
+      const trusted = global.OwnerTrustedAuthority.assertOwnerOrBootstrap({
+        user: options.user,
+        action: options.action,
+        centerId: options.centerId,
+        branchId: options.branchId,
+      });
+      if (!trusted.ok) {
+        if (options.notify && typeof global.notify === 'function') {
+          global.notify(`⛔ صلاحية المدير/المالك مطلوبة — ${options.action || ''}`.trim(), 'danger');
+        }
+        return trusted;
+      }
+      return trusted;
+    }
     const auth = requireAuthenticated(options);
     if (!auth.ok) return auth;
     const user = auth.user;

@@ -100,6 +100,7 @@ const baseline = [
   ['tests/baseline/test-restore-surface-consolidation.js', 'restore-surface-consolidation'],
   ['tests/baseline/test-pr10-conflict-tombstone-idempotency.js', 'pr10-conflict-tombstone-idempotency'],
   ['tests/baseline/test-pr11-owner-lifecycle.js', 'pr11-owner-lifecycle'],
+  ['tests/baseline/test-pr12-owner-admin-runtime-separation.js', 'pr12-owner-admin-runtime-separation'],
   ['tests/backup/backup-restore-v2.test.js', 'v2-5.1:backup-restore-v2'],
   ['tests/backup/backup-sync-harden-v2.test.js', 'v2-5.2:backup-sync-harden'],
   ['tests/baseline/test-v2-5-3-owner-identity-license.js', 'v2-5.3:owner-identity-license'],

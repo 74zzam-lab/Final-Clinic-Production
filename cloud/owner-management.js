@@ -472,6 +472,10 @@
   /** Canonical create entry — acquires the single creation lock. */
   async function createOwner(input) {
     input = input || {};
+    if (input.additionalOwner) {
+      const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({ action: 'createAdditionalOwner' });
+      if (ownerGate && !ownerGate.ok) return ownerGate;
+    }
     const busy = getSystemBusyReason();
     if (busy === 'restore' || busy === 'sync' || busy === 'license_refresh') {
       return { ok: false, error: 'system_busy', busy };
@@ -521,6 +525,8 @@
   }
 
   async function updateOwner(userId, patch) {
+    const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({ action: 'updateOwner' });
+    if (ownerGate && !ownerGate.ok) return ownerGate;
     patch = patch || {};
     const users = getUsers().slice();
     const idx = users.findIndex((u) => u && String(u.id) === String(userId));
@@ -543,6 +549,13 @@
   }
 
   async function resetOwnerPassword(userId, newPassword, confirmPassword) {
+    const usersPreview = getUsers();
+    const targetPreview = usersPreview.find((u) => u && String(u.id) === String(userId));
+    const self = global.currentUser && String(global.currentUser.id) === String(userId);
+    if (targetPreview && isOwnerRole(targetPreview) && !self) {
+      const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({ action: 'resetOwnerPassword' });
+      if (ownerGate && !ownerGate.ok) return ownerGate;
+    }
     const minLen = global.OwnerCreateForm?.MIN_PASSWORD_LENGTH || 8;
     const pw = String(newPassword || '');
     const conf = String(confirmPassword != null ? confirmPassword : pw);
@@ -578,6 +591,8 @@
   }
 
   function setOwnerActive(userId, active) {
+    const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({ action: 'setOwnerActive' });
+    if (ownerGate && !ownerGate.ok) return ownerGate;
     const users = getUsers().slice();
     const idx = users.findIndex((u) => u && String(u.id) === String(userId));
     if (idx < 0) return { ok: false, error: 'not_found' };
@@ -595,6 +610,8 @@
   }
 
   function deleteOwner(userId) {
+    const ownerGate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({ action: 'deleteOwner' });
+    if (ownerGate && !ownerGate.ok) return ownerGate;
     const users = getUsers().slice();
     const gate = canRemoveOwnerUser(userId, users);
     if (!gate.ok) return gate;

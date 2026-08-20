@@ -45,9 +45,11 @@
   function enterBranchMode(branchId) {
     branchId = String(branchId || '').trim();
     if (!branchId) return { ok: false, error: 'branch_required' };
-    if (!global.RolePolicy?.isOrganizationOwner?.(global.currentUser)) {
-      return { ok: false, error: 'owner_required' };
-    }
+    const gate = global.OwnerTrustedAuthority?.assertOwnerMutation?.({
+      action: 'enterBranchMode',
+      branchId,
+    });
+    if (gate && !gate.ok) return gate;
     // Refuse operational mode on half-created branches.
     const pending = global.BranchEnrollment?.loadPending?.();
     if (pending?.status === 'BRANCH_CREATION_PENDING' && pending.branchId === branchId) {
