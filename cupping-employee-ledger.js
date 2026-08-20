@@ -430,11 +430,21 @@
   }
 
   function saveStore() {
+    const bridge = global.SqliteBridge;
+    const outerBundle = bridge?.isPrimary?.() && bridge?.beginBundle && !bridge?.isBundleActive?.();
+    if (outerBundle) bridge.beginBundle();
     global.DB?.set('employeeLedgerAccruals', accruals);
     global.DB?.set('employeeLedgerPayments', payments);
     global.DB?.set('employeeLedgerEntries', entries);
     global.DB?.set('settings', global.settings);
     if (typeof global.syncAppGlobals === 'function') global.syncAppGlobals();
+    if (outerBundle) {
+      void bridge.commitBundle().then((res) => {
+        if (!res?.ok && !res?.skipped) {
+          global.notify?.('⚠️ فشل حفظ المستحقات — ' + (res?.error || 'bundle_commit_failed'), 'danger');
+        }
+      });
+    }
   }
 
   function getTypeDef(typeId) {
@@ -1053,6 +1063,9 @@
   }
 
   function recordPayment(opts) {
+    if (global._ledgerPaymentBusy) return null;
+    global._ledgerPaymentBusy = true;
+    try {
     if (!isModuleEnabled()) { notify('ℹ️ نظام المستحقات معطّل', 'warning'); return null; }
     if (!hasPerm('ledger.pay') && !hasPerm('payroll.edit')) { notify('⛔ لا صلاحية للصرف', 'danger'); return null; }
     if (!canEditPeriod(opts.month, opts.year)) { notify('🔒 الشهر مقفول', 'danger'); return null; }
@@ -1099,6 +1112,9 @@
     global.logAudit?.('LEDGER_PAYMENT', `صرف ${fmtMoney(allocTotal)} — ${doctor.name} (${payment.voucherNo})`, { paymentId: payment.id });
     notify(`✅ تم تسجيل سند الصرف ${payment.voucherNo} — المتبقي: ${fmtMoney(remAfter)}`, 'success');
     return payment;
+    } finally {
+      global._ledgerPaymentBusy = false;
+    }
   }
 
   function getFilters() {

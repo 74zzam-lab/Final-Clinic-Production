@@ -6,6 +6,7 @@
  */
 const crypto = require('crypto');
 const idempotencyKeys = require('./idempotency-keys');
+const { runWithSqliteBusyRetry } = require('./sqlite-busy-retry');
 
 function nowIso() {
   return new Date().toISOString();
@@ -161,11 +162,13 @@ function createSyncPlatform(db) {
    * `mutateFn` receives the db and must not commit its own outer transaction.
    */
   function enqueueAtomic(entry, mutateFn) {
-    const tx = db.transaction(() => {
-      if (typeof mutateFn === 'function') mutateFn(db);
-      return enqueue(entry);
+    return runWithSqliteBusyRetry(() => {
+      const tx = db.transaction(() => {
+        if (typeof mutateFn === 'function') mutateFn(db);
+        return enqueue(entry);
+      });
+      return tx();
     });
-    return tx();
   }
 
   /**
@@ -173,28 +176,32 @@ function createSyncPlatform(db) {
    * On failure the entire bundle rolls back (no partial table/kv/outbox state).
    */
   function enqueueAtomicBundle(mutateFn, entries) {
-    const tx = db.transaction(() => {
-      if (typeof mutateFn === 'function') mutateFn();
-      const results = [];
-      for (const entry of entries || []) {
-        results.push(enqueue(entry));
-      }
-      return { ok: true, results };
-    });
     try {
-      return tx();
+      return runWithSqliteBusyRetry(() => {
+        const tx = db.transaction(() => {
+          if (typeof mutateFn === 'function') mutateFn();
+          const results = [];
+          for (const entry of entries || []) {
+            results.push(enqueue(entry));
+          }
+          return { ok: true, results };
+        });
+        return tx();
+      });
     } catch (err) {
       return { ok: false, error: err.code || 'bundle_atomic_failed', message: err.message };
     }
   }
 
   function persistAtomic(mutateFn) {
-    const tx = db.transaction(() => {
-      if (typeof mutateFn === 'function') mutateFn();
-      return { ok: true };
-    });
     try {
-      return tx();
+      return runWithSqliteBusyRetry(() => {
+        const tx = db.transaction(() => {
+          if (typeof mutateFn === 'function') mutateFn();
+          return { ok: true };
+        });
+        return tx();
+      });
     } catch (err) {
       return { ok: false, error: err.code || 'persist_atomic_failed', message: err.message };
     }

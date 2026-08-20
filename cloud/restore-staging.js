@@ -82,7 +82,7 @@
     return { ok: true, perTable, hasConflict, canSafeMerge, branchId };
   }
 
-  function applyStagedMerge(options) {
+  async function applyStagedMerge(options) {
     options = options || {};
     const staged = loadStaging();
     if (!staged) return { ok: false, error: 'no_staging' };
@@ -92,6 +92,10 @@
     if (comparison.hasConflict && !options.force && !global.RolePolicy?.isManager?.()) {
       return { ok: false, error: 'conflict_manager_required', comparison };
     }
+
+    const bridge = global.SqliteBridge;
+    const useBundle = bridge?.isPrimary?.() && bridge?.beginBundle && !bridge?.isBundleActive?.();
+    if (useBundle) bridge.beginBundle();
 
     const results = [];
     Object.keys(staged.tables || {}).forEach(table => {
@@ -108,6 +112,19 @@
       results.push({ table, ok: !!applied?.ok });
     });
 
+    if (useBundle) {
+      const bundleRes = await bridge.commitBundle();
+      if (!bundleRes?.ok && !bundleRes?.skipped) {
+        return {
+          ok: false,
+          error: bundleRes?.error || 'restore_bundle_failed',
+          results,
+          comparison,
+          atomic: true,
+        };
+      }
+    }
+
     global.AuditLogger?.logSyncEvent?.('MANUAL_RESTORE', {
       summary: `استعادة من نسخة احتياطية — ${results.filter(r => r.ok).length} جدول`,
       source: staged.source,
@@ -115,7 +132,7 @@
     });
 
     if (!options.keepStaging) clearStaging();
-    return { ok: true, results, comparison };
+    return { ok: true, results, comparison, atomic: !!useBundle };
   }
 
   async function stageAndPrompt(backupData, meta) {
