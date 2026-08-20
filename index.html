@@ -9993,6 +9993,11 @@ async function completeAuthenticatedLogin() {
       await SqliteBridge.rehydrateBranchView();
     }
   } catch { /* empty */ }
+  try {
+    if (typeof RestorePostOpen !== 'undefined') {
+      await RestorePostOpen.runPostOpenVerification();
+    }
+  } catch { /* empty */ }
   try { if (typeof RbacGuard !== 'undefined') RbacGuard.applyAuthoritativeCurrentUser?.(); } catch { /* empty */ }
   const errEl = document.getElementById('login-error');
   if (errEl) errEl.style.display = 'none';
@@ -16537,6 +16542,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/branch-authority.js"></script>
 <script src="cloud/branch-switch-forms.js"></script>
 <script src="cloud/restore-reconciliation.js"></script>
+<script src="cloud/restore-post-open.js"></script>
 <script src="cloud/legacy-branch-migration.js"></script>
 <script src="cloud/legacy-branch-migration-ui.js"></script>
 <script src="cloud/drive-path-resolver.js"></script>

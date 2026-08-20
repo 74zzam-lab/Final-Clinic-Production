@@ -14,6 +14,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const fflate = require('fflate');
 const backupCrypto = require('./backup-crypto-v2');
+const restoreValidation = require('./restore-v2-validation');
 const { writeFileAtomicSync } = require('./atomic-file');
 const { MIGRATIONS, runSchemaMigrations } = require('../database/hybrid-schema');
 
@@ -797,31 +798,61 @@ function rollbackSwaps(userDataDir, rollbackRoot, swapped) {
 }
 
 async function restoreBackupFile(options) {
-  if (!options?.userDataDir || !options?.filePath) throw new Error('restore_request_invalid');
+  if (!options?.userDataDir || !options?.filePath) {
+    throw restoreValidation.restoreError('restore_request_invalid', 'restore_request_invalid', restoreValidation.STAGES.VALIDATION);
+  }
   const password = options.password != null ? String(options.password) : '';
   const userDataDir = path.resolve(options.userDataDir);
   const filePath = path.resolve(options.filePath);
+
+  const existingGate = readRestoreGate(userDataDir);
   emitProgress(options, 'reading_manifest');
   let inspected;
   try {
     inspected = inspectBackupBuffer(fs.readFileSync(filePath), password || options.password, options);
   } catch (error) {
+    error.stage = error.stage || restoreValidation.STAGES.VALIDATION;
     try { saveRestoreDiagnosticCopy(filePath, userDataDir, error.code || error.message); } catch { /* best effort */ }
     throw error;
   }
+
   assertOperationalRestoreAllowed(inspected, options);
   if (options.requireSecurityMaterial && !inspected.securityMaterial?.fieldKey) {
-    throw new Error('backup_field_key_missing');
+    throw restoreValidation.restoreError('backup_field_key_missing', 'backup_field_key_missing', restoreValidation.STAGES.VALIDATION);
   }
   emitProgress(options, 'checking_identity');
   assertRestoreIdentityAllowed(inspected.manifest, options.expectedIdentity || {});
+  restoreValidation.assertRestoreScopeTruthAllowed(inspected.manifest, {
+    ...options.expectedIdentity,
+    licensedBranchIds: options.licensedBranchIds,
+    requireScopeTruth: options.requireScopeTruth === true,
+    skipScopeTruth: options.skipScopeTruth === true,
+  });
+
+  const backupId = inspected.manifest?.backupId || null;
+  const idempotent = restoreValidation.assertIdempotentRestoreAllowed(
+    existingGate,
+    backupId,
+    options
+  );
+  if (idempotent.alreadyVerified) {
+    emitProgress(options, 'restore_complete', { idempotent: true, backupId });
+    return {
+      ok: true,
+      needRestart: false,
+      idempotent: true,
+      manifest: inspected.manifest,
+      gate: existingGate,
+    };
+  }
   failpoint(options, 'after_verify');
 
   writeRestoreGate(userDataDir, {
     pending: true,
     verified: false,
-    backupId: inspected.manifest?.backupId || null,
+    backupId,
     source: inspected.manifest?.source || null,
+    startedAt: new Date().toISOString(),
   });
 
   const stageRoot = fs.mkdtempSync(path.join(userDataDir, '.restore-v2-stage-'));
@@ -830,11 +861,27 @@ async function restoreBackupFile(options) {
   let databaseClosed = false;
   let securityChanged = false;
   let emergency = null;
+  let safetyCopy = null;
   try {
     emitProgress(options, 'staging_restore');
     extractEntriesToStage(inspected, stageRoot);
-    databaseHealth(path.join(stageRoot, DATABASE_PATH.replace(/\//g, path.sep)));
-    const migration = migrateStagedDatabase(path.join(stageRoot, DATABASE_PATH.replace(/\//g, path.sep)), options.now || new Date());
+    const stagedDbPath = path.join(stageRoot, DATABASE_PATH.replace(/\//g, path.sep));
+    databaseHealth(stagedDbPath);
+    restoreValidation.validateStagedAttachments(stageRoot, inspected.manifest, options);
+    const scopeSummary = (() => {
+      try {
+        return require('./backup-v2-scope-truth').extractScopeSummaryFromManifest(inspected.manifest);
+      } catch {
+        return { includedBranchIds: [] };
+      }
+    })();
+    restoreValidation.validateStagedSemanticInvariants(stagedDbPath, {
+      allowedBranchIds: scopeSummary.includedBranchIds?.length
+        ? scopeSummary.includedBranchIds
+        : (options.expectedIdentity?.authorizedBranchIds || []),
+      allowLegacyBranchless: options.allowLegacyBranchless !== false,
+    });
+    const migration = migrateStagedDatabase(stagedDbPath, options.now || new Date());
     failpoint(options, 'after_staging');
 
     emitProgress(options, 'creating_emergency_backup');
@@ -850,6 +897,7 @@ async function restoreBackupFile(options) {
         securityMaterial: options.currentSecurityMaterial,
         onProgress: undefined,
       });
+      restoreValidation.assertSafetySnapshotOk(emergency, options);
     } else {
       emergency = { path: null, skipped: true, reason: 'no_live_database' };
     }
@@ -859,6 +907,14 @@ async function restoreBackupFile(options) {
     await options.closeDatabase?.();
     databaseClosed = true;
     failpoint(options, 'after_close');
+
+    emitProgress(options, 'safety_snapshot');
+    if (options.skipSafetySnapshot !== true) {
+      safetyCopy = restoreValidation.createSafetyDatabaseCopy(userDataDir, options);
+    } else {
+      safetyCopy = { ok: true, skipped: true, reason: 'skip_safety_snapshot' };
+    }
+    failpoint(options, 'after_safety_snapshot');
 
     if (inspected.securityMaterial && options.applySecurityMaterial) {
       await options.applySecurityMaterial(inspected.securityMaterial);
@@ -882,17 +938,29 @@ async function restoreBackupFile(options) {
     const finalHealth = databaseHealth(finalDbPath);
     const rowCounts = countDatabaseRows(finalDbPath);
     if (!finalHealth?.ok || rowCounts.ok === false) {
-      throw new Error('restored_sqlite_integrity_failed');
+      throw restoreValidation.restoreError(
+        'restored_sqlite_integrity_failed',
+        'restored_sqlite_integrity_failed',
+        restoreValidation.STAGES.REOPEN
+      );
     }
     writeRestoreGate(userDataDir, {
       pending: false,
       verified: true,
-      backupId: inspected.manifest?.backupId || null,
+      backupId,
       integrity: finalHealth,
       rowCounts: rowCounts.counts,
       source: inspected.manifest?.source || null,
+      reconciliationRequired: true,
+      postOpenRequired: true,
+      safetySnapshotPath: safetyCopy?.safetyRoot || emergency?.path || null,
+      completedAt: new Date().toISOString(),
     });
-    emitProgress(options, 'restore_complete', { emergencyPath: emergency.path, rollbackPath: rollbackRoot });
+    emitProgress(options, 'restore_complete', {
+      emergencyPath: emergency?.path || null,
+      safetySnapshotPath: safetyCopy?.safetyRoot || null,
+      rollbackPath: rollbackRoot,
+    });
     return {
       ok: true,
       needRestart: true,
@@ -900,11 +968,18 @@ async function restoreBackupFile(options) {
       migration,
       database: finalHealth,
       rowCounts: rowCounts.counts,
-      emergencyPath: emergency.path,
+      emergencyPath: emergency?.path || null,
+      safetySnapshotPath: safetyCopy?.safetyRoot || null,
       rollbackPath: rollbackRoot,
+      reconciliationRequired: true,
       unrestorable: Array.isArray(options.unrestorableReport) ? options.unrestorableReport : [],
     };
   } catch (error) {
+    if (!error.stage) {
+      error.stage = swapped.length
+        ? restoreValidation.STAGES.SWAP
+        : (databaseClosed ? restoreValidation.STAGES.SNAPSHOT : restoreValidation.STAGES.STAGING);
+    }
     let rollbackError = null;
     try { if (swapped.length) rollbackSwaps(userDataDir, rollbackRoot, swapped); } catch (caught) { rollbackError = caught; }
     try {
@@ -917,12 +992,14 @@ async function restoreBackupFile(options) {
         pending: false,
         verified: false,
         failed: true,
+        backupId,
         error: String(error.code || error.message || 'restore_failed').slice(0, 300),
+        stage: error.stage || null,
         rolledBack: !rollbackError,
       });
     } catch { /* best effort */ }
     if (rollbackError) error.rollbackError = rollbackError.message;
-    emitProgress(options, 'restore_failed', { error: error.message, rolledBack: !rollbackError });
+    emitProgress(options, 'restore_failed', { error: error.message, rolledBack: !rollbackError, stage: error.stage });
     throw error;
   } finally {
     try { if (fs.existsSync(stageRoot)) safeRemove(stageRoot, userDataDir); } catch { /* preserve primary result */ }
@@ -954,6 +1031,16 @@ function friendlyBackupError(error) {
     restore_branch_unauthorized: 'رُفضت الاستعادة: النسخة تخص فرعاً غير مصرّح لهذا الجهاز.',
     restore_branch_missing: 'رُفضت الاستعادة: النسخة لا تتضمن هوية الفرع المطلوبة.',
     restore_request_invalid: 'طلب الاستعادة غير صالح.',
+    restore_scope_truth_missing: 'بيان scopeTruth غير موجود — الاستعادة مرفوضة.',
+    restore_scope_truth_not_ready: 'النسخة التنظيمية غير جاهزة للاستعادة.',
+    restore_branch_scope_mismatch: 'نطاق الفروع في النسخة لا يطابق الترخيص.',
+    restore_attachments_missing: 'ملفات مرفقات ناقصة في النسخة.',
+    restore_attachment_reference_missing: 'مراجع مرفقات بدون ملفات فعلية.',
+    restore_semantic_invariant_failed: 'فشل التحقق الدلالي من قاعدة البيانات المستعادة.',
+    restore_safety_snapshot_failed: 'فشل نسخة الأمان — تم إيقاف الاستعادة.',
+    restore_already_in_progress: 'استعادة قيد التنفيذ.',
+    restore_interrupted_recovered: 'تم التراجع عن استعادة متقطعة.',
+    restore_interrupted_no_rollback: 'استعادة متقطعة بدون تراجع متاح.',
     no_authorized_backup: 'لا توجد نسخة مصرّح بها يمكن استعادتها.',
     org_backup_not_ready: 'لا يمكن إنشاء نسخة مؤسسة — أكمل مزامنة جميع الفروع وأغلق التعارضات والـOutbox أولاً.',
   };
@@ -994,4 +1081,6 @@ module.exports = {
   hashTree,
   pruneLocalBackups,
   backupFormatPolicy,
+  recoverInterruptedRestore: restoreValidation.recoverInterruptedRestore,
+  RESTORE_STAGES: restoreValidation.STAGES,
 };

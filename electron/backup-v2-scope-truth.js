@@ -414,4 +414,5 @@ module.exports = {
   extractScopeSummaryFromManifest,
   formatScopeLabelAr,
   assessBackupReadiness,
+  assertRestoreScopeTruthAllowed: require('./restore-v2-validation').assertRestoreScopeTruthAllowed,
 };
