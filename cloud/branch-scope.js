@@ -32,7 +32,15 @@
       const raw = sessionStorage.getItem(ACTIVE_BRANCH_KEY);
       if (raw) return raw;
     } catch { /* empty */ }
-    return getDeviceBranchId() || DEFAULT_BRANCH_ID;
+    const cfg = global.DeviceConfig?.load?.() || {};
+    if (cfg.lastOwnerAggregate === true) return '*';
+    const durable = String(cfg.lastViewBranchId || '').trim();
+    if (durable) return durable;
+    if (global.DeviceConfig?.isBranchLocked?.()) {
+      const locked = global.DeviceConfig.getLockedBranchId?.();
+      if (locked) return locked;
+    }
+    return null;
   }
 
   function setActiveBranchId(branchId) {
@@ -249,9 +257,16 @@
 
   function initSessionBranch() {
     const user = global.currentUser;
+    if (global.BranchAuthority?.restoreFromDurable) {
+      const restored = global.BranchAuthority.restoreFromDurable(user);
+      global.activeBranchId = global.BranchAuthority.activeBranchId(user)
+        || getActiveBranchId()
+        || null;
+      return restored;
+    }
     if (!user) {
       global.activeBranchId = getActiveBranchId();
-      return;
+      return { ok: !!global.activeBranchId };
     }
     if (!canUserSwitchBranch(user)) {
       try { sessionStorage.removeItem('__tdw_branch_drawer_pref__'); } catch { /* empty */ }
@@ -260,18 +275,21 @@
       try {
         global.BranchContexts?.setOperationalWriteBranch?.(deviceBranch, { bindDevice: false });
       } catch { /* empty */ }
-      return;
+      global.activeBranchId = deviceBranch;
+      return { ok: true, branchId: deviceBranch };
     }
     const scope = getUserBranchScope(user);
     const preferred = scope.includes('*')
       ? (getDeviceBranchId() || DEFAULT_BRANCH_ID)
       : (scope[0] || DEFAULT_BRANCH_ID);
     const current = getActiveBranchId();
-    if (!userCanAccessBranch(user, current)) {
+    if (!current || !userCanAccessBranch(user, current)) {
       setActiveBranchId(preferred);
+      global.activeBranchId = preferred;
     } else {
       global.activeBranchId = current;
     }
+    return { ok: true, branchId: global.activeBranchId };
   }
 
   global.BranchScope = {

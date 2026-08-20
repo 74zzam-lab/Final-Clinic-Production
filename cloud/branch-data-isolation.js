@@ -299,6 +299,39 @@
     if (bid) persistBranchCounters(bid);
   }
 
+  function sliceKvArrayForBranch(records, branchId) {
+    if (!Array.isArray(records)) return [];
+    branchId = branchId || getViewBranchId();
+    if (!branchId || branchId === '*' || branchId === '__ALL__') return records.slice();
+    if (global.BranchScope?.filterByBranch) {
+      return global.BranchScope.filterByBranch(records, branchId);
+    }
+    return records.filter((r) => r && String(r.branchId || '') === String(branchId));
+  }
+
+  function mergeKvBranchSlice(fullRecords, branchSlice, branchId) {
+    branchId = branchId || getViewBranchId();
+    if (!branchId || branchId === '*' || branchId === '__ALL__') {
+      return Array.isArray(branchSlice) ? branchSlice.slice() : [];
+    }
+    const full = Array.isArray(fullRecords) ? fullRecords : [];
+    const others = full.filter((r) => {
+      if (!r || typeof r !== 'object') return false;
+      if (global.LegacyBranchMigration?.resolveLegacyBranchId) {
+        const resolved = global.LegacyBranchMigration.resolveLegacyBranchId(r);
+        if (resolved == null) return true;
+        return resolved !== branchId;
+      }
+      const rb = r.branchId || global.BranchScope?.DEFAULT_BRANCH_ID || 'BR-MAIN';
+      return rb !== branchId;
+    });
+    return [...others, ...(Array.isArray(branchSlice) ? branchSlice : [])];
+  }
+
+  function invalidateViewCaches() {
+    /* module-level view caches cleared via BranchSwitchCache invalidator registry */
+  }
+
   global.BranchDataIsolation = {
     BRANCH_SETTINGS_STORE,
     BRANCH_COUNTERS_STORE,
@@ -328,6 +361,9 @@
     persistActiveBranchSettings,
     persistActiveBranchCounters,
     persistBranchSettings,
-    applyBranchSettings
+    applyBranchSettings,
+    sliceKvArrayForBranch,
+    mergeKvBranchSlice,
+    invalidateViewCaches,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

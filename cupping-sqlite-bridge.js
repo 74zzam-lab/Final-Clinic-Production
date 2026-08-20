@@ -45,6 +45,7 @@
     bundleActive: false,
     bundleOps: [],
     staleLsOverridden: [],
+    capturedWriteBranchId: null,
   };
 
   function api() {
@@ -143,7 +144,11 @@
   }
 
   function mergeBranchSliceIntoCommitted(tableKey, branchRecords, branchId) {
-    const bid = branchId || getOperationalWriteBranchId();
+    const bid = branchId || getOperationalWriteBranchId({ honorCaptured: true });
+    const scopeCheck = assertScopeMatch(branchRecords, bid);
+    if (!scopeCheck.ok) {
+      throw Object.assign(new Error(scopeCheck.error || 'branch_scope_mismatch'), scopeCheck);
+    }
     const full = Array.isArray(state.lastCommitted[tableKey])
       ? state.lastCommitted[tableKey].slice()
       : [];
@@ -231,7 +236,8 @@
   function beginBundle() {
     state.bundleActive = true;
     state.bundleOps = [];
-    return { ok: true };
+    state.capturedWriteBranchId = getOperationalWriteBranchId();
+    return { ok: true, branchId: state.capturedWriteBranchId };
   }
 
   function queueBundleOp(key, value) {
@@ -288,6 +294,9 @@
 
   function getOperationalWriteBranchId(options = {}) {
     options = options || {};
+    if (options.honorCaptured && state.capturedWriteBranchId) {
+      return state.capturedWriteBranchId;
+    }
     const fromWriteContext = global.BranchContexts?.getOperationalWriteBranch?.();
     if (fromWriteContext) return fromWriteContext;
     if (options.allowDeviceLock !== false && global.DeviceConfig?.isBranchLocked?.()) {
@@ -295,6 +304,27 @@
       if (locked) return locked;
     }
     return null;
+  }
+
+  function assertScopeMatch(records, branchId) {
+    const bid = branchId || getOperationalWriteBranchId({ honorCaptured: true });
+    if (!bid || !Array.isArray(records)) return { ok: true, branchId: bid };
+    for (const r of records) {
+      if (recordOutsideBranch(r, bid)) {
+        return {
+          ok: false,
+          error: 'branch_scope_mismatch',
+          branchId: bid,
+          recordBranchId: r?.branchId || null,
+          recordId: r?.id || null,
+        };
+      }
+    }
+    return { ok: true, branchId: bid };
+  }
+
+  function hasPendingCommits() {
+    return state.pendingKeys.size > 0 || state.bundleActive;
   }
 
   function assertOperationalWriteBranch() {
@@ -316,7 +346,7 @@
         code: writeGate.error || 'operational_write_branch_required',
       });
     }
-    const branchId = writeGate.branchId;
+    const branchId = state.capturedWriteBranchId || writeGate.branchId;
     const steps = ops.map((op) => {
       if (op.kind === 'table') {
         return { type: 'table', tableKey: op.key, records: op.records || [], branchId };
@@ -338,9 +368,13 @@
 
   async function commitBundle() {
     const ops = state.bundleOps.slice();
+    const capturedBranch = state.capturedWriteBranchId;
     state.bundleActive = false;
     state.bundleOps = [];
-    if (!ops.length) return { ok: true, skipped: true, reason: 'bundle_empty' };
+    if (!ops.length) {
+      state.capturedWriteBranchId = null;
+      return { ok: true, skipped: true, reason: 'bundle_empty' };
+    }
 
     const db = api();
     if (!db) {
@@ -379,7 +413,7 @@
       }
       for (const op of ops) {
         if (op.kind === 'table') {
-          mergeBranchSliceIntoCommitted(op.key, op.records, getOperationalWriteBranchId());
+          mergeBranchSliceIntoCommitted(op.key, op.records, capturedBranch || getOperationalWriteBranchId());
         } else {
           applyCommittedToView(op.key, op.value);
         }
@@ -392,6 +426,7 @@
       return { ok: false, error: state.lastError };
     } finally {
       keys.forEach((k) => state.pendingKeys.delete(k));
+      state.capturedWriteBranchId = null;
     }
   }
 
@@ -618,6 +653,10 @@
     }
     const list = filterRecordsForWriteBranch(Array.isArray(records) ? records : []);
     const branchId = writeGate.branchId;
+    const scopeCheck = assertScopeMatch(list, state.capturedWriteBranchId || branchId);
+    if (!scopeCheck.ok) {
+      return { ok: false, error: scopeCheck.error || 'branch_scope_mismatch', ...scopeCheck };
+    }
     state.pendingKeys.add(tableKey);
     try {
       const entry = buildOutboxEntry(tableKey, list);
@@ -651,6 +690,8 @@
   }
 
   async function commitKv(key, value) {
+    const writeGate = assertOperationalWriteBranch();
+    if (!writeGate.ok) return { ok: false, error: writeGate.error || 'operational_write_branch_required' };
     const db = api();
     if (!db) return { ok: false, error: 'database_api_unavailable' };
     if (!state.sqlitePrimary) {
@@ -669,13 +710,17 @@
     let persistValue = value;
     const branchScopedKv = global.BranchDataIsolation?.BRANCH_SCOPED_ARRAY_KEYS?.has?.(key);
     if (Array.isArray(value) && branchScopedKv) {
-      const branchId = getOperationalWriteBranchId();
+      const branchId = state.capturedWriteBranchId || getOperationalWriteBranchId();
       const slice = filterRecordsForWriteBranch(value.map((r) => {
         if (r && typeof r === 'object' && !r.branchId && global.BranchDataIsolation?.stampBranchId) {
           return global.BranchDataIsolation.stampBranchId({ ...r });
         }
         return r;
       }));
+      const scopeCheck = assertScopeMatch(slice, branchId);
+      if (!scopeCheck.ok) {
+        return { ok: false, error: scopeCheck.error || 'branch_scope_mismatch', ...scopeCheck };
+      }
       mergeBranchSliceIntoCommitted(key, slice, branchId);
       persistValue = state.lastCommitted[key] || value;
     }
@@ -865,6 +910,8 @@
     beginBundle,
     commitBundle,
     isBundleActive,
+    hasPendingCommits,
+    assertScopeMatch,
     restoreLastCommit,
     readOperational,
     shouldBlockLocalStorage,
