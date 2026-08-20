@@ -217,11 +217,21 @@ async function runAsyncChecks() {
       }),
     },
   };
+  bridgeSb.BranchContexts = {
+    getOperationalWriteBranch: () => 'BR-MAIN',
+    assertOperationalWriteContext: () => ({ ok: true, branchId: 'BR-MAIN' }),
+  };
+  bridgeSb.DeviceConfig = { isBranchLocked: () => false };
+  bridgeSb.BranchScope = {
+    filterForActiveView: (records) => records,
+    filterByBranch: (records) => records,
+    isAggregateBranchView: () => false,
+  };
   vm.runInNewContext(bridgeSrc, bridgeSb, { timeout: 2000 });
   await bridgeSb.SqliteBridge.hydrateIntoMemory();
   check(bridgeSb.SqliteBridge.getState().sqlitePrimary === true, 'sqlite primary after hydrate');
   const before = bridgeSb.localStorage.getItem('clientsRegistry');
-  bridgeSb.DB.set('clientsRegistry', [{ id: 'new-divergent' }]);
+  bridgeSb.DB.set('clientsRegistry', [{ id: 'new-divergent', branchId: 'BR-MAIN' }]);
   // Allow microtask for failed commit
   await new Promise((r) => setTimeout(r, 30));
   const after = bridgeSb.localStorage.getItem('clientsRegistry');

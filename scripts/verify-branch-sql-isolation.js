@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 4: branch-scoped SQLite writes do not delete other branches' rows.
+ * Phase 4 / PR7: branch-scoped SQLite isolation — writes, reads, IPC enforcement.
  */
 'use strict';
 
@@ -12,15 +12,23 @@ const { createRepositories } = require('../database/repositories');
 
 const root = path.join(__dirname, '..');
 const bridge = fs.readFileSync(path.join(root, 'cupping-sqlite-bridge.js'), 'utf8');
-const service = fs.readFileSync(path.join(root, 'electron/database/service.js'), 'utf8');
+const service = fs.readFileSync(path.join(root, 'electron', 'database', 'service.js'), 'utf8');
+const mainJs = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
+const scopeMod = fs.readFileSync(path.join(root, 'database', 'operational-scope.js'), 'utf8');
 
 const checks = [
-  { name: 'branch-slice module exists', ok: fs.existsSync(path.join(root, 'database/repositories/branch-slice.js')) },
-  { name: 'repos replaceBranchSlice', ok: /replaceBranchSlice/.test(fs.readFileSync(path.join(root, 'database/repositories/index.js'), 'utf8')) },
-  { name: 'service persistTable branchId', ok: /options\.branchId/.test(service) },
-  { name: 'querySafe getById', ok: /case 'getById'/.test(service) },
-  { name: 'bridge passes branchId on persist', ok: /persistTable\(tableKey, list, branchId\)/.test(bridge) },
-  { name: 'bundle steps include branchId', ok: /branchId,\s*branchId/.test(bridge) || /records: op\.records \|\| \[\], branchId/.test(bridge) },
+  { name: 'operational-scope module exists', ok: fs.existsSync(path.join(root, 'database', 'operational-scope.js')) },
+  { name: 'branch-slice listForBranch exported', ok: /function listForBranch/.test(fs.readFileSync(path.join(root, 'database/repositories/branch-slice.js'), 'utf8')) },
+  { name: 'repos getAllForBranch', ok: /getAllForBranch/.test(fs.readFileSync(path.join(root, 'database/repositories/index.js'), 'utf8')) },
+  { name: 'service persistTable requires branchId', ok: /branch_id_required/.test(service) && /isOperationalTable/.test(service) },
+  { name: 'querySafe listForBranch op', ok: /case 'listForBranch'/.test(service) },
+  { name: 'querySafe sumVisits branch scoped', ok: /sumTotalForBranch/.test(service) },
+  { name: 'main IPC branch_id_required', ok: /branch_id_required/.test(mainJs) },
+  { name: 'main querySafe passes session', ok: /querySafe\(req, session\)/.test(mainJs) },
+  { name: 'bridge assertOperationalWriteBranch', ok: /assertOperationalWriteBranch/.test(bridge) },
+  { name: 'operational-scope owner aggregate read', ok: /aggregateRead/.test(scopeMod) },
+  { name: 'leakage test file exists', ok: fs.existsSync(path.join(root, 'tests/baseline/test-branch-sql-isolation-leakage.js')) },
+  { name: 'UI search scoped', ok: /getUiScopedRecords\(clientsRegistry/.test(fs.readFileSync(path.join(root, 'index.html'), 'utf8')) },
 ];
 
 let failed = 0;
@@ -60,6 +68,10 @@ async function runtimeSliceTest() {
   const scoped = repos.clients.getByIdScoped('c-b', 'BR-A');
   console.log((scoped === null ? 'PASS' : 'FAIL') + '  getByIdScoped denies cross-branch');
   if (scoped !== null) failed += 1;
+
+  const listA = repos.clients.getAllForBranch('BR-A');
+  console.log((listA.length === 1 && listA[0].id === 'c-a2' ? 'PASS' : 'FAIL') + '  getAllForBranch returns branch slice only');
+  if (!(listA.length === 1 && listA[0].id === 'c-a2')) failed += 1;
 
   db.close();
   fs.rmSync(tmp, { recursive: true, force: true });

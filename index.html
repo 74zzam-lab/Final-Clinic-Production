@@ -12974,8 +12974,11 @@ function getTopbarClientSearchMatches(q) {
   if (!q || q.length < 1) return [];
   const ql = q.toLowerCase().trim();
   const qt = q.trim();
+  const scopedRegistry = typeof getUiScopedRecords === 'function'
+    ? getUiScopedRecords(clientsRegistry || [])
+    : (clientsRegistry || []);
   const out = [];
-  for (const c of clientsRegistry || []) {
+  for (const c of scopedRegistry) {
     if (!c || out.length >= 8) break;
     const hit = (c.name || '').toLowerCase().includes(ql)
       || (c.phone || '').includes(qt)
@@ -13000,8 +13003,10 @@ function getUnifiedSearchResults(q) {
   if (!q || q.length < 1) return [];
   const ql = q.toLowerCase().trim();
   const qt = q.trim();
+  const scopedCases = typeof getUiScopedRecords === 'function' ? getUiScopedRecords(cases || []) : (cases || []);
+  const scopedBookings = typeof getUiScopedRecords === 'function' ? getUiScopedRecords(bookings || []) : (bookings || []);
   const results = getTopbarClientSearchMatches(q).slice(0, 6);
-  (cases || []).filter(c =>
+  scopedCases.filter(c =>
     (c.invoice && String(c.invoice).includes(qt)) ||
     (c.name || '').toLowerCase().includes(ql) ||
     (c.phone || '').includes(qt)
@@ -13009,7 +13014,7 @@ function getUnifiedSearchResults(q) {
     type: 'invoice', typeLabel: 'فاتورة', key: c.id, name: c.name || '—',
     subtitle: `#${c.invoice || '—'} · ${c.date || ''}`, caseId: c.id,
   }));
-  (bookings || []).filter(b =>
+  scopedBookings.filter(b =>
     (b.name || '').toLowerCase().includes(ql) ||
     (b.phone || '').includes(qt)
   ).slice(0, 4).forEach(b => results.push({
@@ -19265,38 +19270,45 @@ function countBackupItems(data) {
   return n;
 }
 
+function scopeBackupExportArray(arr) {
+  if (!Array.isArray(arr)) return arr;
+  if (typeof BranchScope !== 'undefined' && BranchScope.isAggregateBranchView?.()) return arr;
+  if (typeof getUiScopedRecords === 'function') return getUiScopedRecords(arr);
+  return arr;
+}
+
 function buildBackupObject() {
   const chk = id => document.getElementById(id)?.checked;
   const data = { _meta: { version:3, date: new Date().toISOString(), app: APP_META.productName } };
-  if (chk('bk-cases'))      data.cases = cases;
-  if (chk('bk-doctors'))    data.doctors = doctors;
-  if (chk('bk-attendance')) data.attendance = DB.get('attendance',[]);
-  if (chk('bk-expenses'))   { data.expenses = DB.get('expenses',[]); data.budget = DB.get('budget',0); }
-  if (chk('bk-bookings'))   { data.bookings = DB.get('bookings',[]); data.nextSessions = DB.get('nextSessions',[]); }
+  if (chk('bk-cases'))      data.cases = scopeBackupExportArray(cases);
+  if (chk('bk-doctors'))    data.doctors = scopeBackupExportArray(doctors);
+  if (chk('bk-attendance')) data.attendance = scopeBackupExportArray(DB.get('attendance',[]));
+  if (chk('bk-expenses'))   { data.expenses = scopeBackupExportArray(DB.get('expenses',[])); data.budget = DB.get('budget',0); }
+  if (chk('bk-bookings'))   { data.bookings = scopeBackupExportArray(DB.get('bookings',[])); data.nextSessions = scopeBackupExportArray(DB.get('nextSessions',[])); }
   if (chk('bk-settings'))   data.settings = settings;
   if (chk('bk-users'))      data.users = users;
-  if (chk('bk-otrec'))      { data.otRecords = otRecords; data.invoiceCounter = invoiceCounter; }
-  if (chk('bk-clients'))    { data.clientsRegistry = clientsRegistry; data.clientFileCounter = clientFileCounter; }
-  if (chk('bk-packages'))   { data.packages = packages; data.services = services; }
-  if (chk('bk-messages'))   data.messageLog = DB.get('messageLog', []);
-  if (chk('bk-leaves'))     data.employeeLeaveRequests = DB.get('employeeLeaveRequests', []);
+  if (chk('bk-otrec'))      { data.otRecords = scopeBackupExportArray(otRecords); data.invoiceCounter = invoiceCounter; }
+  if (chk('bk-clients'))    { data.clientsRegistry = scopeBackupExportArray(clientsRegistry); data.clientFileCounter = clientFileCounter; }
+  if (chk('bk-packages'))   { data.packages = scopeBackupExportArray(packages); data.services = scopeBackupExportArray(services); }
+  if (chk('bk-messages'))   data.messageLog = scopeBackupExportArray(DB.get('messageLog', []));
+  if (chk('bk-leaves'))     data.employeeLeaveRequests = scopeBackupExportArray(DB.get('employeeLeaveRequests', []));
   if (chk('bk-ledger')) {
-    data.employeeLedgerAccruals = DB.get('employeeLedgerAccruals', []);
-    data.employeeLedgerPayments = DB.get('employeeLedgerPayments', []);
-    data.employeeLedgerEntries = DB.get('employeeLedgerEntries', []);
+    data.employeeLedgerAccruals = scopeBackupExportArray(DB.get('employeeLedgerAccruals', []));
+    data.employeeLedgerPayments = scopeBackupExportArray(DB.get('employeeLedgerPayments', []));
+    data.employeeLedgerEntries = scopeBackupExportArray(DB.get('employeeLedgerEntries', []));
   }
   if (chk('bk-logs')) {
-    data.activityLog = activityLog;
-    data.hardwareLog = hardwareLog;
-    if (typeof systemLogs !== 'undefined') data.systemLogs = systemLogs;
-    data.communicationWebhookLog = DB.get('communicationWebhookLog', []);
+    data.activityLog = scopeBackupExportArray(activityLog);
+    data.hardwareLog = scopeBackupExportArray(hardwareLog);
+    if (typeof systemLogs !== 'undefined') data.systemLogs = scopeBackupExportArray(systemLogs);
+    data.communicationWebhookLog = scopeBackupExportArray(DB.get('communicationWebhookLog', []));
     data.backupLog = backupLog;
     data.backupRegistry = backupRegistry;
   }
   if (chk('bk-inventory') && typeof inventoryItems !== 'undefined') {
-    data.inventoryItems = inventoryItems;
-    data.inventorySuppliers = inventorySuppliers;
-    data.inventoryMovements = inventoryMovements;
+    data.inventoryItems = scopeBackupExportArray(inventoryItems);
+    data.inventorySuppliers = scopeBackupExportArray(inventorySuppliers);
+    data.inventoryMovements = scopeBackupExportArray(inventoryMovements);
   }
   if (chk('bk-cashfloat') && typeof cashDrawerSession !== 'undefined') data.cashDrawerSession = cashDrawerSession;
   if (chk('bk-import')) data.importHistory = DB.get('importHistory', typeof importHistory !== 'undefined' ? importHistory : []);

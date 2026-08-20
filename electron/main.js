@@ -839,9 +839,26 @@ handle('database:persistTable', (e, tableKey, records, branchId) => {
   const scopedBranchId = branchId != null && branchId !== ''
     ? V.asString(branchId, { name: 'branchId', max: 128, required: false, allowEmpty: true })
     : null;
-  // Reject cross-branch payloads when session scope is limited.
+  const operationalScope = require('../database/operational-scope');
   const session = rbacSession.getSession(e);
-  if (session && Array.isArray(session.branchScope) && !session.branchScope.includes('*')) {
+  if (operationalScope.isOperationalTable(key)) {
+    if (!scopedBranchId) V.fail('BRANCH_SCOPE', 'branch_id_required');
+    const branchGate = rbacSession.assertBranchInSession(e, scopedBranchId);
+    if (!branchGate.ok) V.fail('RBAC_BRANCH', branchGate.error || 'branch_access_denied');
+    if (session && operationalScope.isOwnerLikeSession(session)) {
+      try {
+        operationalScope.assertOwnerOperationalWrite(session, scopedBranchId);
+      } catch (err) {
+        V.fail('BRANCH_SCOPE', err.code || 'owner_write_branch_required');
+      }
+    }
+    for (const row of records) {
+      const bid = row && row.branchId;
+      if (!bid || String(bid) !== String(scopedBranchId)) {
+        V.fail('RBAC_BRANCH', 'branch_id_tamper');
+      }
+    }
+  } else if (session && Array.isArray(session.branchScope) && !session.branchScope.includes('*')) {
     for (const row of records) {
       const bid = row && row.branchId;
       if (bid && !session.branchScope.includes(bid)) {
@@ -868,7 +885,11 @@ handle('database:migrateFromBackup', (_e, snapshot, options) => {
   V.asObject(snapshot, { name: 'snapshot', required: true, maxKeys: 200 });
   return dbService.migrateFromBackupObject(snapshot, V.asObject(options));
 });
-handle('database:querySafe', (_e, request) => dbService.querySafe(V.asObject(request, { required: true })));
+handle('database:querySafe', (e, request) => {
+  const req = V.asObject(request, { required: true });
+  const session = rbacSession.getSession(e);
+  return dbService.querySafe(req, session);
+});
 handle('database:exportSnapshot', () => ({ ok: true, data: dbService.exportSnapshot() }));
 handle('database:syncOp', (_e, request) => {
   const req = V.asObject(request, { required: true, maxKeys: 40 });

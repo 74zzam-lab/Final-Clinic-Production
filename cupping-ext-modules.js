@@ -639,6 +639,15 @@ function toggleInventorySystem(enabled) {
   logSystem('inventory', enabled ? 'تفعيل المخزون' : 'تعطيل المخزون', '');
 }
 
+function getInventoryScopedItems() {
+  const items = inventoryItems || [];
+  if (typeof getUiScopedRecords === 'function') return getUiScopedRecords(items);
+  if (typeof BranchScope !== 'undefined' && BranchScope.filterForActiveView) {
+    return BranchScope.filterForActiveView(items);
+  }
+  return items;
+}
+
 function refreshInventoryPage() {
   ensureExtSettings();
   const enabledEl = document.getElementById('inv-enabled');
@@ -651,7 +660,7 @@ function refreshInventoryPage() {
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted)">نظام المخزون معطّل — فعّله من الأعلى</td></tr>';
     return;
   }
-  if (!inventoryItems.length) {
+  if (!getInventoryScopedItems().length) {
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px">لا توجد أصناف — اضغط «تهيئة مخزون الحجامة»</td></tr>';
     return;
   }
@@ -662,7 +671,7 @@ function refreshInventoryPage() {
     return `<button type="button" class="btn ${cls} btn-sm btn-action" title="${label}"${onclick}><span class="btn-ico">${icon}</span><span class="btn-lbl">${label}</span></button>`;
   };
   const abr = typeof actionBtnRow === 'function' ? actionBtnRow : (h) => `<div class="table-action-btns">${h}</div>`;
-  tbody.innerHTML = inventoryItems.map((item, i) => {
+  tbody.innerHTML = getInventoryScopedItems().map((item, i) => {
     const st = getInventoryStatus(item);
     const expiring = getExpiringBatches(item, 30);
     const expWarn = expiring.length ? `<span class="tag tag-red" style="font-size:10px">⚠️ ${expiring.length} دفعة تنتهي قريباً</span>` : '';

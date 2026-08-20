@@ -109,9 +109,11 @@
       return global.BranchScope.filterForActiveView(value);
     }
     if (global.BranchScope?.filterByBranch) {
-      const bid = global.BranchContexts?.getOperationalWriteBranch?.()
-        || global.BranchScope?.getActiveBranchId?.()
-        || 'BR-MAIN';
+      const bid = global.BranchDataIsolation?.getViewBranchId?.()
+        || global.BranchContexts?.getSelectedReportingBranch?.()
+        || global.BranchContexts?.getOperationalWriteBranch?.()
+        || (global.DeviceConfig?.isBranchLocked?.() ? global.DeviceConfig?.getLockedBranchId?.() : null);
+      if (!bid) return [];
       return global.BranchScope.filterByBranch(value, bid);
     }
     return value;
@@ -129,10 +131,15 @@
   function recordOutsideBranch(record, branchId) {
     if (!record || typeof record !== 'object') return true;
     const bid = branchId || getOperationalWriteBranchId();
+    if (!bid) return true;
     if (global.BranchScope?.filterByBranch) {
       return global.BranchScope.filterByBranch([record], bid).length === 0;
     }
-    return (record.branchId || 'BR-MAIN') !== bid;
+    if (global.LegacyBranchMigration?.resolveLegacyBranchId) {
+      const resolved = global.LegacyBranchMigration.resolveLegacyBranchId(record);
+      return resolved !== bid;
+    }
+    return String(record.branchId || '') !== bid;
   }
 
   function mergeBranchSliceIntoCommitted(tableKey, branchRecords, branchId) {
@@ -257,10 +264,8 @@
       global.LicenseCloud?.loadLocal?.()?.centerId ||
       '';
     if (!centerId) return null;
-    const branchId =
-      global.BranchContexts?.getOperationalWriteBranch?.() ||
-      global.BranchScope?.getActiveBranchId?.() ||
-      'BR-MAIN';
+    const branchId = getOperationalWriteBranchId();
+    if (!branchId) return null;
     const deviceId =
       global.DeviceConfig?.getDeviceId?.() ||
       global.DeviceConfig?.load?.()?.deviceUuid ||
@@ -281,14 +286,37 @@
     return entry;
   }
 
-  function getOperationalWriteBranchId() {
-    return global.BranchContexts?.getOperationalWriteBranch?.()
-      || global.BranchScope?.getActiveBranchId?.()
-      || 'BR-MAIN';
+  function getOperationalWriteBranchId(options = {}) {
+    options = options || {};
+    const fromWriteContext = global.BranchContexts?.getOperationalWriteBranch?.();
+    if (fromWriteContext) return fromWriteContext;
+    if (options.allowDeviceLock !== false && global.DeviceConfig?.isBranchLocked?.()) {
+      const locked = global.DeviceConfig?.getLockedBranchId?.();
+      if (locked) return locked;
+    }
+    return null;
+  }
+
+  function assertOperationalWriteBranch() {
+    const ctx = global.BranchContexts?.assertOperationalWriteContext?.();
+    if (ctx && ctx.ok === false) {
+      return ctx;
+    }
+    const branchId = getOperationalWriteBranchId();
+    if (!branchId) {
+      return { ok: false, error: 'operational_write_branch_required' };
+    }
+    return { ok: true, branchId };
   }
 
   function buildBundlePayloadFromOps(ops) {
-    const branchId = getOperationalWriteBranchId();
+    const writeGate = assertOperationalWriteBranch();
+    if (!writeGate.ok) {
+      throw Object.assign(new Error(writeGate.error || 'operational_write_branch_required'), {
+        code: writeGate.error || 'operational_write_branch_required',
+      });
+    }
+    const branchId = writeGate.branchId;
     const steps = ops.map((op) => {
       if (op.kind === 'table') {
         return { type: 'table', tableKey: op.key, records: op.records || [], branchId };
@@ -543,10 +571,8 @@
       global.CenterId?.getStoredCenterId?.() ||
       global.LicenseCloud?.loadLocal?.()?.centerId ||
       '';
-    const branchId =
-      global.BranchContexts?.getOperationalWriteBranch?.() ||
-      global.BranchScope?.getActiveBranchId?.() ||
-      'BR-MAIN';
+    const branchId = getOperationalWriteBranchId();
+    if (!branchId) return null;
     const deviceId =
       global.DeviceConfig?.getDeviceId?.() ||
       global.DeviceConfig?.load?.()?.deviceUuid ||
@@ -570,6 +596,8 @@
 
   async function commitOperational(tableKey, records, options) {
     options = options || {};
+    const writeGate = assertOperationalWriteBranch();
+    if (!writeGate.ok) return { ok: false, error: writeGate.error || 'operational_write_branch_required' };
     const db = api();
     if (!db) return { ok: false, error: 'database_api_unavailable' };
     if (!state.sqlitePrimary) {
@@ -589,7 +617,7 @@
       };
     }
     const list = filterRecordsForWriteBranch(Array.isArray(records) ? records : []);
-    const branchId = getOperationalWriteBranchId();
+    const branchId = writeGate.branchId;
     state.pendingKeys.add(tableKey);
     try {
       const entry = buildOutboxEntry(tableKey, list);
