@@ -69,39 +69,11 @@
       return global.DriveErrors?.handleFailure?.({ error: 'offline' }) || { ok: false, offline: true };
     }
 
-    if (options.expectedDatabaseVersion != null) {
-      const parts = splitRemotePath(remotePath);
-      const centerMatch = String(remotePath || '').match(/centers\/([^/]+)\/branches\/([^/]+)/);
-      if (centerMatch) {
-        const centerId = centerMatch[1];
-        const branchId = centerMatch[2];
-        const remoteVersions = await downloadVersions(centerId, branchId);
-        if (!remoteVersions?.ok && !/not_found|no_remote/i.test(String(remoteVersions?.error || ''))) {
-          return {
-            ok: false,
-            code: 'remote_revision_unconfirmed',
-            error: remoteVersions?.error || 'remote_revision_unconfirmed',
-          };
-        }
-        const actual = Number(
-          remoteVersions?.data?.branches?.[branchId]?.databaseVersion
-          || remoteVersions?.data?.databaseVersion
-          || 0
-        );
-        const expected = Number(options.expectedDatabaseVersion);
-        const cas = global.SyncPushGuards?.evaluateCasPushGuard?.({
-          expectedRemoteRevision: expected,
-          actualRemoteRevision: actual,
-        });
-        if (cas && !cas.ok) {
-          return { ok: false, ...cas, error: cas.code };
-        }
-      }
-    }
-
     const payload = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
     const { filename } = splitRemotePath(remotePath);
     const provider = options.provider || global.settings?.backup?.cloudProvider || 'google';
+    const centerMatch = String(remotePath || '').match(/centers\/([^/]+)\/branches\/([^/]+)/);
+    const branchId = centerMatch ? centerMatch[2] : (options.branchId || null);
 
     let res;
     if (bridge.uploadCloud) {
@@ -112,6 +84,7 @@
         atomicReplace: options.atomicReplace !== false && /\.json$/i.test(filename),
         hash: options.hash,
         expectedDatabaseVersion: options.expectedDatabaseVersion,
+        branchId,
         operationId: options.operationId,
       });
     } else if (bridge.uploadSyncFile) {

@@ -11,6 +11,7 @@ const tokenStore = require('./token-store');
 const { startLoopbackServer, startLoopbackServerFlexible } = require('./oauth-loopback');
 const driveApi = require('./google-drive-api');
 const drivePaths = require('../cloud-drive-paths');
+const driveSyncCas = require('./drive-sync-cas');
 
 const PROVIDER_ID = 'google';
 const BACKUP_ROOT = drivePaths.DRIVE_APP_FOLDER;
@@ -360,7 +361,7 @@ async function downloadByPath(oauth2, remotePath) {
   ].join(' and ');
   const res = await driveApi.listFiles(oauth2, {
     q,
-    fields: 'files(id,name,size,modifiedTime,md5Checksum)',
+    fields: 'files(id,name,size,modifiedTime,md5Checksum,etag)',
     pageSize: 1
   });
   const file = res.files?.[0];
@@ -488,7 +489,7 @@ async function collectBackupFiles(oauth2, parentId, basePath, items) {
   } while (pageToken);
 }
 
-async function findFileByPath(oauth2, remotePath) {
+async function findFileByPath(oauth2, remotePath, options = {}) {
   const parts = String(remotePath || '').split('/').filter(Boolean);
   const fileName = parts.pop();
   if (!fileName) return null;
@@ -499,12 +500,35 @@ async function findFileByPath(oauth2, remotePath) {
     'trashed=false',
     parentId ? `'${parentId}' in parents` : "'root' in parents"
   ].join(' and ');
+  const fields = options.includeEtag !== false
+    ? 'files(id,name,size,modifiedTime,md5Checksum,etag)'
+    : 'files(id,name,size,modifiedTime,md5Checksum)';
   const res = await driveApi.listFiles(oauth2, {
     q,
-    fields: 'files(id,name,size,modifiedTime,md5Checksum)',
+    fields,
     pageSize: 1
   });
   return res.files?.[0] || null;
+}
+
+const driveCasDeps = {
+  findFileByPath: (oauth2, remotePath, opts) => findFileByPath(oauth2, remotePath, opts),
+  downloadByPath: (oauth2, remotePath) => downloadByPath(oauth2, remotePath),
+  updateFileConditional: (...args) => driveApi.updateFileConditional(...args),
+  createFile: (...args) => driveApi.createFile(...args),
+  resolveFolderPath: (oauth2, parts, opts) => resolveFolderPath(oauth2, parts, opts),
+};
+
+async function conditionalReplaceJson(remotePath, payload, meta = {}) {
+  try {
+    const { oauth2 } = await getAuthedClient();
+    return driveSyncCas.conditionalReplaceJson(driveCasDeps, oauth2, remotePath, payload, {
+      ...meta,
+      provider: PROVIDER_ID,
+    });
+  } catch (err) {
+    return driveSyncCas.mapDriveError(err);
+  }
 }
 
 async function deleteBackup(remotePath) {
@@ -537,6 +561,9 @@ async function verifyRemote(remotePath, expectedHash) {
  * Prevents peers from reading a half-written operational/versions JSON.
  */
 async function atomicReplaceJson(remotePath, payload, meta = {}) {
+  if (meta.expectedDatabaseVersion != null) {
+    return conditionalReplaceJson(remotePath, payload, meta);
+  }
   try {
     const { oauth2 } = await getAuthedClient();
     const data = normalizePayloadBuffer(payload);
@@ -600,6 +627,7 @@ module.exports = {
   deleteBackup,
   verifyRemote,
   atomicReplaceJson,
+  conditionalReplaceJson,
   loadConfig,
   isOAuthConfigured,
   oauthNotConfiguredMessage

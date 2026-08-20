@@ -22,6 +22,14 @@ async function driveFetch(oauth2, url, options = {}) {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    if (res.status === 412) {
+      const err = new Error('drive_precondition_failed');
+      err.code = 'remote_revision_mismatch';
+      err.status = 412;
+      err.retry = true;
+      err.details = text.slice(0, 400);
+      throw err;
+    }
     throw new Error(`drive_api_${res.status}:${text.slice(0, 200)}`);
   }
   if (options.raw) return res;
@@ -49,7 +57,7 @@ function buildMultipartBody(metadata, mimeType, data) {
 async function listFiles(oauth2, { q, fields, pageSize = 100, pageToken, orderBy }) {
   const params = new URLSearchParams({
     q,
-    fields: fields || 'files(id,name,size,modifiedTime,md5Checksum,mimeType),nextPageToken',
+    fields: fields || 'files(id,name,size,modifiedTime,md5Checksum,mimeType,etag),nextPageToken',
     spaces: 'drive',
     pageSize: String(pageSize)
   });
@@ -67,30 +75,44 @@ async function createFolder(oauth2, metadata) {
   });
 }
 
-async function createFile(oauth2, metadata, mimeType, data) {
+async function createFile(oauth2, metadata, mimeType, data, options = {}) {
   const { boundary, body } = buildMultipartBody(metadata, mimeType, data);
   const params = new URLSearchParams({
     uploadType: 'multipart',
-    fields: 'id,name,modifiedTime,size,md5Checksum'
+    fields: 'id,name,modifiedTime,size,md5Checksum,etag'
   });
+  const headers = { 'Content-Type': `multipart/related; boundary=${boundary}` };
+  if (options.ifNoneMatch) headers['If-None-Match'] = String(options.ifNoneMatch);
   return driveFetch(oauth2, `${UPLOAD}/files?${params}`, {
     method: 'POST',
-    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    headers,
     body
   });
 }
 
-async function updateFile(oauth2, fileId, metadata, mimeType, data) {
+async function updateFileConditional(oauth2, fileId, metadata, mimeType, data, options = {}) {
   const { boundary, body } = buildMultipartBody(metadata, mimeType, data);
   const params = new URLSearchParams({
     uploadType: 'multipart',
-    fields: 'id,name,modifiedTime,size,md5Checksum'
+    fields: 'id,name,modifiedTime,size,md5Checksum,etag'
   });
+  const headers = { 'Content-Type': `multipart/related; boundary=${boundary}` };
+  if (options.ifMatch) headers['If-Match'] = String(options.ifMatch);
+  if (options.ifNoneMatch) headers['If-None-Match'] = String(options.ifNoneMatch);
   return driveFetch(oauth2, `${UPLOAD}/files/${fileId}?${params}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    headers,
     body
   });
+}
+
+async function updateFile(oauth2, fileId, metadata, mimeType, data, options = {}) {
+  return updateFileConditional(oauth2, fileId, metadata, mimeType, data, options);
+}
+
+async function getFile(oauth2, fileId, fields = 'id,name,etag,md5Checksum,modifiedTime,size') {
+  const params = new URLSearchParams({ fields });
+  return driveFetch(oauth2, `${DRIVE}/files/${fileId}?${params}`);
 }
 
 async function downloadFile(oauth2, fileId) {
@@ -132,6 +154,8 @@ module.exports = {
   createFolder,
   createFile,
   updateFile,
+  updateFileConditional,
+  getFile,
   downloadFile,
   deleteFile,
   getAbout,
