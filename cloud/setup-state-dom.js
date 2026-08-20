@@ -83,7 +83,7 @@
 
     // 6) Sync manual button — show when sync_manual visibility says so
     const syncVis = SS.visibilityFor('sync_manual');
-    qsa('[data-ss-surface="sync_manual"], #btn-bk-sync-now-top').forEach((el) => {
+    qsa('[data-ss-surface="sync_manual"], #btn-cloud-v2-sync-now, #btn-bk-sync-now-top').forEach((el) => {
       setVisible(el, syncVis.show || support);
     });
 

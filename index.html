@@ -2223,7 +2223,7 @@ tbody tr:nth-child(even) { background: transparent; }
   flex: 1 1 0; min-width: 0; margin-top: 0; padding: 9px 10px; font-size: clamp(11px, 2.4vw, 12px);
   min-height: 44px; white-space: normal; line-height: 1.25; overflow-wrap: anywhere;
 }
-#settings-bootflow-cta, #settings-centersetup-cta, #btn-bk-sync-now-top,
+#settings-bootflow-cta, #settings-centersetup-cta, #btn-cloud-v2-sync-now, #btn-bk-sync-now-top,
 [data-ss-surface="google_connect"] {
   min-height: 40px; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
 }
@@ -6365,7 +6365,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
           <span>📊 ملخص النسخ والمزامنة</span>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button type="button" class="btn btn-secondary btn-sm" onclick="showPage('owner-hub')">🏠 Owner Hub</button>
-            <button type="button" class="btn btn-accent btn-sm" id="btn-bk-sync-now-top" data-ss-surface="sync_manual" onclick="runCloudV2SyncNow()">🔄 مزامنة الآن</button>
+            <button type="button" class="btn btn-accent btn-sm" id="btn-cloud-v2-sync-now" data-ss-surface="sync_manual" onclick="runCloudV2SyncNow()">🔄 مزامنة الآن</button>
           </div>
         </div>
         <div class="backup-status-card">
@@ -6437,6 +6437,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         </div>
         <div id="bk-cv2-setup-hint" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;background:rgba(255,193,7,0.12);border:1px solid rgba(255,193,7,0.35);font-size:12px;line-height:1.7;color:var(--text-muted)"></div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-primary btn-sm" id="settings-owner-hub-cta" onclick="showPage('owner-hub')">🏠 Owner Hub — الفروع والأجهزة</button>
           <button type="button" class="btn btn-secondary btn-sm" id="settings-bootflow-cta" onclick="typeof openBootWizardFromLogin==='function'&&openBootWizardFromLogin()">🚀 معالج الإعداد (BootFlow)</button>
           <button type="button" class="btn btn-ghost btn-sm" id="btn-cloud-v2-resume" onclick="resumeCloudV2Sync()" style="display:none">▶️ استئناف المزامنة</button>
           <button type="button" class="btn btn-ghost btn-sm" id="settings-centersetup-cta" onclick="CenterSetupUI.open('manage')" title="دعم متقدم فقط">⚙️ إعداد المركز (دعم)</button>
