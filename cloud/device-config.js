@@ -36,6 +36,8 @@
     if (patch.centerId != null) cfg.centerId = patch.centerId;
     if (patch.lockedBranchId != null) cfg.lockedBranchId = patch.lockedBranchId;
     if (patch.branchLocked != null) cfg.branchLocked = !!patch.branchLocked;
+    if (patch.lastViewBranchId != null) cfg.lastViewBranchId = patch.lastViewBranchId;
+    if (patch.lastOwnerAggregate != null) cfg.lastOwnerAggregate = !!patch.lastOwnerAggregate;
     save(cfg);
     return cfg;
   }

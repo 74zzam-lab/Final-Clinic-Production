@@ -86,6 +86,57 @@
   function periodKey(y, m) { return `${y}-${m}`; }
   function user() { return global.getActiveUser?.() || global.currentUser; }
 
+  function resolveLedgerBranchId() {
+    if (global.BranchAuthority?.operationalWriteBranchId) {
+      return global.BranchAuthority.operationalWriteBranchId(user());
+    }
+    return global.BranchContexts?.getOperationalWriteBranch?.()
+      || global.BranchScope?.getViewBranchFilter?.()
+      || null;
+  }
+
+  function isLedgerAggregateView() {
+    return !!(global.BranchScope?.isAggregateBranchView?.()
+      || global.BranchAuthority?.isOwnerAggregateMode?.(user()));
+  }
+
+  function filterLedgerRecords(records) {
+    if (!Array.isArray(records)) return [];
+    if (isLedgerAggregateView()) return records.slice();
+    const bid = resolveLedgerBranchId();
+    if (!bid) {
+      if (typeof global.BranchScope === 'undefined' && typeof global.BranchAuthority === 'undefined') {
+        return records.slice();
+      }
+      return [];
+    }
+    if (global.BranchScope?.filterByBranch) {
+      return global.BranchScope.filterByBranch(records, bid);
+    }
+    return records.filter((r) => {
+      if (!r || typeof r !== 'object') return false;
+      if (!r.branchId) return bid === (global.BranchScope?.DEFAULT_BRANCH_ID || 'BR-MAIN');
+      return r.branchId === bid;
+    });
+  }
+
+  function stampLedgerBranch(record) {
+    if (!record || typeof record !== 'object') return record;
+    const bid = resolveLedgerBranchId();
+    if (bid && !record.branchId) record.branchId = bid;
+    return record;
+  }
+
+  function invalidateBranchCache() {
+    accruals = [];
+    payments = [];
+    entries = [];
+  }
+
+  if (global.BranchSwitchCache?.registerInvalidator) {
+    global.BranchSwitchCache.registerInvalidator(invalidateBranchCache);
+  }
+
   const AR_ONES = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة', 'عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
   const AR_TENS = ['', '', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
   const AR_HUNDREDS = ['', 'مائة', 'مائتان', 'ثلاثمائة', 'أربعمائة', 'خمسمائة', 'ستمائة', 'سبعمائة', 'ثمانمائة', 'تسعمائة'];
@@ -422,9 +473,9 @@
   }
 
   function loadStore() {
-    accruals = global.DB?.get('employeeLedgerAccruals', []) || [];
-    payments = global.DB?.get('employeeLedgerPayments', []) || [];
-    entries = global.DB?.get('employeeLedgerEntries', []) || [];
+    accruals = filterLedgerRecords(global.DB?.get('employeeLedgerAccruals', []) || []);
+    payments = filterLedgerRecords(global.DB?.get('employeeLedgerPayments', []) || []);
+    entries = filterLedgerRecords(global.DB?.get('employeeLedgerEntries', []) || []);
     ensureLedgerSettings();
     if (!entries.length && (accruals.length || payments.length)) rebuildEntriesFromLegacy();
   }
@@ -656,7 +707,7 @@
     const debit = round2(payload.debit || 0);
     const prev = lastBalance(payload.doctorId);
     const balanceAfter = round2(prev + credit - debit);
-    const row = {
+    const row = stampLedgerBranch({
       id: uid(),
       doctorId: payload.doctorId,
       doctorName: payload.doctorName,
@@ -676,7 +727,7 @@
       reversesEntryId: payload.reversesEntryId || null,
       status: 'posted',
       createdAt: new Date().toISOString()
-    };
+    });
     entries.push(row);
     return row;
   }
@@ -794,7 +845,7 @@
     const u = user();
     const prevAmount = row?.amount;
     if (!row) {
-      row = {
+      row = stampLedgerBranch({
         id: uid(), doctorId: payload.doctorId, doctorName: payload.doctorName,
         type: payload.type, typeLabel: typeDef.label, category: typeDef.category, priority: typeDef.priority,
         amount: round2(payload.amount), paidAmount: 0,
@@ -804,7 +855,7 @@
         sourceType: payload.sourceType || 'payroll_sync', sourceId: payload.sourceId || null,
         description: payload.description || typeDef.label, syncKey: key, status: 'open',
         createdAt: now, createdBy: u?.fullName || u?.username || 'system', updatedAt: now
-      };
+      });
       accruals.push(row);
       const isDed = row.category === 'deduction';
       postEntry({
@@ -1083,14 +1134,14 @@
     const allocTotal = round2(allocations.reduce((s, a) => s + a.amount, 0));
     if (allocTotal <= 0) { notify('⚠️ لا توجد بنود قابلة للصرف', 'danger'); return null; }
     const u = user();
-    const payment = {
+    const payment = stampLedgerBranch({
       id: uid(), voucherNo: nextVoucherNo(), doctorId: doctor.id, doctorName: doctor.name,
       totalAmount: allocTotal, paymentMethod: opts.paymentMethod || 'cash', notes: opts.notes || '',
       paymentKind: opts.paymentKind || (allocTotal >= amount - 0.01 ? 'full' : 'partial'),
       paidAt: new Date().toISOString(), paidBy: u?.id || '', paidByName: u?.fullName || u?.username || '—',
       allocations, periodMonth: opts.month, periodYear: opts.year,
       settlementStatus: allocTotal >= amount - 0.01 ? 'full' : 'partial'
-    };
+    });
     payments.push(payment);
     allocations.forEach(al => {
       const row = accruals.find(a => a.id === al.accrualId);
@@ -1929,6 +1980,8 @@
     getAccruals: () => { loadStore(); return accruals.slice(); },
     getPayments: () => { loadStore(); return payments.slice(); },
     getEntries: () => { loadStore(); return entries.slice(); },
+    reloadBranchStore: loadStore,
+    invalidateBranchCache,
     extBackupData, extRestoreData
   };
   global.extBackupLedgerData = extBackupData;

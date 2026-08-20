@@ -9977,10 +9977,21 @@ async function finishLogin() {
 }
 
 async function completeAuthenticatedLogin() {
-  if (typeof BranchScope !== 'undefined') BranchScope.initSessionBranch?.();
+  if (typeof BranchAuthority !== 'undefined') {
+    BranchAuthority.restoreFromDurable?.(currentUser);
+  } else if (typeof BranchScope !== 'undefined') {
+    BranchScope.initSessionBranch?.();
+  }
   try {
-    const bid = typeof BranchScope !== 'undefined' ? BranchScope.getActiveBranchId?.() : null;
-    if (bid && typeof BranchDataIsolation !== 'undefined') BranchDataIsolation.applyIncoming?.(bid);
+    const bid = typeof BranchAuthority !== 'undefined'
+      ? BranchAuthority.activeBranchId?.(currentUser)
+      : (typeof BranchScope !== 'undefined' ? BranchScope.getActiveBranchId?.() : null);
+    if (bid && bid !== '*' && typeof BranchDataIsolation !== 'undefined') BranchDataIsolation.applyIncoming?.(bid);
+  } catch { /* empty */ }
+  try {
+    if (typeof SqliteBridge !== 'undefined' && SqliteBridge.rehydrateBranchView) {
+      await SqliteBridge.rehydrateBranchView();
+    }
   } catch { /* empty */ }
   try { if (typeof RbacGuard !== 'undefined') RbacGuard.applyAuthoritativeCurrentUser?.(); } catch { /* empty */ }
   const errEl = document.getElementById('login-error');
@@ -13056,6 +13067,7 @@ function renderTopbarSearchSuggest(matches, query) {
 }
 
 let _topbarSearchTimer = null;
+let _topbarSearchScopeGen = null;
 
 function onTopbarSearchInput() {
   if (currentUser?.role === 'employee') return;
@@ -13066,8 +13078,16 @@ function onTopbarSearchInput() {
     return;
   }
   const q = input?.value.trim() || '';
+  const searchGen = typeof BranchSwitchCache !== 'undefined'
+    ? BranchSwitchCache.captureAsyncToken?.()
+    : null;
+  _topbarSearchScopeGen = searchGen;
   clearTimeout(_topbarSearchTimer);
   _topbarSearchTimer = setTimeout(() => {
+    if (typeof BranchSwitchCache !== 'undefined'
+      && !BranchSwitchCache.isGenerationCurrent?.(_topbarSearchScopeGen)) {
+      return;
+    }
     renderTopbarSearchSuggest(getUnifiedSearchResults(q), q);
   }, 220);
 }
@@ -14629,6 +14649,15 @@ function saveCase() {
   }
   if (window._editCaseId) {
     const editing = cases.find(x => x.id === window._editCaseId);
+    if (typeof BranchSwitchForms !== 'undefined') {
+      const formGate = BranchSwitchForms.assertSaveAllowed({
+        recordBranchId: editing?.branchId || null,
+      });
+      if (!formGate.ok) {
+        notify('⛔ لا يمكن حفظ هذه الحالة — تم تبديل الفرع. أعد فتح السجل من الفرع الصحيح.', 'danger');
+        return;
+      }
+    }
     if (editing?.isSharedVisit) {
       notify('⚠️ لتعديل جلسة مشتركة، احذفها من السجل ثم سجّلها من جديد', 'danger');
       return;
@@ -15204,6 +15233,7 @@ function refreshAllBranchScopedViews(options) {
   if (typeof renderUsersList === 'function') renderUsersList();
   if (typeof refreshInventoryPage === 'function') refreshInventoryPage();
   if (typeof EmployeeLedger !== 'undefined') {
+    if (typeof EmployeeLedger.reloadBranchStore === 'function') EmployeeLedger.reloadBranchStore();
     if (typeof EmployeeLedger.populateLedgerFilters === 'function') EmployeeLedger.populateLedgerFilters();
     if (typeof EmployeeLedger.renderLedgerPage === 'function') EmployeeLedger.renderLedgerPage();
     if (typeof EmployeeLedger.renderDashboardCard === 'function') EmployeeLedger.renderDashboardCard();
@@ -16501,8 +16531,11 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/owner-migration.js"></script>
 <script src="cloud/owner-bootstrap.js"></script>
 <script src="cloud/device-config.js"></script>
+<script src="cloud/branch-switch-cache.js"></script>
 <script src="cloud/branch-scope.js"></script>
 <script src="cloud/branch-contexts.js"></script>
+<script src="cloud/branch-authority.js"></script>
+<script src="cloud/branch-switch-forms.js"></script>
 <script src="cloud/restore-reconciliation.js"></script>
 <script src="cloud/legacy-branch-migration.js"></script>
 <script src="cloud/legacy-branch-migration-ui.js"></script>
@@ -23843,6 +23876,10 @@ function openEditCase(caseId) {
   }
 
   window._editCaseId = caseId;
+  if (typeof BranchSwitchForms !== 'undefined') {
+    const editingCase = cases.find(x => x.id === caseId);
+    BranchSwitchForms.bindOpenForm({ recordId: caseId, recordBranchId: editingCase?.branchId || null });
+  }
   calcFinancials();
   showPage('daily');
 

@@ -25,7 +25,7 @@
     if (global.OwnerBranchMode?.isBranchMode?.()) {
       return global.OwnerBranchMode.getBranchId?.() || null;
     }
-    return getDeviceBoundBranch() || global.BranchScope?.DEFAULT_BRANCH_ID || 'BR-MAIN';
+    return getDeviceBoundBranch() || global.BranchScope?.getActiveBranchId?.() || null;
   }
 
   function setSelectedReportingBranch(branchId) {
@@ -54,7 +54,7 @@
     if (global.DeviceConfig?.isBranchLocked?.()) {
       return getDeviceBoundBranch();
     }
-    return global.BranchScope?.getActiveBranchId?.() || getDeviceBoundBranch() || 'BR-MAIN';
+    return global.BranchScope?.getActiveBranchId?.() || getDeviceBoundBranch() || null;
   }
 
   function setOperationalWriteBranch(branchId, options) {
