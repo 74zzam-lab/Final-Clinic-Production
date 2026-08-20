@@ -161,7 +161,7 @@
       return { ok: false, error: 'conflict', needsReview: true, comparison };
     }
 
-    const merged = global.RestoreStaging.applyStagedMerge({
+    const merged = await global.RestoreStaging.applyStagedMerge({
       manual: true,
       branchId: meta.branchId,
       keepStaging: false

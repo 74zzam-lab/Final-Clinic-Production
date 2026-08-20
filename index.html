@@ -14856,6 +14856,10 @@ function collectExtraServicesFromForm() {
 }
 
 function saveSharedPackageCase() {
+  if (window._saveCaseBusy) return;
+  window._saveCaseBusy = true;
+  if (typeof SqliteBridge !== 'undefined' && SqliteBridge.beginBundle) SqliteBridge.beginBundle();
+  try {
   const name1   = document.getElementById('f-name').value.trim();
   const name2   = document.getElementById('f2-name').value.trim();
   const doctor  = document.getElementById('f-doctor').value;
@@ -15043,6 +15047,7 @@ function saveSharedPackageCase() {
 
   cases.push(case1, case2);
   DB.set('cases', cases);
+  if (client1) DB.set('clientsRegistry', clientsRegistry);
   trackBackupOperation();
   logPackageActivity('جلسة باقة مشتركة', `${d.packageInfo?.packageName || 'باقة'} — ${name1} (${c1cups}) + ${name2} (${c2cups})`);
   clearForm();
@@ -15052,6 +15057,21 @@ function saveSharedPackageCase() {
   notify('✅ تم تسجيل الجلسة المشتركة — فاتورة واحدة وسجلين منفصلين');
   postSaveHardwareActions(case1.id);
   scheduleMessagingCheck();
+  } finally {
+    const releaseBusy = () => { window._saveCaseBusy = false; };
+    if (typeof SqliteBridge !== 'undefined' && SqliteBridge.commitBundle) {
+      void SqliteBridge.commitBundle().then((res) => {
+        if (!res?.ok && !res?.skipped) {
+          try {
+            notify('⚠️ فشل حفظ الجلسة المشتركة في SQLite — ' + (res?.error || 'bundle_commit_failed'), 'danger');
+          } catch { /* empty */ }
+        }
+        releaseBusy();
+      }).catch(() => releaseBusy());
+    } else {
+      releaseBusy();
+    }
+  }
 }
 
 function deleteCase(id) {
