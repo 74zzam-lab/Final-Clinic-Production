@@ -6471,9 +6471,10 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-top:0">
           <div class="card-title">🗄️ النسخ الاحتياطي واستعادة الكوارث</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" type="button" onclick="runBackupV2Create()">💾 نسخ الآن</button>
+            <button class="btn btn-primary btn-sm" type="button" onclick="runBackupV2Create()">💾 نسخ كاملة الآن</button>
+            <button class="btn btn-accent btn-sm" type="button" onclick="scanDriveBackupsV2()" aria-label="Scan Google Drive backups">🔍 فحص Drive</button>
             <button class="btn btn-accent btn-sm" type="button" onclick="runBackupV2RestoreManual()" aria-label="Restore backup file via wizard">♻️ استعادة من ملف</button>
-            <button class="btn btn-ghost btn-sm" type="button" onclick="runBackupV2RestoreLatest()" aria-label="Restore latest authorized backup">⏫ أحدث نسخة</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="runBackupV2RestoreLatest()" aria-label="Restore latest authorized backup">⏫ أحدث نسخة (محلي + Drive)</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="refreshBackupV2HistoryUi()" aria-label="Refresh backup history">📜 سجل النسخ</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="runBackupV2ImportLegacy()" aria-label="Import legacy encrypted backup">🔐 نسخة مشفّرة قديمة</button>
           </div>
@@ -6481,8 +6482,14 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <div id="ops-ux-backup-host">
           <div id="ops-ux-status-host"></div>
         </div>
-        <p class="backup-card-desc">مسار الإنتاج لاستعادة قاعدة البيانات والمرفقات (ZIP غير مشفّر — بلا كلمة مرور). النسخ المشفّرة القديمة تتطلب كلمة مرور عبر «نسخة مشفّرة قديمة». يُرفض أي نسخة لمركز/فرع غير مصرّح به.</p>
+        <p class="backup-card-desc">مسار الإنتاج لاستعادة <strong>قاعدة SQLite + المرفقات + الإعدادات</strong> للمؤسسة بالكامل (ملف ZIP كبير — عادةً عشرات أو مئات MB). النسخ الصغيرة اليومية JSON ليست بديلاً عن هذا المسار.</p>
         <div class="form-grid form-grid-2" style="gap:10px;margin-top:10px">
+          <div class="form-group" style="margin:0">
+            <label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer;font-size:13px">
+              <input type="checkbox" id="bk-v2-upload-drive" checked> رفع النسخة الكاملة إلى Google Drive
+            </label>
+            <p class="backup-card-desc" style="margin:6px 0 0">يُحتفظ بآخر <strong>3</strong> نسخ كاملة على Drive فقط — الأقدم يُحذف تلقائياً.</p>
+          </div>
           <div class="form-group" style="margin:0;display:none" aria-hidden="true">
             <label class="form-label">مفتاح التشفير (تلقائي)</label>
             <input class="form-control" type="password" id="bk-v2-pass" placeholder="تلقائي" autocomplete="new-password" tabindex="-1">
@@ -6497,6 +6504,9 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
               <option value="360">كل 6 ساعات</option>
               <option value="1440">يومياً</option>
             </select>
+            <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;font-size:12px;margin-top:8px">
+              <input type="checkbox" id="bk-v2-schedule-cloud" checked onchange="saveBackupV2ScheduleFromUI()"> جدولة ترفع إلى Drive (آخر 3 نسخ)
+            </label>
           </div>
         </div>
         <div class="backup-status-card" style="margin-top:12px">
@@ -17211,7 +17221,47 @@ function getBackupV2IdentityMeta() {
     deviceId: (typeof DeviceConfig !== 'undefined' && DeviceConfig.load?.()?.deviceId) || '',
     centerName: settings?.centerName || '',
     deviceName: settings?.backup?.deviceName || (typeof DeviceConfig !== 'undefined' && DeviceConfig.load?.()?.deviceName) || '',
+    scopeType: 'organization',
   };
+}
+
+function getBackupV2CloudOptions() {
+  return {
+    cloudRetentionCount: 3,
+    retentionCount: 20,
+  };
+}
+
+function formatBackupBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (!n) return '—';
+  if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  if (n >= 1024) return Math.round(n / 1024) + ' KB';
+  return n + ' B';
+}
+
+async function listBackupV2CloudEntries() {
+  const api = getBackupV2Api();
+  if (api?.v2ListCloud) {
+    const listed = await api.v2ListCloud({});
+    if (listed?.ok) return listed.items || [];
+  }
+  const res = await BackupBridge.listCloudBackups('google', 'Backups/V2');
+  if (!res?.ok) return [];
+  return (res.items || [])
+    .filter((it) => /Tadawi-Backup-V2/i.test(String(it.name || '')))
+    .map((it) => ({
+      id: it.id || it.path,
+      path: it.path,
+      remotePath: it.path,
+      createdAt: it.modifiedAt,
+      modifiedAt: it.modifiedAt,
+      size: it.size,
+      source: 'cloud',
+      label: it.name || it.path,
+      validation: 'cloud',
+    }));
 }
 
 function getBackupV2Password() {
@@ -17265,6 +17315,10 @@ async function refreshBackupV2Status() {
     if (interval && sched && typeof sched.intervalMinutes === 'number') {
       interval.value = sched.enabled ? String(sched.intervalMinutes) : '0';
     }
+    const cloudUpload = document.getElementById('bk-v2-upload-drive');
+    const schedCloud = document.getElementById('bk-v2-schedule-cloud');
+    if (schedCloud && sched) schedCloud.checked = sched.cloudEnabled !== false;
+    if (cloudUpload && sched) cloudUpload.checked = sched.cloudEnabled !== false;
   } catch (err) {
     const st = document.getElementById('bk-v2-status');
     if (st) st.textContent = String(err?.message || err).slice(0, 80);
@@ -17282,16 +17336,24 @@ async function runBackupV2Create() {
     notify('⚠️ جلسة الصلاحيات غير مربوطة — أعد تسجيل الدخول ثم حاول مجدداً (rbac_session_required)', 'warning');
     return;
   }
-  notify('⏳ جاري إنشاء Backup V2...', 'warning');
+  notify('⏳ جاري إنشاء نسخة كاملة Backup V2...', 'warning');
   try {
     const password = getBackupV2Password();
+    const uploadDrive = document.getElementById('bk-v2-upload-drive')?.checked !== false;
     const res = await api.v2Create({
       ...(password ? { password } : {}),
       backupType: 'manual',
+      cloud: uploadDrive,
+      upload: uploadDrive,
       ...getBackupV2IdentityMeta(),
+      ...getBackupV2CloudOptions(),
     });
     if (res?.ok || res?.path || res?.hash) {
-      notify('✅ تم إنشاء نسخة Backup V2', 'success');
+      const cloudMsg = res?.cloudOk
+        ? ' — تم الرفع إلى Drive'
+        : (uploadDrive ? ' — محلي فقط (فشل/تخطي Drive)' : ' — محلي فقط');
+      const prunedMsg = Number(res?.pruned) > 0 ? ` (حُذفت ${res.pruned} نسخة قديمة)` : '';
+      notify('✅ تم إنشاء نسخة Backup V2' + cloudMsg + prunedMsg, res?.cloudOk === false && uploadDrive ? 'warning' : 'success');
       await refreshBackupV2Status();
       if (typeof refreshBackupV2HistoryUi === 'function') await refreshBackupV2HistoryUi();
     } else {
@@ -17339,18 +17401,52 @@ async function refreshBackupV2HistoryUi() {
   try {
     if (api?.v2ListLocal) {
       const listed = await api.v2ListLocal();
-      entries = listed?.entries || listed?.files || listed || [];
-      if (!Array.isArray(entries)) entries = [];
+      const localFiles = listed?.entries || listed?.files || listed || [];
+      entries = (Array.isArray(localFiles) ? localFiles : []).map((e, i) => ({
+        id: e.id || e.path || e.filePath || ('local-' + i),
+        path: e.path || e.filePath || e.id,
+        createdAt: e.createdAt || (e.mtimeMs ? new Date(e.mtimeMs).toISOString() : null),
+        size: e.size,
+        source: 'local',
+        validation: e.validation || (e.ok === false ? 'invalid' : 'local'),
+        label: e.label || e.name || e.path || e.filePath || ('backup-' + i),
+      }));
     }
-  } catch { entries = []; }
-  window.OpsUxBridge?.mountBackupHistory?.(host, entries.map((e, i) => ({
-    id: e.id || e.path || e.filePath || ('bk-' + i),
-    path: e.path || e.filePath || e.id,
-    createdAt: e.createdAt || e.mtime || e.modifiedAt,
-    size: e.size,
-    validation: e.validation || (e.ok === false ? 'invalid' : 'unknown'),
-    label: e.label || e.name || e.path || e.filePath || ('backup-' + i),
-  })));
+    const cloudEntries = await listBackupV2CloudEntries();
+    entries = entries.concat(cloudEntries);
+  } catch { entries = entries || []; }
+  window.OpsUxBridge?.mountBackupHistory?.(host, entries);
+}
+
+async function scanDriveBackupsV2() {
+  notify('⏳ جاري فحص Google Drive...', 'warning');
+  try {
+    const status = await BackupBridge.getCloudStatus('google');
+    if (!status?.connected) {
+      notify('⚠️ Google Drive غير متصل — اربط الحساب من بطاقة OAuth أولاً', 'danger');
+      return;
+    }
+    const cloudEntries = await listBackupV2CloudEntries();
+    await refreshBackupV2HistoryUi();
+    const sumCloud = document.getElementById('bk-sum-cloud');
+    if (sumCloud && cloudEntries.length) {
+      const newest = cloudEntries[0];
+      sumCloud.textContent = `${newest.label || 'Drive'} · ${formatBackupBytes(newest.size)} · ${(newest.modifiedAt || '').slice(0, 16)}`;
+    } else if (sumCloud) {
+      sumCloud.textContent = cloudEntries.length ? '—' : 'لا توجد نسخ V2 كاملة';
+    }
+    if (!cloudEntries.length) {
+      notify('ℹ️ لا توجد نسخ Backup V2 كاملة على Drive — أنشئ «نسخ كاملة الآن» مع تفعيل الرفع', 'warning');
+      return;
+    }
+    const lines = cloudEntries.slice(0, 10).map((e, i) =>
+      `${i + 1}. ${e.label} — ${formatBackupBytes(e.size)} — ${(e.modifiedAt || '').slice(0, 19)}`
+    ).join('\n');
+    notify(`✅ وُجدت ${cloudEntries.length} نسخة كاملة على Drive`, 'success');
+    console.log('[Drive backup scan]\n' + lines);
+  } catch (err) {
+    notify('⚠️ فشل فحص Drive: ' + (err?.message || err), 'danger');
+  }
 }
 
 async function runBackupV2RestoreManual() {
@@ -17426,6 +17522,7 @@ async function runBackupV2RestoreLatest() {
         return await api.v2RestoreLatest({
           ...(password ? { password } : {}),
           relaunch: true,
+          includeCloud: true,
           ...getBackupV2IdentityMeta(),
         });
       },
@@ -17472,10 +17569,15 @@ async function saveBackupV2ScheduleFromUI() {
   const api = getBackupV2Api();
   if (!api?.v2ScheduleConfigure) return;
   const mins = Number(document.getElementById('bk-v2-schedule-interval')?.value || 0);
+  const cloudEnabled = document.getElementById('bk-v2-schedule-cloud')?.checked !== false
+    || document.getElementById('bk-v2-upload-drive')?.checked !== false;
   try {
     await api.v2ScheduleConfigure({
       enabled: mins > 0,
       intervalMinutes: mins > 0 ? mins : 60,
+      cloudEnabled: mins > 0 && cloudEnabled,
+      cloudRetentionCount: 3,
+      retentionCount: 20,
       ...getBackupV2IdentityMeta(),
     });
     await refreshBackupV2Status();
