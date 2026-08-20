@@ -129,10 +129,15 @@
 
       // Only allow subsequent sync pushes of NEW local changes after pull/reconcile.
       state.phase = state.pullDone ? 'reconciled' : 'reconcile_incomplete';
-      state.pushBlocked = false;
+      state.pushBlocked = !state.pullDone;
       state.pushAllowed = state.pullDone === true;
       state.finishedAt = new Date().toISOString();
       saveState(state);
+      if (state.pullDone && global.SyncBaseline?.completeReconciliation) {
+        try {
+          global.SyncBaseline.completeReconciliation({ source: 'restore_reconciliation' });
+        } catch { /* empty */ }
+      }
       return { ok: state.pullDone !== false, state, pushAllowed: state.pushAllowed };
     } catch (e) {
       state.phase = 'failed';

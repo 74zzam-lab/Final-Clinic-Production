@@ -90,6 +90,16 @@ function registerBackupV2Ipc({
   if (!isBackupV2Enabled()) return { enabled: false, scheduler: null };
 
   let scheduler = null;
+  try {
+    const recovered = backupV2.recoverInterruptedRestore?.(getUserDataPath(), {
+      restoreRoots: backupV2.RESTORE_ROOTS,
+    });
+    if (recovered?.action === 'rolled_back') {
+      console.warn('[backup-v2] recovered interrupted restore via rollback', recovered);
+    }
+  } catch (e) {
+    console.warn('[backup-v2] recoverInterruptedRestore failed', e?.message || e);
+  }
 
   function resolveIdentity(opts = {}) {
     const fromLive = typeof getLiveIdentity === 'function' ? (getLiveIdentity() || {}) : {};
@@ -217,11 +227,18 @@ function registerBackupV2Ipc({
       err.code = friendly.code;
       throw err;
     }
+    const licensedBranchIds = Array.isArray(opts.licensedBranchIds)
+      ? opts.licensedBranchIds.map((v) => String(v).slice(0, 128)).filter(Boolean)
+      : [];
     try {
       const result = await backupV2.restoreBackupFile({
         filePath,
         userDataDir: opts.targetUserDataDir || getUserDataPath(),
         expectedIdentity: identity,
+        licensedBranchIds,
+        skipScopeTruth: opts.skipScopeTruth === true,
+        requireScopeTruth: opts.requireScopeTruth === true,
+        allowLegacyBranchless: opts.allowLegacyBranchless !== false,
         closeDatabase: closeDatabase || undefined,
         reopenDatabase: reopenDatabase || undefined,
         applySecurityMaterial: applySecurityMaterial || undefined,

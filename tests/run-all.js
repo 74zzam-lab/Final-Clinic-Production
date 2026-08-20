@@ -96,6 +96,7 @@ const baseline = [
   ['tests/baseline/test-remove-backup-encryption.js', 'remove-backup-encryption'],
   ['tests/baseline/test-branch-sql-isolation-leakage.js', 'branch-sql-isolation-leakage'],
   ['tests/baseline/test-branch-switch-correctness.js', 'branch-switch-correctness'],
+  ['tests/baseline/test-atomic-restore-recovery.js', 'atomic-restore-recovery'],
   ['tests/backup/backup-restore-v2.test.js', 'v2-5.1:backup-restore-v2'],
   ['tests/backup/backup-sync-harden-v2.test.js', 'v2-5.2:backup-sync-harden'],
   ['tests/baseline/test-v2-5-3-owner-identity-license.js', 'v2-5.3:owner-identity-license'],
