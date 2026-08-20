@@ -19,9 +19,9 @@ check(extSrc.includes('return sanitizePermissionMap(ROLE_PRESETS[user.role] || R
 check(extSrc.includes('window.PermissionPolicy.sanitizePermissionMap = sanitizePermissionMap;'), 'PermissionPolicy sanitizer must be exposed');
 
 check(html.includes("if (!checkAdmin('إدارة المستخدمين')) return;"), 'saveUserAsync admin guard missing');
-check(html.includes("if (users[idx].id === '1')"), 'primary admin protection missing');
+check(html.includes('isBranchPrimaryUser(users[idx])'), 'primary admin protection missing');
 check(html.includes('window.PermissionPolicy?.sanitizePermissionMap'), 'user permissions must be sanitized before save');
-check(html.includes("notify('⚠️ اسم المستخدم مستخدم بالفعل'"), 'duplicate username guard missing');
+check(html.includes("notify('⚠️ اسم المستخدم مستخدم بالفعل"), 'duplicate username guard missing');
 
 if (errors.length) {
   console.error('FAIL: phase6 permissions');
