@@ -24,7 +24,11 @@ const KV_KEYS = [
   'clientFileCounter', 'messageLog', 'backupLog', 'backupRegistry', 'activityLog',
   'nextSessions', 'employeeLeaveRequests', 'employeeLedgerAccruals', 'employeeLedgerPayments',
   'employeeLedgerEntries', 'importHistory', 'hardwareLog', 'inventoryItems',
-  'inventorySuppliers', 'inventoryMovements',
+  'inventorySuppliers', 'inventoryMovements', 'attachments_meta',
+  'systemLogs', 'cashDrawerSession', 'communicationWebhookLog', 'communicationQueue',
+  '__tdw_conflict_queue__', '__tdw_conflict_archive__', '__tdw_attachment_manifest__',
+  '__tdw_branch_settings_store__', '__tdw_branch_counters_store__',
+  '__tdw_owner_profile__', '__tdw_owner_setup__', '__tdw_owner_migration__',
 ];
 
 function asArray(value) {

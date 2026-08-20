@@ -9396,8 +9396,11 @@ const DB = {
   get: (k, def) => {
     try {
       if (typeof SqliteBridge !== 'undefined' && SqliteBridge.readOperational) {
-        const authoritative = SqliteBridge.readOperational(k);
+        const authoritative = SqliteBridge.readOperational(k, def);
         if (authoritative !== undefined) return authoritative;
+      }
+      if (typeof SqliteBridge !== 'undefined' && SqliteBridge.shouldBlockLocalStorage?.(k)) {
+        return def;
       }
     } catch { /* empty */ }
     try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; }
@@ -16528,6 +16531,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/data-state-ui.js"></script>
 <script src="cloud/conflict-manager-ui.js"></script>
 <script src="cloud/db-bridge.js"></script>
+<script src="database/sqlite-operational-registry.js"></script>
 <script src="cupping-sqlite-bridge.js"></script>
 <script src="cloud/versions.js"></script>
 <script src="cloud/license-limits.js"></script>
@@ -22772,13 +22776,19 @@ function reloadClientStoreFromDb() {
   expenses = DB.get('expenses', expenses);
   attendance = DB.get('attendance', attendance);
   nextSessions = DB.get('nextSessions', nextSessions);
-  packages = DB.get('packages', packages);
-  services = DB.get('services', services);
   otRecords = DB.get('otRecords', otRecords);
   activityLog = DB.get('activityLog', activityLog);
   users = DB.get('users', users);
+  settings = DB.get('settings', settings);
   clientFileCounter = DB.get('clientFileCounter', clientFileCounter);
   invoiceCounter = DB.get('invoiceCounter', invoiceCounter);
+  if (typeof inventoryItems !== 'undefined') inventoryItems = DB.get('inventoryItems', inventoryItems);
+  if (typeof inventorySuppliers !== 'undefined') inventorySuppliers = DB.get('inventorySuppliers', inventorySuppliers);
+  if (typeof inventoryMovements !== 'undefined') inventoryMovements = DB.get('inventoryMovements', inventoryMovements);
+  if (typeof systemLogs !== 'undefined') systemLogs = DB.get('systemLogs', systemLogs);
+  if (typeof cashDrawerSession !== 'undefined') cashDrawerSession = DB.get('cashDrawerSession', cashDrawerSession);
+  if (typeof employeeLeaveRequests !== 'undefined') employeeLeaveRequests = DB.get('employeeLeaveRequests', employeeLeaveRequests);
+  if (typeof importHistory !== 'undefined') importHistory = DB.get('importHistory', importHistory);
   syncAppGlobals();
 }
 
