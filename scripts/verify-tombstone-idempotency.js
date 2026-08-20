@@ -21,14 +21,21 @@ const idempotencyKeys = require('../database/idempotency-keys');
 const { openDatabase } = require('../database/connection');
 const { createSyncPlatform } = require('../database/sync-outbox');
 
-// Tombstone policy
+// Tombstone policy (PR10: equal revision → tombstone wins; conflict only when live revision strictly newer)
 const delVsUpdate = tombstone.decideTombstone(
+  { id: 'c1', deletedAt: '2026-01-02T10:00:00Z', revision: 2 },
+  { id: 'c1', name: 'Alive', revision: 3 },
+  'clientsRegistry'
+);
+assert(delVsUpdate?.action === tombstone.ACTIONS.CONFLICT, 'delete_vs_update → conflict when remote revision newer');
+assert(delVsUpdate?.reason === 'delete_vs_update', 'delete_vs_update reason');
+
+const equalRevTombstoneWins = tombstone.decideTombstone(
   { id: 'c1', deletedAt: '2026-01-02T10:00:00Z', revision: 2 },
   { id: 'c1', name: 'Alive', revision: 2 },
   'clientsRegistry'
 );
-assert(delVsUpdate?.action === tombstone.ACTIONS.CONFLICT, 'delete_vs_update → conflict');
-assert(delVsUpdate?.reason === 'delete_vs_update', 'delete_vs_update reason');
+assert(equalRevTombstoneWins?.action === tombstone.ACTIONS.PUSH, 'equal revision: local tombstone wins over stale remote');
 
 const updateVsDel = tombstone.decideTombstone(
   { id: 'c1', name: 'Alive', revision: 2 },
@@ -53,10 +60,10 @@ assert(bothTomb?.action === tombstone.ACTIONS.PUSH, 'newer local tombstone → p
 
 assert(
   tombstone.recordsConflict(
-    { id: 'c1', deletedAt: '2026-01-02T10:00:00Z' },
-    { id: 'c1', name: 'Bob' }
+    { id: 'c1', deletedAt: '2026-01-02T10:00:00Z', revision: 2 },
+    { id: 'c1', name: 'Bob', revision: 3 }
   ),
-  'recordsConflict on delete_vs_update'
+  'recordsConflict on delete_vs_update when remote revision newer'
 );
 assert(
   !tombstone.recordsConflict(
@@ -161,17 +168,17 @@ vm.createContext(context);
 
 const mpConflict = context.MergePolicy.decideRecord(
   { id: 'c1', deletedAt: '2026-01-02T10:00:00Z', revision: 2, updatedAt: '2026-01-02' },
-  { id: 'c1', name: 'Live', revision: 2, updatedAt: '2026-01-02' },
+  { id: 'c1', name: 'Live', revision: 3, updatedAt: '2026-01-03' },
   'clientsRegistry'
 );
-assert(mpConflict.action === 'conflict', 'MergePolicy routes tombstone delete_vs_update');
+assert(mpConflict.action === 'conflict', 'MergePolicy routes tombstone delete_vs_update when remote revision newer');
 
 const tConflict = context.TableMergePolicy.decideForTable(
   'clientsRegistry',
   { id: 'c1', deletedAt: '2026-01-02T10:00:00Z', revision: 2, updatedAt: '2026-01-02' },
-  { id: 'c1', name: 'Live', revision: 2, updatedAt: '2026-01-02' }
+  { id: 'c1', name: 'Live', revision: 3, updatedAt: '2026-01-03' }
 );
-assert(tConflict.action === 'conflict', 'TableMergePolicy tombstone conflict');
+assert(tConflict.action === 'conflict', 'TableMergePolicy tombstone conflict when remote revision newer');
 
 db.close();
 try { fs.unlinkSync(dbPath); } catch { /* empty */ }
