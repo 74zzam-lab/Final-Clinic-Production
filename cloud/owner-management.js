@@ -117,8 +117,21 @@
 
     const owners = listActiveOwners(users);
     const hasProfile = !!global.OwnerProfile?.hasProfile?.();
-    const profile = hasProfile ? (global.OwnerProfile.loadProfile?.() || null) : null;
+
+    const invariant = global.OwnerLifecycleAuthority?.assertOwnerCountInvariant?.(users);
+    if (invariant && !invariant.ok) {
+      return {
+        state: OWNER_STATES.OWNER_CORRUPTED,
+        action: OWNER_ACTIONS.RUN_RECOVERY,
+        activeOwnerCount: owners.length,
+        hasProfile,
+        invariantViolation: invariant.code || invariant.error,
+        systemBusy: getSystemBusyReason(),
+      };
+    }
+
     const ownersWithPassword = owners.filter((u) => !!u.password);
+    const profile = hasProfile ? (global.OwnerProfile.loadProfile?.() || null) : null;
     const setupFlag = !!global.OwnerSetupState?.isRequired?.();
 
     if (!hasProfile && owners.length === 0) {
@@ -458,10 +471,33 @@
 
   /** Canonical create entry — acquires the single creation lock. */
   async function createOwner(input) {
+    input = input || {};
     const busy = getSystemBusyReason();
     if (busy === 'restore' || busy === 'sync' || busy === 'license_refresh') {
       return { ok: false, error: 'system_busy', busy };
     }
+
+    if (!input.skipLifecycleGate && !input.additionalOwner && global.OwnerLifecycleAuthority) {
+      const prior = global.OwnerLifecycleAuthority.findCommittedOwner?.(input);
+      if (prior?.ok) return prior;
+      if (global.OwnerLifecycleAuthority.isCreateBlocked?.()) {
+        return {
+          ok: false,
+          error: 'owner_create_blocked',
+          code: 'EXISTING_NO_CREATE',
+          mode: global.OwnerLifecycleAuthority.getMode?.(),
+        };
+      }
+      const inv = global.OwnerLifecycleAuthority.assertOwnerCountInvariant?.();
+      if (inv && !inv.ok && !input.forceRecovery) return inv;
+      if (!global.OwnerProfile?.hasProfile?.() && countActiveOwners() === 0) {
+        const mode = global.OwnerLifecycleAuthority.getMode?.();
+        if (mode === 'existing' || mode === 'restore' || mode === 'replacement') {
+          return { ok: false, error: 'owner_create_blocked', code: 'EXISTING_NO_CREATE', mode };
+        }
+      }
+    }
+
     if (creationInProgress) {
       return { ok: false, error: 'creation_in_progress', code: 'owner_creation_in_progress' };
     }
@@ -470,6 +506,12 @@
       const res = await createOwnerAccountUnlocked(input);
       if (res?.ok) {
         bootstrapOpenRequested = false;
+        if (input.lifecycleCommit && global.OwnerLifecycleAuthority?.saveCommitRecord) {
+          global.OwnerLifecycleAuthority.saveCommitRecord(
+            global.OwnerLifecycleAuthority.buildCreateIdempotencyKey(input),
+            { ok: true, userId: res.userId, username: res.username }
+          );
+        }
         notifyOwnerChanged({ type: 'create', username: res.username, userId: res.userId });
       }
       return res;
@@ -696,6 +738,7 @@
     getSystemBusyReason,
     isOwnerCreationInProgress,
     notifyOwnerChanged,
+    getUsers,
     listOwners,
     listActiveOwners,
     countActiveOwners,
@@ -709,6 +752,7 @@
     canDisableOwnerUser,
     canDemoteOwnerUser,
     createOwner,
+    setupCommitOwner: (...args) => global.OwnerLifecycleAuthority?.setupCommitOwner?.(...args),
     createOwnerAccount,
     updateOwner,
     resetOwnerPassword,

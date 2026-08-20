@@ -97,6 +97,17 @@
         } catch { /* empty */ }
       }
 
+      stages.push('owner_lifecycle');
+      if (global.OwnerLifecycleAuthority?.reconcileAfterRestore) {
+        const ownerRec = global.OwnerLifecycleAuthority.reconcileAfterRestore({
+          gateId: gate?.backupId || null,
+          source: options.source || 'backup_v2_restore',
+        });
+        if (ownerRec && ownerRec.ok === false && ownerRec.readyBlocked) {
+          return fail(ownerRec.error || 'owner_invariant_violation', 'owner_lifecycle');
+        }
+      }
+
       try { sessionStorage.setItem(GATE_POLL_KEY, '1'); } catch { /* empty */ }
 
       if (typeof global.refreshAllBranchScopedViews === 'function') {
