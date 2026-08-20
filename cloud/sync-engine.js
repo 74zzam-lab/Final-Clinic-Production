@@ -114,6 +114,23 @@
     return Number(local?.branches?.[branchId]?.databaseVersion || local?.databaseVersion || 0);
   }
 
+  async function getRemoteTableRevision(branchId, table) {
+    branchId = getBranchId(branchId);
+    const centerId = getCenterId();
+    if (!centerId || !global.OperationalLayer?.drivePathForTable) {
+      return { ok: false, remoteRevision: 0, error: 'remote_table_revision_unconfirmed' };
+    }
+    const remotePath = global.OperationalLayer.drivePathForTable(centerId, branchId, table);
+    const dl = await global.DriveAdapter.downloadJson(remotePath);
+    if (!dl?.ok) {
+      if (isBenignSyncError(dl?.error)) {
+        return { ok: true, remoteRevision: 0, emptyRemote: true };
+      }
+      return { ok: false, remoteRevision: 0, error: dl?.error || 'remote_table_revision_unconfirmed' };
+    }
+    return { ok: true, remoteRevision: Number(dl.data?.revision || 0), data: dl.data };
+  }
+
   async function getRemoteBranchDatabaseRevision(branchId) {
     branchId = getBranchId(branchId);
     const centerId = getCenterId();
@@ -392,7 +409,7 @@
         for (const item of paths) {
           const r = await global.DriveAdapter.uploadJson(item.path, item.data, {
             overwrite: true,
-            expectedDatabaseVersion: remoteDbRev,
+            atomicReplace: true,
             operationId: options.operationId,
           });
           if (r?.code === 'remote_revision_mismatch') {
@@ -412,7 +429,7 @@
         remotePath = global.ConfigLayer?.drivePathForFile?.(centerId, branchId, meta.file);
         const up = await global.DriveAdapter.uploadJson(remotePath, payload, {
           overwrite: true,
-          expectedDatabaseVersion: remoteDbRev,
+          atomicReplace: true,
           operationId: options.operationId,
         });
         if (up?.code === 'remote_revision_mismatch') {
@@ -436,11 +453,24 @@
         return { ok: false, blocked: true, reason: pushGuard.code || pushGuard.reason, guard: pushGuard };
       }
       remotePath = global.OperationalLayer?.drivePathForTable?.(centerId, branchId, table);
-      const nextRevision = Math.max(Number(payload?.revision || 0), remoteDbRev + 1);
+      const remoteTableHead = await getRemoteTableRevision(branchId, table);
+      if (!remoteTableHead.ok && !remoteTableHead.emptyRemote) {
+        return {
+          ok: false,
+          blocked: true,
+          code: 'remote_table_revision_unconfirmed',
+          reason: 'remote_table_revision_unconfirmed',
+          error: remoteTableHead.error,
+        };
+      }
+      const remoteTableRev = Number(remoteTableHead.remoteRevision || 0);
+      const localTableRev = Number(payload?.revision || 0);
+      const nextRevision = Math.max(localTableRev, remoteTableRev + 1);
       const payloadWithRev = { ...(payload || {}), revision: nextRevision, operationId: options.operationId || null };
       const upOp = await global.DriveAdapter.uploadJson(remotePath, payloadWithRev, {
         overwrite: true,
-        expectedDatabaseVersion: remoteDbRev,
+        casResource: 'table',
+        expectedTableRevision: remoteTableRev,
         operationId: options.operationId,
         atomicReplace: true,
       });
@@ -471,6 +501,7 @@
       global.VersionsIndex?.syncFromRepository?.(global.Repository, centerId, branchId)
     );
     const manifestUp = await global.DriveAdapter.uploadVersionsConditional?.(centerId, versions, branchId, {
+      expectedBranchRevision: remoteDbRev,
       expectedDatabaseVersion: remoteDbRev,
       newDatabaseVersion: newDbRev,
       operationId: options.operationId,

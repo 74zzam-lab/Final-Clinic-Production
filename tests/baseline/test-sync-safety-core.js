@@ -67,14 +67,16 @@ async function testCasGuard() {
 }
 
 async function seedRemoteAtRevision(remote, centerId, branchId, table, revision, records, deviceId) {
-  let current = remote.getBranchDatabaseRevision(remote.getVersions(centerId, branchId), branchId);
-  while (current < revision) {
-    await remote.putTable(centerId, branchId, table, current, records, deviceId, {
-      expectedRemoteRevision: current,
-      expectedManifestRevision: current,
+  let currentManifest = remote.getBranchDatabaseRevision(remote.getVersions(centerId, branchId), branchId);
+  let currentTable = remote.getTableRevision(centerId, branchId, table);
+  while (currentManifest < revision || currentTable < revision) {
+    await remote.putTable(centerId, branchId, table, currentTable + 1, records, deviceId, {
+      expectedTableRevision: currentTable,
+      expectedManifestRevision: currentManifest,
       operationId: 'seed-op',
     });
-    current = remote.getBranchDatabaseRevision(remote.getVersions(centerId, branchId), branchId);
+    currentManifest = remote.getBranchDatabaseRevision(remote.getVersions(centerId, branchId), branchId);
+    currentTable = remote.getTableRevision(centerId, branchId, table);
   }
 }
 

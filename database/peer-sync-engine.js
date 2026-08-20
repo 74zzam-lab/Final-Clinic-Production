@@ -142,31 +142,30 @@ class FileRemote {
     );
   }
 
+  getTableRevision(centerId, branchId, table) {
+    const remoteTable = this.getTable(centerId, branchId, table);
+    return Number(remoteTable?.revision || 0);
+  }
+
   putTable(centerId, branchId, table, revision, records, deviceId, options = {}) {
     options = options || {};
     const versionsBefore = this.getVersions(centerId, branchId);
     const currentDbRev = this.getBranchDatabaseRevision(versionsBefore, branchId);
-    const expectedRemoteRevision = options.expectedRemoteRevision != null
-      ? Number(options.expectedRemoteRevision)
+    const currentTableRev = this.getTableRevision(centerId, branchId, table);
+    const expectedTableRevision = options.expectedTableRevision != null
+      ? Number(options.expectedTableRevision)
       : null;
 
-    if (expectedRemoteRevision != null) {
-      const cas = pushGuards.evaluateCasPushGuard({
-        expectedRemoteRevision,
-        actualRemoteRevision: currentDbRev,
-        baseRevision: options.baseRevision,
-      });
-      if (!cas.ok) {
-        const err = new Error(cas.code || 'remote_revision_mismatch');
-        err.code = cas.code || 'remote_revision_mismatch';
-        err.expectedRemoteRevision = expectedRemoteRevision;
-        err.actualRemoteRevision = currentDbRev;
-        err.retry = cas.retry === true;
-        throw err;
-      }
+    if (expectedTableRevision != null && expectedTableRevision !== currentTableRev) {
+      const err = new Error('remote_revision_mismatch');
+      err.code = 'remote_revision_mismatch';
+      err.expectedTableRevision = expectedTableRevision;
+      err.actualTableRevision = currentTableRev;
+      err.retry = true;
+      throw err;
     }
 
-    const putRev = Math.max(currentDbRev + 1, Number(revision || 0));
+    const putRev = Math.max(currentTableRev + 1, Number(revision || 0));
     const payload = {
       centerId,
       branchId,
@@ -196,6 +195,7 @@ class FileRemote {
       throw err;
     }
 
+    const nextDbRev = currentDbRev + 1;
     const nextVersions = { ...versionsAfterRead };
     nextVersions.tables = nextVersions.tables || {};
     nextVersions.tables[table] = {
@@ -208,8 +208,8 @@ class FileRemote {
     };
     nextVersions.branches = nextVersions.branches || {};
     nextVersions.branches[branchId] = nextVersions.branches[branchId] || {};
-    nextVersions.branches[branchId].databaseVersion = putRev;
-    nextVersions.databaseVersion = putRev;
+    nextVersions.branches[branchId].databaseVersion = nextDbRev;
+    nextVersions.databaseVersion = Math.max(Number(nextVersions.databaseVersion || 0), nextDbRev);
     nextVersions.updatedAt = payload.updatedAt;
     nextVersions.writerDeviceId = deviceId;
     nextVersions.operationId = options.operationId || null;
@@ -218,7 +218,7 @@ class FileRemote {
       ...written,
       payloadHash: payload.payloadHash,
       revision: putRev,
-      databaseVersion: putRev,
+      databaseVersion: nextDbRev,
     };
   }
 
@@ -528,7 +528,10 @@ function createDevice(options) {
             };
           }
 
-          const putRev = remoteDbRev + 1;
+          const remoteTableRev = remote.getTableRevision
+            ? remote.getTableRevision(state.centerId, state.branchId, row.table_name)
+            : Number((remote.getTable(state.centerId, state.branchId, row.table_name) || {}).revision || 0);
+          const putRev = Math.max(localRev, remoteTableRev + 1);
           let put;
           try {
             put = await Promise.resolve(
@@ -540,7 +543,7 @@ function createDevice(options) {
                 records,
                 state.deviceId,
                 {
-                  expectedRemoteRevision: remoteDbRev,
+                  expectedTableRevision: remoteTableRev,
                   expectedManifestRevision: remoteDbRev,
                   operationId,
                 }

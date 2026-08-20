@@ -361,7 +361,7 @@ async function downloadByPath(oauth2, remotePath) {
   ].join(' and ');
   const res = await driveApi.listFiles(oauth2, {
     q,
-    fields: 'files(id,name,size,modifiedTime,md5Checksum,etag)',
+    fields: 'files(id,name,size,modifiedTime,md5Checksum,version)',
     pageSize: 1
   });
   const file = res.files?.[0];
@@ -500,23 +500,36 @@ async function findFileByPath(oauth2, remotePath, options = {}) {
     'trashed=false',
     parentId ? `'${parentId}' in parents` : "'root' in parents"
   ].join(' and ');
-  const fields = options.includeEtag !== false
-    ? 'files(id,name,size,modifiedTime,md5Checksum,etag)'
-    : 'files(id,name,size,modifiedTime,md5Checksum)';
   const res = await driveApi.listFiles(oauth2, {
     q,
-    fields,
-    pageSize: 1
+    fields: 'files(id,name,size,modifiedTime,md5Checksum,version)',
+    pageSize: options.includeDuplicates ? 10 : 1,
+    orderBy: 'modifiedTime desc',
   });
-  return res.files?.[0] || null;
+  const files = res.files || [];
+  if (!files.length) return null;
+  if (files.length === 1 && !options.includeDuplicates) return files[0];
+  if (files.length === 1) return { canonical: files[0], duplicates: [] };
+  return { canonical: files[0], duplicates: files.slice(1) };
 }
+
+async function trashDuplicateFiles(oauth2, duplicates) {
+  for (const file of duplicates || []) {
+    if (!file?.id) continue;
+    try { await driveApi.trashFile(oauth2, file.id); } catch { /* best effort */ }
+  }
+}
+
+const driveV2Api = require('./google-drive-v2-api');
 
 const driveCasDeps = {
   findFileByPath: (oauth2, remotePath, opts) => findFileByPath(oauth2, remotePath, opts),
   downloadByPath: (oauth2, remotePath) => downloadByPath(oauth2, remotePath),
-  updateFileConditional: (...args) => driveApi.updateFileConditional(...args),
-  createFile: (...args) => driveApi.createFile(...args),
   resolveFolderPath: (oauth2, parts, opts) => resolveFolderPath(oauth2, parts, opts),
+  getFilePreconditionV2: (oauth2, fileId) => driveV2Api.getFileMetadata(oauth2, fileId),
+  updateFileMediaWithIfMatchV2: (...args) => driveV2Api.updateFileMediaWithIfMatch(...args),
+  insertFileWithIfNoneMatchV2: (...args) => driveV2Api.insertFileWithIfNoneMatch(...args),
+  trashDuplicates: (oauth2, duplicates) => trashDuplicateFiles(oauth2, duplicates),
 };
 
 async function conditionalReplaceJson(remotePath, payload, meta = {}) {
@@ -524,6 +537,7 @@ async function conditionalReplaceJson(remotePath, payload, meta = {}) {
     const { oauth2 } = await getAuthedClient();
     return driveSyncCas.conditionalReplaceJson(driveCasDeps, oauth2, remotePath, payload, {
       ...meta,
+      remotePath,
       provider: PROVIDER_ID,
     });
   } catch (err) {
@@ -531,10 +545,16 @@ async function conditionalReplaceJson(remotePath, payload, meta = {}) {
   }
 }
 
+function resolveCanonicalFile(result) {
+  if (!result) return null;
+  if (result.canonical) return result.canonical;
+  return result.id ? result : null;
+}
+
 async function deleteBackup(remotePath) {
   try {
     const { oauth2 } = await getAuthedClient();
-    const file = await findFileByPath(oauth2, remotePath);
+    const file = resolveCanonicalFile(await findFileByPath(oauth2, remotePath));
     if (!file?.id) return { ok: false, message: 'الملف غير موجود' };
     await driveApi.deleteFile(oauth2, file.id);
     return { ok: true };
@@ -561,8 +581,12 @@ async function verifyRemote(remotePath, expectedHash) {
  * Prevents peers from reading a half-written operational/versions JSON.
  */
 async function atomicReplaceJson(remotePath, payload, meta = {}) {
-  if (meta.expectedDatabaseVersion != null) {
-    return conditionalReplaceJson(remotePath, payload, meta);
+  const needsCas = meta.expectedBranchRevision != null
+    || meta.expectedDatabaseVersion != null
+    || meta.expectedTableRevision != null
+    || meta.casResource;
+  if (needsCas) {
+    return conditionalReplaceJson(remotePath, payload, { ...meta, remotePath });
   }
   try {
     const { oauth2 } = await getAuthedClient();

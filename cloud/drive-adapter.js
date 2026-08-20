@@ -75,6 +75,9 @@
     const centerMatch = String(remotePath || '').match(/centers\/([^/]+)\/branches\/([^/]+)/);
     const branchId = centerMatch ? centerMatch[2] : (options.branchId || null);
 
+    const isManifest = /^versions\.json$/i.test(filename);
+    const casResource = options.casResource || (isManifest ? 'manifest' : 'table');
+
     let res;
     if (bridge.uploadCloud) {
       res = await bridge.uploadCloud(payload, filename, provider, {
@@ -83,7 +86,10 @@
         brand: 'NajjarTech',
         atomicReplace: options.atomicReplace !== false && /\.json$/i.test(filename),
         hash: options.hash,
-        expectedDatabaseVersion: options.expectedDatabaseVersion,
+        casResource,
+        expectedBranchRevision: options.expectedBranchRevision ?? options.expectedDatabaseVersion,
+        expectedTableRevision: options.expectedTableRevision,
+        expectedDatabaseVersion: options.expectedBranchRevision ?? options.expectedDatabaseVersion,
         branchId,
         operationId: options.operationId,
       });
@@ -155,7 +161,11 @@
       || remote?.data?.databaseVersion
       || 0
     );
-    const expected = Number(options.expectedDatabaseVersion);
+    const expected = Number(
+      options.expectedBranchRevision != null
+        ? options.expectedBranchRevision
+        : options.expectedDatabaseVersion
+    );
     const manifestCas = global.SyncPushGuards?.evaluateManifestCasGuard?.({
       expectedManifestRevision: expected,
       actualManifestRevision: actual,
@@ -184,7 +194,10 @@
     const up = await uploadJson(path, enriched, {
       overwrite: true,
       atomicReplace: true,
+      casResource: 'manifest',
+      expectedBranchRevision: expected,
       expectedDatabaseVersion: expected,
+      branchId,
       operationId: options.operationId,
     });
     if (!up?.ok) return up;

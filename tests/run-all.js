@@ -137,6 +137,7 @@ const baseline = [
   ['tests/baseline/test-v2-4-outbox-dual-device.js', 'v2-4:outbox-dual-device'],
   ['tests/baseline/test-sync-safety-core.js', 'sync-safety-core'],
   ['tests/baseline/test-drive-provider-cas.js', 'drive-provider-cas'],
+  ['tests/baseline/test-sync-revision-contract.js', 'sync-revision-contract'],
   ['tests/baseline/test-v2-4-policies-attachments.js', 'v2-4:policies-attachments'],
   ['tests/baseline/test-v2-4-conflict-resolution.js', 'v2-4:conflict-resolution'],
   ['tests/baseline/test-v2-4-large-queue.js', 'v2-4:large-queue'],
