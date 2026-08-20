@@ -487,6 +487,8 @@
     const report = await db.migrateFromBackup(snapshot, {
       sourceLabel: options?.sourceLabel || 'localStorage',
       dryRun: !!options?.dryRun,
+      internalMigration: true,
+      migrationOnly: true,
     });
     if (!report?.ok) {
       if (typeof global.MigrationSafety?.notifyMigrationFailure === 'function') {

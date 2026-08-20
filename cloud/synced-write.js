@@ -139,6 +139,9 @@
 
   async function restoreFromBackup(data, meta) {
     meta = meta || {};
+    const gate = global.RestoreSurfaceAuthority?.assertMigrationMergeAllowed?.(meta);
+    if (gate && !gate.ok) return gate;
+
     ensureBridge();
     if (!global.RestoreStaging?.stageBackup) {
       return { ok: false, error: 'no_restore_staging' };
@@ -148,7 +151,7 @@
     const comparison = global.RestoreStaging.compareWithLocal(staged);
 
     global.AuditLogger?.logSyncEvent?.('MANUAL_RESTORE', {
-      summary: 'بدء استعادة نسخة احتياطية عبر محرك الدمج',
+      summary: 'بدء استيراد/دمج بيانات عبر Staging (migration-only)',
       source: meta.source || 'backup'
     });
 
@@ -163,6 +166,7 @@
 
     const merged = await global.RestoreStaging.applyStagedMerge({
       manual: true,
+      migrationOnly: meta.migrationOnly === true,
       branchId: meta.branchId,
       keepStaging: false
     });

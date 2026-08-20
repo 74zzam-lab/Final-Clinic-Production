@@ -10,18 +10,15 @@
   const NO_PROGRESS_WATCHDOG_MS = 30000;
 
   const RESTORE_STAGES = [
-    { id: 'verify_point', label: 'التحقق من النسخة', weight: 5 },
-    { id: 'local_safety', label: 'إنشاء نسخة أمان محلية', weight: 5 },
-    { id: 'download_db', label: 'تنزيل قاعدة البيانات / الحالة السحابية', weight: 25 },
-    { id: 'download_attachments', label: 'تنزيل المرفقات', weight: 10 },
+    { id: 'verify_point', label: 'التحقق من نقطة السحابة', weight: 5 },
+    { id: 'local_safety', label: 'الاحتفاظ بالحالة المحلية', weight: 5 },
+    { id: 'download_db', label: 'سحب حالة السحابة (metadata)', weight: 25 },
+    { id: 'download_attachments', label: 'تنزيل المرفقات الناقصة', weight: 10 },
     { id: 'checksums', label: 'التحقق من Checksums', weight: 8 },
-    { id: 'decrypt', label: 'فك التشفير والضغط', weight: 10 },
-    { id: 'staging', label: 'الاستعادة إلى Staging', weight: 12 },
-    { id: 'sqlite_integrity', label: 'SQLite integrity check', weight: 8 },
-    { id: 'atomic_swap', label: 'Atomic swap', weight: 7 },
-    { id: 'remote_compare', label: 'مقارنة أحدث التغييرات السحابية', weight: 5 },
-    { id: 'reconcile', label: 'Reconciliation', weight: 3 },
-    { id: 'restart_prep', label: 'تجهيز إعادة التشغيل', weight: 2 },
+    { id: 'cloud_merge', label: 'دمج حالة السحابة (بدون استبدال DB)', weight: 20 },
+    { id: 'remote_compare', label: 'مقارنة أحدث التغييرات السحابية', weight: 10 },
+    { id: 'reconcile', label: 'Reconciliation', weight: 12 },
+    { id: 'restart_prep', label: 'تجهيز المتابعة', weight: 5 },
   ];
 
   let discoveryOpId = 0;
@@ -392,7 +389,7 @@
       // Do NOT download multi‑MB .tdw here without a password / V2 restore execute.
       emit('download_db', { lastActivity: 'سحب حالة السحابة المؤكدة', stageRatio: 0.3 });
       if (global.CloudBootstrap?.hydrateFromDrive) {
-        emit('staging', { lastActivity: 'تطبيق الحالة السحابية على Staging محلي' });
+        emit('staging', { lastActivity: 'دمج حالة السحابة على Staging محلي (sync hydrate)' });
         const hydrated = await global.CloudBootstrap.hydrateFromDrive(null, {
           allowMissingLicense: true,
           skipAnalysis: true,
@@ -424,10 +421,9 @@
         };
       }
 
-      emit('checksums', { stageRatio: 0.5 });
-      emit('sqlite_integrity', { stageRatio: 0.5 });
-      emit('atomic_swap', { stageRatio: 0.8 });
-      emit('remote_compare', { stageRatio: 0.5 });
+      emit('checksums', { stageRatio: 0.5, lastActivity: 'تحقق سلامة metadata السحابة' });
+      emit('cloud_merge', { stageRatio: 0.75, lastActivity: 'دمج السحابة — لا استبدال DB' });
+      emit('remote_compare', { stageRatio: 0.85 });
 
       // Reconciliation AFTER restore — pull newer only, never push, never during discovery
       emit('reconcile', { lastActivity: 'مواءمة ما بعد الاستعادة' });

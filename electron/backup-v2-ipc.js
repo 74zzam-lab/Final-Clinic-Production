@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { dialog } = require('electron');
 const backupV2 = require('./backup-v2-core');
+const restoreAuthority = require('./restore-authority');
 const backupV2Cloud = require('./backup-v2-cloud');
 const backupV2ScopeTruth = require('./backup-v2-scope-truth');
 const { BackupV2Scheduler } = require('./backup-v2-scheduler');
