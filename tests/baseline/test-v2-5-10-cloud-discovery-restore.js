@@ -31,7 +31,7 @@ check(/listFolderShallow/.test(mainDiscovery), 'shallow folder listing present')
 check(/buildDiscoveryProbeFolders/.test(mainDiscovery) && /Backups\/V2/.test(mainDiscovery),
   'discovery probes Backups/V2 and expanded folder layouts');
 check(/buildVersionsProbePaths/.test(mainDiscovery), 'discovery probes multiple versions.json paths');
-check(/DISCOVERY_OVERALL_MS\s*=\s*60000/.test(mainDiscovery), '60s default discovery budget');
+check(/DISCOVERY_OVERALL_MS\s*=\s*150000/.test(mainDiscovery), '150s default discovery budget');
 check(/PRIORITY_PARALLEL/.test(mainDiscovery), 'parallel priority folder batch');
 check(/emitProgress|backup:discoveryProgress/.test(mainDiscovery + preload), 'discovery progress events');
 check(/discovery_timeout/.test(mainDiscovery), 'timeout error codes present');
@@ -48,7 +48,7 @@ check(/restore_in_flight|discovery_in_flight|stale_discovery|stale_restore/.test
 
 // --- BootFlow wiring ---
 check(/CloudDataDiscovery/.test(boot), 'BootFlow uses CloudDataDiscovery');
-check(/سحب بيانات الفرع من السحابة/.test(boot), 'explicit cloud hydrate CTA (not full DR restore)');
+check(/سحب (بيانات الفرع من السحابة|الأحدث \(موصى به\))/.test(boot), 'explicit cloud hydrate CTA (not full DR restore)');
 check(/onProgress/.test(boot), 'BootFlow discovery progress callback');
 check(/DISCOVERY_TIMEOUT_MS/.test(boot), 'BootFlow uses discovery timeout constant');
 check(!/جارٍ الاستعادة من السحابة\.\.\./.test(boot)
@@ -69,7 +69,7 @@ check(/backup:discoverCloudRestorePoints/.test(preload), 'preload allowlist');
 check(/discoverCloudRestorePoints:/.test(preload), 'preload bridge method');
 check(/onDiscoveryProgress/.test(preload), 'preload discovery progress listener');
 check(/backup:discoverCloudRestorePoints/.test(mainJs), 'main IPC handler');
-check(/branchName/.test(mainJs) && /90000/.test(mainJs), 'main IPC branchName + extended timeout cap');
+check(/branchName/.test(mainJs) && /180000/.test(mainJs), 'main IPC branchName + extended timeout cap');
 check(/backup:discoverCloudRestorePoints/.test(rbac), 'RBAC public channel for BootFlow');
 check(/cloud\/cloud-data-discovery\.js/.test(index), 'index.html loads discovery module');
 check(/getAuthedClient/.test(gdrive) && /resolveFolderPath/.test(gdrive) && /findFileByPath/.test(gdrive),
@@ -77,8 +77,9 @@ check(/getAuthedClient/.test(gdrive) && /resolveFolderPath/.test(gdrive) && /fin
 
 // --- Behavioral unit: withTimeout + shallow discovery helpers ---
 const discovery = require(path.join(root, 'electron/cloud-data-discovery.js'));
-assert.strictEqual(discovery.DISCOVERY_OVERALL_MS, 60000);
-assert.strictEqual(discovery.clampTimeoutMs(120000), 90000);
+assert.strictEqual(discovery.DISCOVERY_OVERALL_MS, 150000);
+assert.strictEqual(discovery.clampTimeoutMs(120000), 120000);
+assert.strictEqual(discovery.clampTimeoutMs(200000), 180000);
 assert.strictEqual(discovery.clampTimeoutMs(45000), 45000);
 
 (async () => {

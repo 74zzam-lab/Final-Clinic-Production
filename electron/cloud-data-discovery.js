@@ -6,10 +6,27 @@
 
 const drivePaths = require('./cloud-drive-paths');
 
-const DISCOVERY_OVERALL_MS = 60000;
-const DISCOVERY_MAX_MS = 90000;
+const DISCOVERY_OVERALL_MS = 150000;
+const DISCOVERY_MAX_MS = 180000;
+const NO_PROGRESS_WATCHDOG_MS = 35000;
 const PER_REQUEST_MS = 8000;
 const PRIORITY_PARALLEL = 4;
+const BACKUP_RETENTION_DISPLAY = 3;
+
+/** Work-based stages — percent derived from completed stage weight, not elapsed time. */
+const DISCOVERY_STAGES = Object.freeze([
+  { id: 'oauth', weight: 5, label: 'اتصال Google' },
+  { id: 'center', weight: 7, label: 'التحقق من المركز' },
+  { id: 'license', weight: 8, label: 'فحص التراخيص' },
+  { id: 'organizations', weight: 10, label: 'فحص المؤسسات' },
+  { id: 'branches', weight: 15, label: 'فحص الفروع' },
+  { id: 'datasets', weight: 15, label: 'فحص بيانات الفروع' },
+  { id: 'backups', weight: 18, label: 'فحص Backup V2' },
+  { id: 'versions', weight: 12, label: 'مقارنة revisions' },
+  { id: 'done', weight: 10, label: 'اكتمال الفحص' },
+]);
+
+const STAGE_WEIGHT_TOTAL = DISCOVERY_STAGES.reduce((a, s) => a + s.weight, 0);
 
 function clampTimeoutMs(ms) {
   const n = Number(ms);
@@ -214,10 +231,44 @@ async function probeFileMeta(googleDrive, remotePath) {
 
 function finalizeRestorePoints(out) {
   out.restorePoints.sort((a, b) => String(b.modifiedAt || '').localeCompare(String(a.modifiedAt || '')));
-  const newestBackup = out.restorePoints.find((p) => p.kind === 'backup_file') || null;
+  const backupFiles = out.restorePoints.filter((p) => p.kind === 'backup_file');
+  out.latestBackups = backupFiles.slice(0, BACKUP_RETENTION_DISPLAY);
+  const newestBackup = backupFiles[0] || null;
   const newestAny = out.restorePoints[0] || null;
   out.newest = newestBackup || newestAny;
   return out.newest;
+}
+
+function buildDiscoverySummary(out, options = {}) {
+  const branchIds = new Set();
+  for (const p of out.restorePoints || []) {
+    if (p.branchId) branchIds.add(String(p.branchId));
+  }
+  const localBranches = Array.isArray(options.localBranches) ? options.localBranches.length : 0;
+  const branchCount = Math.max(branchIds.size, localBranches, options.branchId ? 1 : 0);
+  const backupCount = (out.restorePoints || []).filter((p) => p.kind === 'backup_file').length;
+  return {
+    googleConnected: !!out.googleConnected,
+    organizations: out.googleConnected && options.centerId ? 1 : 0,
+    licenses: out.licenseFound ? 1 : (options.centerId ? 1 : 0),
+    branches: branchCount,
+    devices: out.devicesFound || 0,
+    datasets: out.datasetsFound || branchCount,
+    backups: backupCount,
+    attachments: out.attachmentsFound ?? null,
+    syncCheckpoints: (out.restorePoints || []).filter((p) => p.kind === 'sync_checkpoint').length,
+  };
+}
+
+function computeStagePercent(stageId, intraRatio) {
+  const idx = DISCOVERY_STAGES.findIndex((s) => s.id === stageId);
+  if (idx < 0) return 5;
+  let done = 0;
+  for (let i = 0; i < idx; i += 1) done += DISCOVERY_STAGES[i].weight;
+  const stage = DISCOVERY_STAGES[idx];
+  const ratio = Math.min(1, Math.max(0, Number(intraRatio) || 0));
+  const current = stage.weight * ratio;
+  return Math.min(99, Math.round(((done + current) / STAGE_WEIGHT_TOTAL) * 100));
 }
 
 function formatTimeoutSeconds(ms) {
@@ -246,7 +297,13 @@ async function discoverCloudRestorePoints(options = {}) {
     centerName: centerName || null,
     googleConnected: false,
     restorePoints: [],
+    latestBackups: [],
     newest: null,
+    summary: null,
+    licenseFound: false,
+    devicesFound: 0,
+    datasetsFound: 0,
+    attachmentsFound: null,
     status: 'unknown',
     message: null,
     durationMs: 0,
@@ -260,21 +317,60 @@ async function discoverCloudRestorePoints(options = {}) {
 
   const overallDeadline = Date.now() + overallMs;
   let foldersProbed = 0;
+  let lastRealProgressMs = Date.now();
+  let currentStageId = 'oauth';
+  let noProgressWarned = false;
+  const localBranches = Array.isArray(options.localBranches) ? options.localBranches : [];
+
+  function markRealProgress() {
+    lastRealProgressMs = Date.now();
+    noProgressWarned = false;
+  }
 
   function emitProgress(extra = {}) {
+    if (extra.stageId) currentStageId = extra.stageId;
     const elapsedMs = Date.now() - trace.startedMs;
+    const foldersDone = extra.foldersDone != null ? extra.foldersDone : foldersProbed;
+    const foldersTotal = extra.foldersTotal || null;
+    let intraRatio = extra.intraRatio;
+    if (intraRatio == null && foldersTotal > 0) {
+      intraRatio = foldersDone / foldersTotal;
+    }
+    const percent = extra.percent != null
+      ? extra.percent
+      : computeStagePercent(currentStageId, intraRatio != null ? intraRatio : 0);
+
+    let etaMs = null;
+    if (foldersTotal > 0 && foldersDone > 0 && foldersDone < foldersTotal) {
+      const perFolder = elapsedMs / foldersDone;
+      etaMs = Math.round(perFolder * (foldersTotal - foldersDone));
+    }
+
+    if (Date.now() - lastRealProgressMs > NO_PROGRESS_WATCHDOG_MS && !noProgressWarned) {
+      noProgressWarned = true;
+      extra.stalled = true;
+    }
+
+    if (extra.realProgress === true) {
+      lastRealProgressMs = Date.now();
+      noProgressWarned = false;
+    }
     const payload = {
       phase: extra.phase || 'cloud',
+      stageId: currentStageId,
       folder: extra.folder || null,
-      foldersDone: extra.foldersDone != null ? extra.foldersDone : foldersProbed,
-      foldersTotal: extra.foldersTotal || null,
+      foldersDone,
+      foldersTotal,
       foundCount: out.restorePoints.length,
+      backupCount: (out.restorePoints || []).filter((p) => p.kind === 'backup_file').length,
       elapsedMs,
       budgetMs: overallMs,
-      percent: extra.percent != null
-        ? extra.percent
-        : Math.min(95, Math.round((elapsedMs / overallMs) * 90)),
-      label: extra.label || 'فحص Google Drive (بيانات وصفية فقط)',
+      etaMs,
+      percent,
+      stalled: !!extra.stalled,
+      stalledMs: extra.stalled ? Date.now() - lastRealProgressMs : 0,
+      label: extra.label || DISCOVERY_STAGES.find((s) => s.id === currentStageId)?.label || 'فحص Google Drive',
+      summary: out.summary || null,
     };
     if (typeof options.onProgress === 'function') {
       try { options.onProgress(payload); } catch { /* observer only */ }
@@ -337,13 +433,19 @@ async function discoverCloudRestorePoints(options = {}) {
     return added;
   }
 
-  async function probeBackupFolder(folder, foldersTotal) {
+  async function probeBackupFolder(folder, foldersTotal, listOpts = {}) {
     if (Date.now() >= overallDeadline) return false;
-    emitProgress({ phase: 'folders', folder, foldersTotal, label: `فحص مجلد: ${folder}` });
+    emitProgress({
+      phase: 'folders',
+      stageId: 'backups',
+      folder,
+      foldersTotal,
+      label: `فحص مجلد: ${folder}`,
+    });
     try {
       const listed = await step(`list_shallow:${folder}`, () => listFolderShallow(googleDrive, folder, {
-        pageSize: 40,
-        maxPages: 1,
+        pageSize: listOpts.pageSize || 40,
+        maxPages: listOpts.maxPages || 1,
       }), PER_REQUEST_MS);
       ingestListedItems(listed, folder);
     } catch (err) {
@@ -351,12 +453,19 @@ async function discoverCloudRestorePoints(options = {}) {
       // folder missing / access — continue other probes
     }
     foldersProbed += 1;
-    emitProgress({ phase: 'folders', folder, foldersDone: foldersProbed, foldersTotal });
+    emitProgress({
+      phase: 'folders',
+      stageId: 'backups',
+      folder,
+      foldersDone: foldersProbed,
+      foldersTotal,
+      realProgress: true,
+    });
     return true;
   }
 
   try {
-    emitProgress({ phase: 'oauth', label: 'التحقق من اتصال Google…', percent: 2 });
+    emitProgress({ phase: 'oauth', stageId: 'oauth', label: 'التحقق من اتصال Google…', percent: computeStagePercent('oauth', 0.5), realProgress: true });
 
     // 1) Google connection / token
     const status = await step('oauth_status', async () => {
@@ -382,6 +491,8 @@ async function discoverCloudRestorePoints(options = {}) {
       return out;
     }
 
+    emitProgress({ phase: 'center', stageId: 'center', label: 'التحقق من المركز…', percent: computeStagePercent('center', 0.5), realProgress: true });
+
     if (!centerId) {
       out.status = 'missing_center';
       out.message = 'لا يوجد centerId محلي للبحث عن بيانات سحابية.';
@@ -391,7 +502,19 @@ async function discoverCloudRestorePoints(options = {}) {
       return out;
     }
 
-    // 2) Shallow backup folder probes — priority batch in parallel, then sequential
+    emitProgress({ phase: 'license', stageId: 'license', label: 'فحص الترخيص…', percent: computeStagePercent('license', 0.3), realProgress: true });
+    try {
+      const licPath = drivePaths.buildV2Path(centerId, 'license.json');
+      const licMeta = await step('license_meta', () => probeFileMeta(googleDrive, licPath), PER_REQUEST_MS);
+      out.licenseFound = !!licMeta.found;
+    } catch (err) {
+      if (err.code === 'DISCOVERY_TIMEOUT') throw err;
+    }
+
+    emitProgress({ phase: 'organizations', stageId: 'organizations', label: 'فحص المؤسسة…', percent: computeStagePercent('organizations', 0.5), realProgress: true });
+    emitProgress({ phase: 'branches', stageId: 'branches', label: 'فحص الفروع…', percent: computeStagePercent('branches', 0.2), realProgress: true });
+
+    // 2) Shallow backup folder probes — priority batch in parallel, then sequential until 3 backups or all folders
     const backupFolders = buildDiscoveryProbeFolders({
       centerId, centerName, branchId, branchName,
     });
@@ -402,30 +525,48 @@ async function discoverCloudRestorePoints(options = {}) {
 
     emitProgress({
       phase: 'folders',
+      stageId: 'backups',
       foldersDone: 0,
       foldersTotal,
       label: `فحص ${foldersTotal} مساراً معروفاً على Drive…`,
-      percent: 8,
+      percent: computeStagePercent('backups', 0.05),
     });
 
-    await Promise.all(priorityBatch.map((folder) => probeBackupFolder(folder, foldersTotal)));
+    const v2DeepList = { pageSize: 50, maxPages: 3 };
+    await Promise.all(priorityBatch.map((folder) => probeBackupFolder(
+      folder,
+      foldersTotal,
+      folder === 'Backups/V2' ? v2DeepList : {}
+    )));
 
-    const foundInPriority = out.restorePoints.some((p) => p.kind === 'backup_file');
-    if (!foundInPriority) {
+    const backupCount = out.restorePoints.filter((p) => p.kind === 'backup_file').length;
+    if (backupCount < BACKUP_RETENTION_DISPLAY) {
       for (const folder of remainingFolders) {
         if (Date.now() >= overallDeadline) {
           out.partialScan = foldersProbed < foldersTotal;
           break;
         }
-        await probeBackupFolder(folder, foldersTotal);
+        if (out.restorePoints.filter((p) => p.kind === 'backup_file').length >= BACKUP_RETENTION_DISPLAY
+          && folder !== 'Backups/V2') {
+          continue;
+        }
+        await probeBackupFolder(folder, foldersTotal, folder.includes('Backups/V2') ? v2DeepList : {});
       }
     } else {
-      foldersProbed = Math.max(foldersProbed, priorityBatch.length);
       out.partialScan = remainingFolders.length > 0;
     }
 
-    // 3) Sync checkpoint / versions.json metadata only (file meta, not full table sync)
-    emitProgress({ phase: 'versions', label: 'فحص نقاط المزامنة (versions.json)…', percent: 85 });
+    out.datasetsFound = Math.max(localBranches.length, branchId ? 1 : 0);
+    try {
+      const devicesPath = drivePaths.buildV2Path(centerId, 'devices.json');
+      const devMeta = await step('devices_meta', () => probeFileMeta(googleDrive, devicesPath), PER_REQUEST_MS);
+      if (devMeta.found && devMeta.item?.size > 2) out.devicesFound = 1;
+    } catch (err) {
+      if (err.code === 'DISCOVERY_TIMEOUT') throw err;
+    }
+
+    emitProgress({ phase: 'datasets', stageId: 'datasets', label: 'تلخيص مجموعات البيانات…', percent: computeStagePercent('datasets', 0.8), realProgress: true });
+    emitProgress({ phase: 'versions', stageId: 'versions', label: 'فحص نقاط المزامنة (versions.json)…', percent: computeStagePercent('versions', 0.1), realProgress: true });
     const versionsPaths = buildVersionsProbePaths({
       centerId, centerName, branchId, branchName,
     });
@@ -462,7 +603,19 @@ async function discoverCloudRestorePoints(options = {}) {
     }
 
     finalizeRestorePoints(out);
-    emitProgress({ phase: 'done', percent: 100, label: 'اكتمل الفحص' });
+    out.summary = buildDiscoverySummary(out, {
+      centerId,
+      branchId,
+      localBranches,
+    });
+    emitProgress({
+      phase: 'done',
+      stageId: 'done',
+      percent: 100,
+      label: 'اكتمل الفحص',
+      realProgress: true,
+      summary: out.summary,
+    });
 
     if (!out.newest) {
       out.status = out.partialScan ? 'timeout' : 'not_found';
@@ -507,6 +660,9 @@ async function discoverCloudRestorePoints(options = {}) {
 module.exports = {
   DISCOVERY_OVERALL_MS,
   DISCOVERY_MAX_MS,
+  NO_PROGRESS_WATCHDOG_MS,
+  BACKUP_RETENTION_DISPLAY,
+  DISCOVERY_STAGES,
   PER_REQUEST_MS,
   clampTimeoutMs,
   withTimeout,
@@ -515,5 +671,8 @@ module.exports = {
   isBackupArtifact,
   buildDiscoveryProbeFolders,
   buildVersionsProbePaths,
+  buildDiscoverySummary,
+  computeStagePercent,
+  finalizeRestorePoints,
   discoverCloudRestorePoints,
 };

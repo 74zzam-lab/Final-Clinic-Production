@@ -6473,7 +6473,9 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
           <div class="card-title">🗄️ النسخ الاحتياطي واستعادة الكوارث</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" type="button" onclick="runBackupV2Create()">💾 نسخ كاملة الآن</button>
-            <button class="btn btn-accent btn-sm" type="button" onclick="scanDriveBackupsV2()" aria-label="Scan Google Drive backups">🔍 فحص Drive</button>
+            <button class="btn btn-accent btn-sm" type="button" onclick="scanDriveBackupsV2()" aria-label="Cloud scan for backups">🔍 فحص السحابة</button>
+            <div id="bk-cloud-scan-progress" class="bf-source-meta" style="margin-top:6px;display:none"></div>
+            <div id="bk-cloud-scan-summary" class="bf-source-meta" style="margin-top:6px;display:none"></div>
             <button class="btn btn-accent btn-sm" type="button" onclick="runBackupV2RestoreManual()" aria-label="Restore backup file via wizard">♻️ استعادة من ملف</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="runBackupV2RestoreLatest()" aria-label="Restore latest authorized backup">⏫ أحدث نسخة (محلي + Drive)</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="refreshBackupV2HistoryUi()" aria-label="Refresh backup history">📜 سجل النسخ</button>
@@ -16669,6 +16671,8 @@ window.__LICENSE_VAULT_DEFAULTS__ = window.__LICENSE_VAULT_DEFAULTS__ || {
 <script src="cloud/setup-state-dom.js"></script>
 <script src="cloud/bootstrap.js"></script>
 <script src="cloud/cloud-data-discovery.js"></script>
+<script src="cloud/sync-lifecycle.js"></script>
+<script src="cloud/pre-install-safety-snapshot.js"></script>
 <script src="cloud/boot-flow-ui.js"></script>
 <script src="cloud/activation-sync-defaults.js"></script>
 <script src="cloud/cloud-v2-init.js"></script>
@@ -17606,14 +17610,51 @@ async function refreshBackupV2HistoryUi() {
 }
 
 async function scanDriveBackupsV2() {
-  notify('⏳ جاري فحص Google Drive...', 'warning');
+  const progressEl = document.getElementById('bk-cloud-scan-progress');
+  const summaryEl = document.getElementById('bk-cloud-scan-summary');
+  if (progressEl) {
+    progressEl.style.display = 'block';
+    progressEl.textContent = '⏳ جاري فحص السحابة…';
+  }
+  notify('⏳ جاري فحص السحابة (نفس محرك معالج الإعداد)…', 'warning');
   try {
     const status = await BackupBridge.getCloudStatus('google');
     if (!status?.connected) {
       notify('⚠️ Google Drive غير متصل — اربط الحساب من بطاقة OAuth أولاً', 'danger');
+      if (progressEl) progressEl.textContent = '⚠️ Google غير متصل';
       return;
     }
-    const cloudEntries = await listBackupV2CloudEntries();
+    const Discovery = window.CloudDataDiscovery;
+    if (!Discovery?.runCloudScanForBackupPage) {
+      notify('⚠️ محرك فحص السحابة غير متاح — حدّث التطبيق', 'danger');
+      return;
+    }
+    const scan = await Discovery.runCloudScanForBackupPage({
+      onProgress: (snap) => {
+        if (!progressEl || !snap) return;
+        const eta = snap.etaMs > 0 ? ` · ~${Math.round(snap.etaMs / 1000)}ث متبقية` : '';
+        progressEl.textContent = `${snap.stageLabel || 'فحص'} — ${snap.percent || 0}% · ${Math.round((snap.elapsedMs || 0) / 1000)}ث${eta}`;
+      },
+    });
+    if (scan.ok === false && scan.error === 'discovery_in_flight') {
+      notify('⚠️ فحص جاري بالفعل', 'warning');
+      return;
+    }
+    const latest = scan.latestBackups || [];
+    const cloudEntries = latest.map((bp, i) => ({
+      id: bp.id || bp.path,
+      label: `#${i + 1} ${bp.name || 'Backup V2'}${i === 0 ? ' (الأحدث)' : ''}`,
+      size: bp.sizeBytes || 0,
+      modifiedAt: bp.modifiedAt,
+      path: bp.path,
+      source: 'cloud_discovery',
+      validation: bp.validation || 'metadata_ok',
+      scope: bp.scope || null,
+    }));
+    if (summaryEl && scan.summary && Discovery.formatDiscoverySummaryHtml) {
+      summaryEl.style.display = 'block';
+      summaryEl.innerHTML = Discovery.formatDiscoverySummaryHtml(scan.summary);
+    }
     await refreshBackupV2HistoryUi();
     const sumCloud = document.getElementById('bk-sum-cloud');
     if (sumCloud && cloudEntries.length) {
@@ -17623,16 +17664,15 @@ async function scanDriveBackupsV2() {
       sumCloud.textContent = cloudEntries.length ? '—' : 'لا توجد نسخ V2 كاملة';
     }
     if (!cloudEntries.length) {
+      if (progressEl) progressEl.textContent = 'ℹ️ لا توجد نسخ Backup V2 في نطاق المركز';
       notify('ℹ️ لا توجد نسخ Backup V2 كاملة على Drive — أنشئ «نسخ كاملة الآن» مع تفعيل الرفع', 'warning');
       return;
     }
-    const lines = cloudEntries.slice(0, 10).map((e, i) =>
-      `${i + 1}. ${e.label} — ${formatBackupBytes(e.size)} — ${(e.modifiedAt || '').slice(0, 19)}`
-    ).join('\n');
-    notify(`✅ وُجدت ${cloudEntries.length} نسخة كاملة على Drive`, 'success');
-    console.log('[Drive backup scan]\n' + lines);
+    if (progressEl) progressEl.textContent = `✅ ${cloudEntries.length} نسخة (آخر 3) — اختر من السجل للاستعادة`;
+    notify(`✅ وُجدت ${cloudEntries.length} نسخة ضمن retention (آخر 3)`, 'success');
   } catch (err) {
-    notify('⚠️ فشل فحص Drive: ' + (err?.message || err), 'danger');
+    if (progressEl) progressEl.textContent = '⚠️ فشل الفحص';
+    notify('⚠️ فشل فحص السحابة: ' + (err?.message || err), 'danger');
   }
 }
 

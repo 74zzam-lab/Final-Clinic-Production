@@ -33,3 +33,13 @@ Path: `dist/win-unpacked/Hijama Management System.exe`
 | 8 Google OAuth | **PENDING** | Cannot complete on Linux/Wine |
 
 **Authorized UAT must continue on native Windows** using the EXE with SHA-256 above only. Do not use `npm start` or any other build.
+
+## RC Hotfix Round 1 — Windows retest checklist (after new build)
+
+1. EXISTING org step: Center ID + name read-only
+2. NEW org step: name editable, Center ID readonly
+3. Cloud discovery: stage-based % + ETA + summary + 3 backups table
+4. Backup page «فحص السحابة»: same engine/progress as wizard
+5. Initial sync: lifecycle label + not-ready reason + conflict button if any
+6. Existing profile upgrade: `.tdw` safety snapshot before migration
+7. Full wizard NEW + EXISTING end-to-end per mandatory order
