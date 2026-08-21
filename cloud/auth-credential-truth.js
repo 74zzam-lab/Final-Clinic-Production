@@ -40,7 +40,10 @@
 
   async function ensureAuthCredentialsReady() {
     if (global.SqliteBridge?.bootFromSQLiteSoTOnce) {
-      await global.SqliteBridge.bootFromSQLiteSoTOnce();
+      await Promise.race([
+        global.SqliteBridge.bootFromSQLiteSoTOnce(),
+        new Promise((resolve) => setTimeout(() => resolve({ ok: false, timedOut: true }), 12000)),
+      ]);
     }
     syncUsersFromAuthoritativeStore();
     if (hasRestoredOwnerCredential(global.users)) {

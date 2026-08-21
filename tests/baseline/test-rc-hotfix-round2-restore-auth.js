@@ -24,6 +24,8 @@ check(/auth-credential-truth\.js/.test(index), 'index loads auth-credential-trut
 check(/bootstrap-google-disconnect\.js/.test(index), 'index loads bootstrap-google-disconnect');
 check(/restore-verification\.js/.test(index), 'index loads restore-verification');
 check(/reconcileAuthUsersAfterHydrate/.test(index), 'startup reconciles auth users after hydrate');
+check(/Non-blocking: SQLite user hydrate/.test(index) || /startup auth reconcile \(background\)/.test(index),
+  'auth reconcile is non-blocking on startup');
 check(/ensureAuthCredentialsReady/.test(index) && /doLogin/.test(index), 'doLogin awaits credential ready');
 check(/cp-return-login/.test(index) && /cancelForcedPasswordChange/.test(index), 'forced password return to login');
 check(/__assignUsersClosure/.test(index), 'users closure hook for hydrate sync');

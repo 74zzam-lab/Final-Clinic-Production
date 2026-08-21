@@ -4092,11 +4092,10 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         function clearPendingLoginLicenseStatus(reason) {
           var el = document.getElementById('login-license-status');
           if (!el || !/جار[ٍي]?\s*التحقق/.test(String(el.textContent || ''))) return;
-          el.textContent = reason || '⛔ تعذّر إكمال التحقق بسرعة — الدخول للموظفين فقط (قراءة)';
+          el.textContent = reason || 'ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو دخول موظف (قراءة)';
           el.style.color = '#ffa05a';
         }
-        setTimeout(function () { clearPendingLoginLicenseStatus(); }, 5000);
-        setTimeout(function () { clearPendingLoginLicenseStatus(); }, 10000);
+        setTimeout(function () { clearPendingLoginLicenseStatus(); }, 8000);
       })();
       </script>
       <div class="login-setup-hint" id="login-setup-hint" role="status"></div>
@@ -9584,7 +9583,6 @@ const defaultUsers = [
   /* V2-5.9: seeded Owner (local auth). Google never implies Owner. mustChangePassword forced until changed. */
   { id:'3', fullName:'مالك المركز', username:'owner', password: OWNER_SEED_PASSWORD_HASH, role:'owner', empNum:'000', active:true, branchId:'BR-MAIN', branchScope:['*'], canSwitchBranch:true, mustChangePassword:true, seedDefaultPassword:true }
 ];
-// V2-5.9: seed Owner only when none exists — deferred until SQLite hydrate (startup).
 let users = DB.get('users', defaultUsers);
 global.__assignUsersClosure = (store) => { users = store; };
 if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.migrateUsersBranchIds) {
@@ -9594,6 +9592,21 @@ if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.migrateUse
     DB.set('users', users);
   }
 }
+// V2-5.9: seed Owner when none exists — quick local seed; authoritative SQLite sync happens in doLogin/background.
+try {
+  const storedUsers = DB.get('users', null);
+  const hasRestoredOwner = Array.isArray(storedUsers) && storedUsers.some((u) => u
+    && String(u.role || '').toLowerCase() === 'owner'
+    && u.active !== false
+    && u.password
+    && u.password !== OWNER_SEED_PASSWORD_HASH
+    && !u.seedDefaultPassword);
+  if (hasRestoredOwner) {
+    users = storedUsers;
+  } else {
+    users = ensureOwnerSeedAccount(users);
+  }
+} catch { /* empty */ }
 let currentUser = null;
 let _appAuthed = false;
 let _authPending = false;
@@ -26965,8 +26978,10 @@ function finalizeLicCheckUi(reason) {
     try { _licStatus = 'none'; _licBlocked = false; } catch { /* TDZ */ }
   }
   statusEl.textContent = reason
-    || '⛔ تعذّر إكمال التحقق بسرعة — الدخول للموظفين فقط (قراءة)';
-  statusEl.style.color = '#ffa05a';
+    || (licStatus === 'expired'
+      ? '❌ انتهت صلاحية الترخيص — الدخول للموظفين فقط (قراءة)'
+      : 'ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو دخول موظف (قراءة)');
+  statusEl.style.color = licStatus === 'expired' ? '#ff8888' : '#ffa05a';
   try { _licApplyLoginRestrictions(); } catch { /* empty */ }
   try { licUpdateLoginDevNotice(); } catch { /* empty */ }
   try { licUpdateLoginDriveBootstrapPanel(); } catch { /* empty */ }
@@ -27134,7 +27149,7 @@ async function licCheck() {
     run(),
     new Promise((resolve) => setTimeout(() => {
       if (stillCurrent()) {
-        finalizeLicCheckUi('⛔ تعذّر إكمال التحقق بسرعة — الدخول للموظفين فقط (قراءة)');
+        finalizeLicCheckUi('ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو دخول موظف (قراءة)');
       }
       resolve(false);
     }, 3500))
@@ -28153,13 +28168,6 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
     console.warn('startup restart consume:', e);
   }
   ensureUserLoginScreenVisible();
-  try {
-    if (typeof reconcileAuthUsersAfterHydrate === 'function') {
-      await withTimeout(reconcileAuthUsersAfterHydrate(), 8000, 'reconcileAuthUsersAfterHydrate');
-    }
-  } catch (err) {
-    console.warn('startup auth reconcile:', err);
-  }
   filterLoginUsers();
   applyCenterBranding();
   try { BootFlow?.applyLoginGate?.(); } catch { /* empty */ }
@@ -28182,6 +28190,18 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
     console.warn('startup licCheck:', err);
   }
   try { finalizeLicCheckUi(); } catch { /* empty */ }
+
+  // Non-blocking: SQLite user hydrate must not delay login/setup UI or licCheck.
+  void Promise.resolve().then(async () => {
+    try {
+      if (typeof reconcileAuthUsersAfterHydrate === 'function') {
+        await reconcileAuthUsersAfterHydrate();
+        filterLoginUsers();
+      }
+    } catch (err) {
+      console.warn('startup auth reconcile (background):', err);
+    }
+  });
   try {
     if (typeof licFinalizeFeatureState === 'function') {
       await withTimeout(licFinalizeFeatureState(), 2500, 'licFinalizeFeatureState');
