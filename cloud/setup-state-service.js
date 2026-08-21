@@ -189,7 +189,7 @@
       states: STATES,
       isReady: resolved.state === STATES.READY,
       needsBootFlow: ![STATES.READY, STATES.OWNER_PASSWORD_CHANGE_REQUIRED].includes(resolved.state),
-      showLoginBootCta: ![STATES.READY, STATES.OWNER_PASSWORD_CHANGE_REQUIRED, STATES.RESTART_REQUIRED].includes(resolved.state),
+      showLoginBootCta: ![STATES.READY, STATES.OWNER_PASSWORD_CHANGE_REQUIRED].includes(resolved.state),
       showCenterSupport: resolved.state === STATES.ERROR_RECOVERABLE || !!options.supportMode,
       syncReadiness,
       at: new Date().toISOString(),

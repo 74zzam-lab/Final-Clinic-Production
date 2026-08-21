@@ -258,9 +258,8 @@
       if (bootParam === '0') return false;
       if (bootParam === '1' || bootParam === 'force') return true;
     } catch { /* empty */ }
-    // V2-5.9: NEVER auto-open solely because Owner is missing — Google ≠ Owner.
-    // Only open when the activation journey itself is incomplete.
-    return needsBootScreen() && !global.currentUser;
+    // Never auto-open on cold start — user opens setup from login CTA (بدء الإعداد).
+    return false;
   }
 
   function canShowLogin() {
@@ -947,6 +946,29 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
         if (hasGoogle() && provEmail) emailEl.textContent = '✅ ' + provEmail;
         const btn = addBtn(actions, oauthInFlight ? '⏳ جارٍ الربط...' : '🔗 ربط Google', 'btn-primary', () => runGoogleConnect(), oauthInFlight);
         btn.id = 'bf-google-connect-btn';
+        if (hasGoogle()) {
+          addBtn(actions, '🔌 فصل حساب Google', 'btn-ghost', async () => {
+            if (!window.confirm('فصل حساب Google ومسح بيانات الإعداد المرتبطة (الترخيص/المركز/الفرع)؟')) return;
+            setStatus('⏳ جاري فصل Google...');
+            const res = await global.BootstrapGoogleDisconnect?.disconnectGoogleDuringBootstrap?.();
+            if (!res?.ok) {
+              setStatus('❌ ' + (res?.error || 'disconnect_failed'), true);
+              return;
+            }
+            setStatus('✅ تم فصل Google — يمكنك ربط حساب آخر');
+            renderStepUI(loadWizard());
+          }, oauthInFlight);
+          addBtn(actions, '🔄 تغيير حساب Google', 'btn-secondary', async () => {
+            if (!window.confirm('سيتم فصل الحساب الحالي ثم ربط حساب Google جديد. متابعة؟')) return;
+            setStatus('⏳ جاري فصل Google...');
+            const res = await global.BootstrapGoogleDisconnect?.disconnectGoogleDuringBootstrap?.();
+            if (!res?.ok) {
+              setStatus('❌ ' + (res?.error || 'disconnect_failed'), true);
+              return;
+            }
+            await runGoogleConnect();
+          }, oauthInFlight);
+        }
         if (hasGoogle() && hasValidLicense()) setStatus('✅ Google متصل والترخيص جاهز — تابع للمؤسسة/الفرع');
         else if (hasGoogle()) setStatus('✅ Google متصل — إن لم يُعثر على تفعيل أدخل المفتاح في الخطوة التالية');
         break;
@@ -1281,7 +1303,30 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
                 }
                 return;
               }
-              markRestore('cloud', '✅ تم سحب/دمج بيانات السحابة — انتقل للمزامنة');
+              setStatus('⏳ جاري التحقق من البيانات المستعادة...');
+              try { await global.reconcileAuthUsersAfterHydrate?.(); } catch { /* empty */ }
+              const verified = await global.RestoreVerification?.verifyPostRestore?.({
+                kind: 'cloud_hydrate',
+                point,
+                source: 'bootflow_cloud_restore',
+                requireOwner: false,
+                requireData: false,
+              });
+              if (!verified?.verified) {
+                setStatus(
+                  `❌ فشل التحقق بعد الاستعادة: ${verified?.error || 'restore_verification_failed'}`,
+                  true
+                );
+                if (progressHost) {
+                  progressHost.innerHTML += `<p class="tdw-field-error">لم تُكمل خطوة الاستعادة — البيانات غير مؤكدة.</p>`;
+                }
+                return;
+              }
+              try { await global.reconcileAuthUsersAfterHydrate?.(); } catch { /* empty */ }
+              if (progressHost && global.RestoreVerification?.formatSummaryHtml) {
+                progressHost.innerHTML += global.RestoreVerification.formatSummaryHtml(verified.summary);
+              }
+              markRestore('cloud', '✅ تم سحب/دمج بيانات السحابة والتحقق — انتقل للمزامنة');
               setStatus('✅ تم سحب السحابة — المزامنة التالية تسحب الأحدث فقط');
             } catch (e) {
               setStatusFromErr(e, 'restore_interrupted');
@@ -1315,14 +1360,30 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             metaHtml: `المسار: <code dir="ltr">${local.path || '—'}</code><br>الحالة: ${local.message || local.status || '—'}`,
           });
           addBtn(localCard.actions, 'استخدام البيانات المحلية', 'btn-secondary', async () => {
-            markRestore('local', '✅ سيتم استخدام قاعدة البيانات المحلية الحالية');
-            try { global.ActivationSyncDefaults?.applyDefaults?.({ startSync: true }); } catch { /* empty */ }
             try {
               setStatus('⏳ مواءمة ما بعد الاستعادة (سحب الأحدث — بلا رفع فوري)...');
               if (global.RestoreReconciliation?.afterRestoreDataSourceSelected) {
                 await global.RestoreReconciliation.afterRestoreDataSourceSelected('local');
               }
-            } catch { /* empty */ }
+              const verified = await global.RestoreVerification?.verifyPostRestore?.({
+                kind: 'local',
+                source: 'bootflow_local',
+                requireOwner: true,
+                requireData: false,
+              });
+              if (!verified?.verified) {
+                setStatus('❌ فشل التحقق من البيانات المحلية: ' + (verified?.error || 'unknown'), true);
+                return;
+              }
+              try { await global.reconcileAuthUsersAfterHydrate?.(); } catch { /* empty */ }
+              if (progressHost && global.RestoreVerification?.formatSummaryHtml) {
+                progressHost.innerHTML = global.RestoreVerification.formatSummaryHtml(verified.summary);
+              }
+              markRestore('local', '✅ تم التحقق من البيانات المحلية — تابع للمزامنة');
+            } catch (e) {
+              setStatusFromErr(e, 'restore_interrupted');
+            }
+            try { global.ActivationSyncDefaults?.applyDefaults?.({ startSync: true }); } catch { /* empty */ }
           });
 
           // --- Local backups / file ---

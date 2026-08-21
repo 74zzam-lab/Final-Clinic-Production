@@ -109,10 +109,10 @@ async function main() {
     return { ownerLogin: true, mintGuard: true, hubMutateOwnerOnly: true };
   });
 
-  await scenario('S07-owner-login-expired-license', 'Owner/Admin can log in when license expired/none', async () => {
+  await scenario('S07-owner-login-expired-license', 'All roles can log in read-only when license expired/none', async () => {
     const index = readSrc('index.html');
-    if (!/_licStatus === 'expired'[\s\S]{0,400}allowWithoutValidLicense|role === 'owner'/.test(index.replace(/\n/g, ' '))) {
-      if (!/allowWithoutValidLicense/.test(index)) throw new Error('expired-license login path missing');
+    if (!/_licStatus === 'expired'[\s\S]{0,400}LicenseReadOnlyMode|read-only|finishLogin/.test(index.replace(/\n/g, ' '))) {
+      if (!/LicenseReadOnlyMode/.test(index)) throw new Error('expired-license read-only login path missing');
     }
     return { ownerBypassExpired: true };
   });

@@ -133,13 +133,15 @@
     return st;
   }
 
-  function mountBackupHistory(hostSelector, entries) {
+  function mountBackupHistory(hostSelector, entries, options) {
+    options = options || {};
     if (typeof document === 'undefined' || !global.BackupHistory) return null;
     const host = typeof hostSelector === 'string' ? document.querySelector(hostSelector) : hostSelector;
     if (!host) return null;
-    let box = document.getElementById(HISTORY_ID);
+    const panelId = options.panelId || HISTORY_ID;
+    let box = host.querySelector('#' + panelId) || document.getElementById(panelId);
     if (!box) {
-      box = el('div', { id: HISTORY_ID });
+      box = el('div', { id: panelId });
       box.style.cssText = 'margin-top:12px';
       host.appendChild(box);
     }
@@ -152,7 +154,8 @@
       return n + ' B';
     };
     const list = global.BackupHistory.sortByNewest((entries || []).map((e) => global.BackupHistory.normalizeEntry(e)));
-    box.innerHTML = `<div class="card-title" style="font-size:14px;margin-bottom:8px">سجل Backup V2 — محلي + Google Drive</div>
+    const title = options.title || 'سجل Backup V2 — محلي + Google Drive';
+    box.innerHTML = `<div class="card-title" style="font-size:14px;margin-bottom:8px">${title}</div>
       <div style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto">
       ${list.map((e) => {
         const src = e.source === 'cloud' ? '☁️ Drive' : '💻 محلي';

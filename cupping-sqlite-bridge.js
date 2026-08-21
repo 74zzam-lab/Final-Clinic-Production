@@ -199,7 +199,12 @@
     else if (tableKey === 'doctors') global.doctors = value;
     else if (tableKey === 'attendance') global.attendance = value;
     else if (tableKey === 'expenses') global.expenses = value;
-    else if (tableKey === 'users') global.users = value;
+    else if (tableKey === 'users') {
+      global.users = value;
+      if (typeof globalThis.__assignUsersClosure === 'function') {
+        try { globalThis.__assignUsersClosure(value); } catch { /* empty */ }
+      }
+    }
     else if (tableKey === 'services') global.services = value;
     else if (tableKey === 'packages') global.packages = value;
     else if (tableKey === 'settings' && value && !Array.isArray(value)) global.settings = value;
@@ -637,6 +642,9 @@
 
   async function commitOperational(tableKey, records, options) {
     options = options || {};
+    if (global.LicenseReadOnlyMode?.isDbKeyBlocked?.(tableKey)) {
+      return { ok: false, error: 'license_readonly_mode' };
+    }
     const writeGate = assertOperationalWriteBranch();
     if (!writeGate.ok) return { ok: false, error: writeGate.error || 'operational_write_branch_required' };
     const db = api();
@@ -696,6 +704,9 @@
   }
 
   async function commitKv(key, value) {
+    if (global.LicenseReadOnlyMode?.isDbKeyBlocked?.(key)) {
+      return { ok: false, error: 'license_readonly_mode' };
+    }
     const writeGate = assertOperationalWriteBranch();
     if (!writeGate.ok) return { ok: false, error: writeGate.error || 'operational_write_branch_required' };
     const db = api();

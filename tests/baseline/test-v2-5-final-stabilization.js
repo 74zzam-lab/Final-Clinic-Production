@@ -123,7 +123,7 @@ function main() {
     const ext = fs.readFileSync(path.join(root, 'cupping-ext-modules.js'), 'utf8');
     check(/owner:\s*'المالك'/.test(ext), 'owner display name');
     check(/فقط المالك \(Owner\) يمكنه تعيين دور Owner|فقط المالك يمكنه إنشاء حساب Owner/.test(index), 'owner mint guard');
-    check(/allowWithoutValidLicense|role === 'owner'/.test(index) && /_licStatus === 'expired'/.test(index), 'owner login when license expired');
+    check(/LicenseReadOnlyMode|read-only|قراءة فقط/.test(index) && /_licStatus === 'expired'/.test(index), 'all-role read-only login when license expired');
 
     // 9) token-store encryption present
     const ts = fs.readFileSync(path.join(root, 'electron/cloud-providers/token-store.js'), 'utf8');
