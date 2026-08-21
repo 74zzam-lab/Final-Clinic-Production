@@ -199,7 +199,12 @@
     else if (tableKey === 'doctors') global.doctors = value;
     else if (tableKey === 'attendance') global.attendance = value;
     else if (tableKey === 'expenses') global.expenses = value;
-    else if (tableKey === 'users') global.users = value;
+    else if (tableKey === 'users') {
+      global.users = value;
+      if (typeof global.__assignUsersClosure === 'function') {
+        try { global.__assignUsersClosure(value); } catch { /* empty */ }
+      }
+    }
     else if (tableKey === 'services') global.services = value;
     else if (tableKey === 'packages') global.packages = value;
     else if (tableKey === 'settings' && value && !Array.isArray(value)) global.settings = value;

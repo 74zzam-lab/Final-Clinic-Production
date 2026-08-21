@@ -136,6 +136,8 @@ const baseline = [
   ['tests/baseline/test-v2-5-10-production-lock.js', 'v2-5.10:production-lock'],
   ['tests/baseline/test-v2-5-10-production-lock-ux.js', 'v2-5.10:production-lock-ux'],
   ['tests/baseline/test-v2-5-10-category-b.js', 'v2-5.10:category-b'],
+  ['tests/baseline/test-rc-hotfix-round1-bootstrap.js', 'rc-hotfix-round1:bootstrap'],
+  ['tests/baseline/test-rc-hotfix-round2-restore-auth.js', 'rc-hotfix-round2:restore-auth'],
   ['scripts/v2-5-8-scenarios-all.cjs', 'v2-5.8:scenarios'],
   ['scripts/windows-uat/v2-5-8-activation-runtime.cjs', 'v2-5.8:windows-uat'],
   ['tests/baseline/test-hybrid-sot-foundation.js', 'hybrid:sot-foundation'],

@@ -3934,6 +3934,26 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
 .backup-stack-grid {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px;
 }
+.backup-dual-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 14px;
+}
+.backup-panel {
+  border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--surface);
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+}
+.backup-panel h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.backup-panel__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.backup-panel__meta {
+  font-size: 11px; color: var(--text-muted); line-height: 1.65;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px;
+}
+.backup-panel__meta strong { display: block; color: var(--text); font-size: 12px; }
+.backup-panel__table { min-height: 120px; max-height: 280px; overflow: auto; }
+.backup-combined-actions {
+  margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border);
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+}
+.backup-combined-actions span { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-inline-end: 4px; }
 .backup-role-badge {
   display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 99px; margin-bottom: 8px;
 }
@@ -3954,7 +3974,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
 }
 @media (max-width: 900px) {
   .exp-stats-grid { grid-template-columns: 1fr !important; }
-  .backup-config-grid, .set-system-grid, .backup-stack-grid, .set-systems-toggle-grid { grid-template-columns: 1fr !important; }
+  .backup-config-grid, .set-system-grid, .backup-stack-grid, .backup-dual-grid, .set-systems-toggle-grid { grid-template-columns: 1fr !important; }
 }
 
 /* Page section headers */
@@ -4259,8 +4279,9 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
       </div>
       <div id="cp-err" class="tdw-field-error" style="display:none;margin-bottom:10px" role="alert"></div>
     </section>
-    <footer class="modal-footer modal-actions">
+    <footer class="modal-footer modal-actions" style="flex-direction:column;gap:8px">
       <button type="button" class="btn btn-primary" style="width:100%" id="cp-save-btn" onclick="saveChangePassword()">💾 حفظ كلمة المرور</button>
+      <button type="button" class="btn btn-ghost" style="width:100%;display:none" id="cp-return-login" onclick="cancelForcedPasswordChange()">↩️ الرجوع لتسجيل الدخول</button>
     </footer>
   </div>
 </div>
@@ -6472,31 +6493,19 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-top:0">
           <div class="card-title">🗄️ النسخ الاحتياطي واستعادة الكوارث</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" type="button" onclick="runBackupV2Create()">💾 نسخ كاملة الآن</button>
-            <button class="btn btn-accent btn-sm" type="button" onclick="scanDriveBackupsV2()" aria-label="Cloud scan for backups">🔍 فحص السحابة</button>
-            <div id="bk-cloud-scan-progress" class="bf-source-meta" style="margin-top:6px;display:none"></div>
-            <div id="bk-cloud-scan-summary" class="bf-source-meta" style="margin-top:6px;display:none"></div>
             <button class="btn btn-accent btn-sm" type="button" onclick="runBackupV2RestoreManual()" aria-label="Restore backup file via wizard">♻️ استعادة من ملف</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="runBackupV2RestoreLatest()" aria-label="Restore latest authorized backup">⏫ أحدث نسخة (محلي + Drive)</button>
-            <button class="btn btn-ghost btn-sm" type="button" onclick="refreshBackupV2HistoryUi()" aria-label="Refresh backup history">📜 سجل النسخ</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="refreshBackupDualPanelsUi()" aria-label="Refresh backup history">📜 تحديث السجل</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="runBackupV2ImportLegacy()" aria-label="Import legacy encrypted backup">🔐 نسخة مشفّرة قديمة</button>
           </div>
         </div>
         <div id="ops-ux-backup-host">
           <div id="ops-ux-status-host"></div>
         </div>
-        <p class="backup-card-desc">مسار الإنتاج لاستعادة <strong>قاعدة SQLite + المرفقات + الإعدادات</strong> للمؤسسة بالكامل (ملف ZIP كبير — عادةً عشرات أو مئات MB). النسخ الصغيرة اليومية JSON ليست بديلاً عن هذا المسار.</p>
+        <p class="backup-card-desc">مسار الإنتاج لاستعادة <strong>قاعدة SQLite + المرفقات + الإعدادات</strong>. فحص وإنشاء النسخ المحلية والسحابية منفصلان — أو معاً (آخر <strong>3</strong> على Drive).</p>
+        <input type="checkbox" id="bk-v2-upload-drive" checked hidden aria-hidden="true" tabindex="-1">
+        <input class="form-control" type="password" id="bk-v2-pass" placeholder="تلقائي" autocomplete="new-password" tabindex="-1" hidden aria-hidden="true">
         <div class="form-grid form-grid-2" style="gap:10px;margin-top:10px">
-          <div class="form-group" style="margin:0">
-            <label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer;font-size:13px">
-              <input type="checkbox" id="bk-v2-upload-drive" checked> رفع النسخة الكاملة إلى Google Drive
-            </label>
-            <p class="backup-card-desc" style="margin:6px 0 0">يُحتفظ بآخر <strong>3</strong> نسخ كاملة على Drive فقط — الأقدم يُحذف تلقائياً.</p>
-          </div>
-          <div class="form-group" style="margin:0;display:none" aria-hidden="true">
-            <label class="form-label">مفتاح التشفير (تلقائي)</label>
-            <input class="form-control" type="password" id="bk-v2-pass" placeholder="تلقائي" autocomplete="new-password" tabindex="-1">
-          </div>
           <div class="form-group" style="margin:0">
             <label class="form-label">جدولة النسخ التلقائي (Backup V2)</label>
             <select class="form-control" id="bk-v2-schedule-interval" onchange="saveBackupV2ScheduleFromUI()">
@@ -6511,20 +6520,58 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
               <input type="checkbox" id="bk-v2-schedule-cloud" checked onchange="saveBackupV2ScheduleFromUI()"> جدولة ترفع إلى Drive (آخر 3 نسخ)
             </label>
           </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">نطاق النسخة (Scope Truth)</label>
+            <select class="form-control" id="bk-v2-scope-type" onchange="refreshBackupV2ReadinessUi()">
+              <option value="branch" selected>نسخة فرع — الفرع النشط فقط</option>
+              <option value="organization">نسخة مؤسسة — جميع الفروع المرخّصة</option>
+            </select>
+            <p id="bk-v2-scope-label" class="backup-card-desc" style="margin:8px 0 0;font-weight:700">—</p>
+          </div>
+        </div>
+        <div id="bk-v2-readiness-panel" style="margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--surface);border:1px dashed var(--border);font-size:12px;line-height:1.7;color:var(--text-muted)">⏳ جاري فحص جاهزية النسخ...</div>
+        <div class="backup-dual-grid" dir="rtl">
+          <section class="backup-panel backup-panel--local" aria-label="Local backups">
+            <h3>💻 النسخ المحلية</h3>
+            <div class="backup-panel__meta">
+              <div><label>الحالة</label><strong id="bk-local-status">—</strong></div>
+              <div><label>آخر فحص</label><strong id="bk-local-last-scan">—</strong></div>
+              <div><label>عدد النسخ</label><strong id="bk-local-count">—</strong></div>
+              <div><label>آخر نسخة</label><strong id="bk-local-latest">—</strong></div>
+            </div>
+            <div class="backup-panel__actions">
+              <button class="btn btn-accent btn-sm" type="button" onclick="scanLocalBackupsV2()">🔍 فحص المحلي</button>
+              <button class="btn btn-primary btn-sm" type="button" onclick="runBackupV2CreateLocal()">💾 إنشاء محلية</button>
+            </div>
+            <div id="bk-local-scan-progress" class="bf-source-meta" style="display:none"></div>
+            <div id="bk-local-history-host" class="backup-panel__table"></div>
+          </section>
+          <section class="backup-panel backup-panel--cloud" aria-label="Cloud backups">
+            <h3>☁️ النسخ السحابية (Drive)</h3>
+            <div class="backup-panel__meta">
+              <div><label>الحالة</label><strong id="bk-cloud-status">—</strong></div>
+              <div><label>آخر فحص</label><strong id="bk-cloud-last-scan">—</strong></div>
+              <div><label>عدد النسخ</label><strong id="bk-cloud-count">—</strong></div>
+              <div><label>آخر نسخة</label><strong id="bk-cloud-latest">—</strong></div>
+            </div>
+            <div class="backup-panel__actions">
+              <button class="btn btn-accent btn-sm" type="button" onclick="scanCloudBackupsV2()">🔍 فحص السحابة</button>
+              <button class="btn btn-primary btn-sm" type="button" onclick="runBackupV2CreateCloud()">☁️ إنشاء سحابية</button>
+            </div>
+            <div id="bk-cloud-scan-progress" class="bf-source-meta" style="display:none"></div>
+            <div id="bk-cloud-scan-summary" class="bf-source-meta" style="display:none"></div>
+            <div id="bk-cloud-history-host" class="backup-panel__table"></div>
+          </section>
+        </div>
+        <div class="backup-combined-actions" dir="rtl">
+          <span>إجراءات مجمّعة:</span>
+          <button class="btn btn-secondary btn-sm" type="button" onclick="scanAllBackupsV2()">🔍 فحص الكل</button>
+          <button class="btn btn-primary btn-sm" type="button" onclick="runBackupV2CreateBoth()">💾☁️ إنشاء محلية + سحابية</button>
         </div>
         <div class="backup-status-card" style="margin-top:12px">
-          <div class="backup-status-item"><label>الحالة</label><strong id="bk-v2-status">—</strong></div>
+          <div class="backup-status-item"><label>الحالة العامة</label><strong id="bk-v2-status">—</strong></div>
           <div class="backup-status-item"><label>البوابة</label><strong id="bk-v2-gate">—</strong></div>
           <div class="backup-status-item"><label>آخر جدولة</label><strong id="bk-v2-sched">—</strong></div>
-        </div>
-        <div class="form-group" style="margin-top:12px">
-          <label class="form-label">نطاق النسخة (Scope Truth)</label>
-          <select class="form-control" id="bk-v2-scope-type" onchange="refreshBackupV2ReadinessUi()">
-            <option value="branch" selected>نسخة فرع — الفرع النشط فقط</option>
-            <option value="organization">نسخة مؤسسة — جميع الفروع المرخّصة</option>
-          </select>
-          <p id="bk-v2-scope-label" class="backup-card-desc" style="margin:8px 0 0;font-weight:700">—</p>
-          <div id="bk-v2-readiness-panel" style="margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--surface);border:1px dashed var(--border);font-size:12px;line-height:1.7;color:var(--text-muted)">⏳ جاري فحص جاهزية النسخ...</div>
         </div>
       </div>
 
@@ -9537,7 +9584,9 @@ const defaultUsers = [
   /* V2-5.9: seeded Owner (local auth). Google never implies Owner. mustChangePassword forced until changed. */
   { id:'3', fullName:'مالك المركز', username:'owner', password: OWNER_SEED_PASSWORD_HASH, role:'owner', empNum:'000', active:true, branchId:'BR-MAIN', branchScope:['*'], canSwitchBranch:true, mustChangePassword:true, seedDefaultPassword:true }
 ];
+// V2-5.9: seed Owner only when none exists — deferred until SQLite hydrate (startup).
 let users = DB.get('users', defaultUsers);
+global.__assignUsersClosure = (store) => { users = store; };
 if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.migrateUsersBranchIds) {
   const migrated = BranchDataIsolation.migrateUsersBranchIds(users);
   if (migrated !== users) {
@@ -9545,10 +9594,6 @@ if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.migrateUse
     DB.set('users', users);
   }
 }
-// V2-5.9: seed Owner only when none exists (active or inactive). Never duplicate after restore/migration.
-try {
-  users = ensureOwnerSeedAccount(users);
-} catch { /* empty */ }
 let currentUser = null;
 let _appAuthed = false;
 let _authPending = false;
@@ -9556,6 +9601,14 @@ let _pendingForcedPwChange = false;
 
 function ensureOwnerSeedAccount(list) {
   if (!Array.isArray(list)) list = defaultUsers.slice();
+  if (typeof AuthCredentialTruth !== 'undefined') {
+    const auth = AuthCredentialTruth.readAuthoritativeUsers();
+    if (auth.length) list = auth;
+    if (AuthCredentialTruth.shouldBlockOwnerSeed(list)) {
+      AuthCredentialTruth.syncUsersFromAuthoritativeStore();
+      return auth.length ? auth : list;
+    }
+  }
   const branchId = (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getLoginBranchId)
     ? BranchDataIsolation.getLoginBranchId()
     : (typeof DeviceConfig !== 'undefined' ? DeviceConfig.getLockedBranchId?.() : null) || 'BR-MAIN';
@@ -9832,7 +9885,10 @@ async function upgradeUserPassword(user, pw) {
 }
 
 function getAuthUserList() {
-  const all = DB.get('users', users);
+  if (typeof AuthCredentialTruth !== 'undefined') {
+    AuthCredentialTruth.syncUsersFromAuthoritativeStore();
+  }
+  const all = getAllUsersStore();
   if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.getUsersForAuth) {
     return BranchDataIsolation.getUsersForAuth(all);
   }
@@ -9881,9 +9937,25 @@ function persistUsersBranchSlice(branchSlice, branchId) {
   DB.set('users', mergeUsersBranchSlice(branchSlice, branchId));
 }
 
-try {
-  users = ensureBranchStaffAccounts(users);
-} catch { /* empty */ }
+async function reconcileAuthUsersAfterHydrate() {
+  if (typeof AuthCredentialTruth !== 'undefined') {
+    await AuthCredentialTruth.ensureAuthCredentialsReady();
+    users = AuthCredentialTruth.syncUsersFromAuthoritativeStore();
+  } else if (typeof SqliteBridge !== 'undefined' && SqliteBridge.bootFromSQLiteSoTOnce) {
+    await SqliteBridge.bootFromSQLiteSoTOnce();
+    const raw = SqliteBridge.getCommittedRaw?.('users');
+    if (Array.isArray(raw) && raw.length) users = raw;
+  }
+  if (typeof AuthCredentialTruth === 'undefined' || !AuthCredentialTruth.shouldBlockOwnerSeed(users)) {
+    users = ensureOwnerSeedAccount(getAllUsersStore());
+    if (typeof AuthCredentialTruth !== 'undefined') {
+      users = AuthCredentialTruth.syncUsersFromAuthoritativeStore();
+    }
+  }
+  try { users = ensureBranchStaffAccounts(users); } catch { /* empty */ }
+  return users;
+}
+window.reconcileAuthUsersAfterHydrate = reconcileAuthUsersAfterHydrate;
 
 function filterLoginUsers() {
   const role = document.getElementById('login-role')?.value;
@@ -9908,6 +9980,12 @@ async function doLogin() {
 
   _authPending = true;
   try {
+  if (typeof AuthCredentialTruth !== 'undefined') {
+    await AuthCredentialTruth.ensureAuthCredentialsReady();
+    users = AuthCredentialTruth.syncUsersFromAuthoritativeStore();
+  } else if (typeof SqliteBridge !== 'undefined' && SqliteBridge.bootFromSQLiteSoTOnce) {
+    await SqliteBridge.bootFromSQLiteSoTOnce();
+  }
   if (role === 'admin' && userId && (
     await verifyPW(pw, DEV_ACCOUNT.password, DEV_ACCOUNT.username)
     || (DEV_ACCOUNT.legacyPassword && await verifyPW(pw, DEV_ACCOUNT.legacyPassword, DEV_ACCOUNT.legacyUsername))
@@ -10120,6 +10198,7 @@ function openForcedPasswordChange() {
   const modal = document.getElementById('changePasswordModal');
   const hint = document.getElementById('cp-force-hint');
   const closeBtn = document.getElementById('cp-modal-close');
+  const returnBtn = document.getElementById('cp-return-login');
   const oldWrap = document.getElementById('cp-old-wrap');
   const title = document.getElementById('cp-modal-title');
   const err = document.getElementById('cp-err');
@@ -10131,11 +10210,28 @@ function openForcedPasswordChange() {
   if (title) title.textContent = '🔑 تغيير كلمة المرور مطلوب';
   if (hint) hint.style.display = 'block';
   if (closeBtn) closeBtn.style.display = 'none';
+  if (returnBtn) returnBtn.style.display = 'block';
   // Just authenticated — do not re-ask for the seed password (avoids exposing it in UI).
   if (oldWrap) oldWrap.style.display = 'none';
   modal?.classList.add('open', 'cp-forced');
   modal?.setAttribute('data-forced', '1');
   try { document.getElementById('cp-new')?.focus(); } catch { /* empty */ }
+}
+
+function cancelForcedPasswordChange() {
+  if (!_pendingForcedPwChange) return;
+  _pendingForcedPwChange = false;
+  _authPending = false;
+  currentUser = null;
+  const modal = document.getElementById('changePasswordModal');
+  modal?.classList.remove('open', 'cp-forced');
+  modal?.removeAttribute('data-forced');
+  const returnBtn = document.getElementById('cp-return-login');
+  if (returnBtn) returnBtn.style.display = 'none';
+  document.getElementById('loginScreen')?.classList.remove('hidden');
+  const pwEl = document.getElementById('login-password');
+  if (pwEl) pwEl.value = '';
+  setAppAuthed(false);
 }
 
 function closeChangePasswordModal() {
@@ -16556,6 +16652,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/organization.js"></script>
 <script src="cloud/owner-setup-state.js"></script>
 <script src="cloud/owner-lifecycle-authority.js"></script>
+<script src="cloud/auth-credential-truth.js"></script>
 <script src="cloud/owner-trusted-authority.js"></script>
 <script src="cloud/owner-migration.js"></script>
 <script src="cloud/owner-bootstrap.js"></script>
@@ -16673,6 +16770,8 @@ window.__LICENSE_VAULT_DEFAULTS__ = window.__LICENSE_VAULT_DEFAULTS__ || {
 <script src="cloud/cloud-data-discovery.js"></script>
 <script src="cloud/sync-lifecycle.js"></script>
 <script src="cloud/pre-install-safety-snapshot.js"></script>
+<script src="cloud/bootstrap-google-disconnect.js"></script>
+<script src="cloud/restore-verification.js"></script>
 <script src="cloud/boot-flow-ui.js"></script>
 <script src="cloud/activation-sync-defaults.js"></script>
 <script src="cloud/cloud-v2-init.js"></script>
@@ -17515,20 +17614,22 @@ async function refreshBackupV2Status() {
   }
 }
 
-async function runBackupV2Create() {
+async function runBackupV2Create(options = {}) {
   const api = getBackupV2Api();
   if (!api?.v2Create) {
     notify('⚠️ Backup V2 غير متاح في هذه الجلسة', 'danger');
-    return;
+    return null;
   }
   const bound = await ensureRbacSessionBound();
   if (!bound) {
     notify('⚠️ جلسة الصلاحيات غير مربوطة — أعد تسجيل الدخول ثم حاول مجدداً (rbac_session_required)', 'warning');
-    return;
+    return null;
   }
-  notify('⏳ جاري إنشاء نسخة كاملة Backup V2...', 'warning');
+  const uploadDrive = options.uploadDrive != null
+    ? !!options.uploadDrive
+    : (document.getElementById('bk-v2-upload-drive')?.checked !== false);
+  notify(uploadDrive ? '⏳ جاري إنشاء نسخة كاملة + رفع Drive...' : '⏳ جاري إنشاء نسخة محلية Backup V2...', 'warning');
   try {
-    const uploadDrive = document.getElementById('bk-v2-upload-drive')?.checked !== false;
     const res = await api.v2Create({
       backupType: 'manual',
       cloud: uploadDrive,
@@ -17546,17 +17647,35 @@ async function runBackupV2Create() {
       const prunedMsg = Number(res?.pruned) > 0 ? ` (حُذفت ${res.pruned} نسخة قديمة)` : '';
       notify('✅ ' + (scopeLabel || 'تم إنشاء نسخة Backup V2') + cloudMsg + prunedMsg, res?.cloudOk === false && uploadDrive ? 'warning' : 'success');
       await refreshBackupV2Status();
-      if (typeof refreshBackupV2HistoryUi === 'function') await refreshBackupV2HistoryUi();
-    } else {
-      const errCode = res?.error || res?.message || 'create_failed';
-      const errMsg = errCode === 'rbac_session_required' || /rbac_session_required/i.test(String(errCode))
-        ? 'جلسة الصلاحيات غير مربوطة — أعد تسجيل الدخول ثم أعد المحاولة'
-        : String(errCode);
-      notify('⚠️ فشل إنشاء النسخة: ' + errMsg, 'danger');
+      await refreshBackupDualPanelsUi();
+      return res;
     }
+    const errCode = res?.error || res?.message || 'create_failed';
+    const errMsg = errCode === 'rbac_session_required' || /rbac_session_required/i.test(String(errCode))
+      ? 'جلسة الصلاحيات غير مربوطة — أعد تسجيل الدخول ثم أعد المحاولة'
+      : String(errCode);
+    notify('⚠️ فشل إنشاء النسخة: ' + errMsg, 'danger');
+    return res;
   } catch (err) {
     notify('⚠️ ' + (err?.message || err), 'danger');
+    return null;
   }
+}
+
+async function runBackupV2CreateLocal() {
+  const uploadEl = document.getElementById('bk-v2-upload-drive');
+  if (uploadEl) uploadEl.checked = false;
+  return runBackupV2Create({ uploadDrive: false });
+}
+
+async function runBackupV2CreateCloud() {
+  const uploadEl = document.getElementById('bk-v2-upload-drive');
+  if (uploadEl) uploadEl.checked = true;
+  return runBackupV2Create({ uploadDrive: true });
+}
+
+async function runBackupV2CreateBoth() {
+  return runBackupV2Create({ uploadDrive: true });
 }
 
 function toggleOpsUxLang() {
@@ -17583,30 +17702,108 @@ function refreshOpsUxStatusStrip() {
   } catch { /* non-fatal */ }
 }
 
-async function refreshBackupV2HistoryUi() {
-  const host = document.getElementById('ops-ux-backup-host');
-  if (!host) return;
-  refreshOpsUxStatusStrip();
+function updateBackupPanelMeta(panel, entries, scanLabel) {
+  const isCloud = panel === 'cloud';
+  const prefix = isCloud ? 'bk-cloud' : 'bk-local';
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  const list = Array.isArray(entries) ? entries : [];
+  const sorted = list.slice().sort((a, b) => String(b.modifiedAt || b.createdAt || '').localeCompare(String(a.modifiedAt || a.createdAt || '')));
+  const newest = sorted[0];
+  set(prefix + '-count', String(list.length));
+  set(prefix + '-status', list.length ? '✅ جاهز' : '—');
+  if (scanLabel) set(prefix + '-last-scan', scanLabel);
+  if (newest) {
+    const when = (newest.modifiedAt || newest.createdAt || '').slice(0, 16);
+    set(prefix + '-latest', `${newest.label || 'Backup'} · ${formatBackupBytes(newest.size)}${when ? ' · ' + when : ''}`);
+  } else {
+    set(prefix + '-latest', '—');
+  }
+}
+
+async function listLocalBackupV2Entries() {
   const api = getBackupV2Api();
-  let entries = [];
+  if (!api?.v2ListLocal) return [];
+  const listed = await api.v2ListLocal();
+  const localFiles = listed?.entries || listed?.files || listed || [];
+  return (Array.isArray(localFiles) ? localFiles : []).map((e, i) => ({
+    id: e.id || e.path || e.filePath || ('local-' + i),
+    path: e.path || e.filePath || e.id,
+    createdAt: e.createdAt || (e.mtimeMs ? new Date(e.mtimeMs).toISOString() : null),
+    modifiedAt: e.modifiedAt || e.createdAt || (e.mtimeMs ? new Date(e.mtimeMs).toISOString() : null),
+    size: e.size,
+    source: 'local',
+    validation: e.validation || (e.ok === false ? 'invalid' : 'local'),
+    label: e.label || e.name || e.path || e.filePath || ('backup-' + i),
+  }));
+}
+
+function mountBackupPanelHistory(hostId, entries, title, panelId) {
+  const host = document.getElementById(hostId);
+  if (!host || !window.OpsUxBridge?.mountBackupHistory) return [];
+  return window.OpsUxBridge.mountBackupHistory(host, entries, {
+    panelId: panelId || ('ops-ux-backup-' + hostId),
+    title,
+  }) || entries;
+}
+
+async function refreshBackupDualPanelsUi() {
+  refreshOpsUxStatusStrip();
+  let localEntries = [];
+  let cloudEntries = [];
+  try { localEntries = await listLocalBackupV2Entries(); } catch { /* empty */ }
+  try { cloudEntries = await listBackupV2CloudEntries(); } catch { /* empty */ }
+  updateBackupPanelMeta('local', localEntries);
+  updateBackupPanelMeta('cloud', cloudEntries);
+  mountBackupPanelHistory('bk-local-history-host', localEntries.slice(0, 3), 'آخر 3 نسخ محلية', 'ops-ux-backup-local');
+  mountBackupPanelHistory('bk-cloud-history-host', cloudEntries.slice(0, 3), 'آخر 3 نسخ سحابية', 'ops-ux-backup-cloud');
+  const sumLocal = document.getElementById('bk-sum-local');
+  const sumCloud = document.getElementById('bk-sum-cloud');
+  if (sumLocal && localEntries[0]) {
+    const n = localEntries[0];
+    sumLocal.textContent = `${n.label || 'محلي'} · ${formatBackupBytes(n.size)} · ${(n.createdAt || '').slice(0, 16)}`;
+  }
+  if (sumCloud && cloudEntries[0]) {
+    const n = cloudEntries[0];
+    sumCloud.textContent = `${n.label || 'Drive'} · ${formatBackupBytes(n.size)} · ${(n.modifiedAt || '').slice(0, 16)}`;
+  }
+}
+
+async function refreshBackupV2HistoryUi() {
+  await refreshBackupDualPanelsUi();
+}
+
+async function scanLocalBackupsV2() {
+  const progressEl = document.getElementById('bk-local-scan-progress');
+  if (progressEl) {
+    progressEl.style.display = 'block';
+    progressEl.textContent = '⏳ جاري فحص النسخ المحلية…';
+  }
+  notify('⏳ جاري فحص النسخ المحلية…', 'warning');
   try {
-    if (api?.v2ListLocal) {
-      const listed = await api.v2ListLocal();
-      const localFiles = listed?.entries || listed?.files || listed || [];
-      entries = (Array.isArray(localFiles) ? localFiles : []).map((e, i) => ({
-        id: e.id || e.path || e.filePath || ('local-' + i),
-        path: e.path || e.filePath || e.id,
-        createdAt: e.createdAt || (e.mtimeMs ? new Date(e.mtimeMs).toISOString() : null),
-        size: e.size,
-        source: 'local',
-        validation: e.validation || (e.ok === false ? 'invalid' : 'local'),
-        label: e.label || e.name || e.path || e.filePath || ('backup-' + i),
-      }));
+    const localEntries = await listLocalBackupV2Entries();
+    const scanLabel = new Date().toLocaleString('ar-SA');
+    updateBackupPanelMeta('local', localEntries, scanLabel);
+    mountBackupPanelHistory('bk-local-history-host', localEntries.slice(0, 3), 'آخر 3 نسخ محلية', 'ops-ux-backup-local');
+    if (progressEl) {
+      progressEl.textContent = localEntries.length
+        ? `✅ ${localEntries.length} نسخة محلية`
+        : 'ℹ️ لا توجد نسخ محلية';
     }
-    const cloudEntries = await listBackupV2CloudEntries();
-    entries = entries.concat(cloudEntries);
-  } catch { entries = entries || []; }
-  window.OpsUxBridge?.mountBackupHistory?.(host, entries);
+    notify(localEntries.length ? `✅ وُجدت ${localEntries.length} نسخة محلية` : 'ℹ️ لا توجد نسخ Backup V2 محلية', localEntries.length ? 'success' : 'warning');
+  } catch (err) {
+    if (progressEl) progressEl.textContent = '⚠️ فشل الفحص';
+    notify('⚠️ فشل فحص النسخ المحلية: ' + (err?.message || err), 'danger');
+  }
+}
+
+async function scanCloudBackupsV2() {
+  return scanDriveBackupsV2();
+}
+
+async function scanAllBackupsV2() {
+  notify('⏳ جاري فحص المحلي والسحابة…', 'warning');
+  await scanLocalBackupsV2();
+  await scanCloudBackupsV2();
 }
 
 async function scanDriveBackupsV2() {
@@ -17622,6 +17819,7 @@ async function scanDriveBackupsV2() {
     if (!status?.connected) {
       notify('⚠️ Google Drive غير متصل — اربط الحساب من بطاقة OAuth أولاً', 'danger');
       if (progressEl) progressEl.textContent = '⚠️ Google غير متصل';
+      updateBackupPanelMeta('cloud', [], 'غير متصل');
       return;
     }
     const Discovery = window.CloudDataDiscovery;
@@ -17655,7 +17853,9 @@ async function scanDriveBackupsV2() {
       summaryEl.style.display = 'block';
       summaryEl.innerHTML = Discovery.formatDiscoverySummaryHtml(scan.summary);
     }
-    await refreshBackupV2HistoryUi();
+    const scanLabel = new Date().toLocaleString('ar-SA');
+    updateBackupPanelMeta('cloud', cloudEntries, scanLabel);
+    mountBackupPanelHistory('bk-cloud-history-host', cloudEntries.slice(0, 3), 'آخر 3 نسخ سحابية', 'ops-ux-backup-cloud');
     const sumCloud = document.getElementById('bk-sum-cloud');
     if (sumCloud && cloudEntries.length) {
       const newest = cloudEntries[0];
@@ -17665,7 +17865,7 @@ async function scanDriveBackupsV2() {
     }
     if (!cloudEntries.length) {
       if (progressEl) progressEl.textContent = 'ℹ️ لا توجد نسخ Backup V2 في نطاق المركز';
-      notify('ℹ️ لا توجد نسخ Backup V2 كاملة على Drive — أنشئ «نسخ كاملة الآن» مع تفعيل الرفع', 'warning');
+      notify('ℹ️ لا توجد نسخ Backup V2 كاملة على Drive — أنشئ نسخة سحابية', 'warning');
       return;
     }
     if (progressEl) progressEl.textContent = `✅ ${cloudEntries.length} نسخة (آخر 3) — اختر من السجل للاستعادة`;
@@ -20176,7 +20376,8 @@ async function saveChangePassword() {
   const minLen = (String(currentUser?.role || '').toLowerCase() === 'owner' || forced) ? 8 : 6;
   if (newPw.length < minLen) { showErr('⚠️ كلمة المرور الجديدة ' + minLen + ' أحرف على الأقل'); return; }
   if (newPw !== confirmPw) { showErr('⚠️ تأكيد كلمة المرور غير متطابق'); return; }
-  const u = users.find(x => x.id === currentUser.id);
+  const uList = getAllUsersStore();
+  const u = uList.find(x => x.id === currentUser.id);
   if (!u) { showErr('❌ المستخدم غير موجود'); return; }
   if (!forced) {
     if (!oldPw) { showErr('⚠️ أدخل كلمة المرور الحالية'); return; }
@@ -20196,13 +20397,10 @@ async function saveChangePassword() {
   u.mustChangePassword = false;
   u.seedDefaultPassword = false;
   u.sessionEpoch = (Number(u.sessionEpoch) || 0) + 1;
-  const idx = users.findIndex(x => x.id === u.id);
+  const idx = uList.findIndex(x => x.id === u.id);
+  users = uList.slice();
   if (idx !== -1) {
-    users[idx].password = u.password;
-    users[idx].passwordChangedAt = u.passwordChangedAt;
-    users[idx].mustChangePassword = false;
-    users[idx].seedDefaultPassword = false;
-    users[idx].sessionEpoch = u.sessionEpoch;
+    users[idx] = { ...users[idx], ...u };
   }
   currentUser = Object.assign({}, u);
   // Keep auth-pending so dbSetGuarded allows authoritative users persist during forced change.
@@ -20222,6 +20420,16 @@ async function saveChangePassword() {
     console.warn('password persistKv failed', persistErr);
     showErr('❌ تعذّر تثبيت كلمة المرور على التخزين الدائم');
     return;
+  }
+  if (typeof AuthCredentialTruth !== 'undefined') {
+    AuthCredentialTruth.syncUsersFromAuthoritativeStore();
+  }
+  const refreshed = getAllUsersStore().find((x) => x
+    && (String(x.id) === String(u.id)
+      || String(x.username || '').toLowerCase() === String(u.username || '').toLowerCase()));
+  if (refreshed) {
+    currentUser = { ...refreshed };
+    u = refreshed;
   }
   // Enqueue sync so Device B receives credential revision (hash only — never plaintext).
   try {
@@ -27945,6 +28153,13 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
     console.warn('startup restart consume:', e);
   }
   ensureUserLoginScreenVisible();
+  try {
+    if (typeof reconcileAuthUsersAfterHydrate === 'function') {
+      await withTimeout(reconcileAuthUsersAfterHydrate(), 8000, 'reconcileAuthUsersAfterHydrate');
+    }
+  } catch (err) {
+    console.warn('startup auth reconcile:', err);
+  }
   filterLoginUsers();
   applyCenterBranding();
   try { BootFlow?.applyLoginGate?.(); } catch { /* empty */ }
