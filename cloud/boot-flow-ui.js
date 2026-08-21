@@ -258,9 +258,8 @@
       if (bootParam === '0') return false;
       if (bootParam === '1' || bootParam === 'force') return true;
     } catch { /* empty */ }
-    // V2-5.9: NEVER auto-open solely because Owner is missing — Google ≠ Owner.
-    // Only open when the activation journey itself is incomplete.
-    return needsBootScreen() && !global.currentUser;
+    // Never auto-open on cold start — user opens setup from login CTA (بدء الإعداد).
+    return false;
   }
 
   function canShowLogin() {
@@ -1305,11 +1304,12 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
                 return;
               }
               setStatus('⏳ جاري التحقق من البيانات المستعادة...');
+              try { await global.reconcileAuthUsersAfterHydrate?.(); } catch { /* empty */ }
               const verified = await global.RestoreVerification?.verifyPostRestore?.({
                 kind: 'cloud_hydrate',
                 point,
                 source: 'bootflow_cloud_restore',
-                requireOwner: true,
+                requireOwner: false,
                 requireData: false,
               });
               if (!verified?.verified) {

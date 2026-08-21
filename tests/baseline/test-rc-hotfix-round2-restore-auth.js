@@ -44,7 +44,9 @@ check(/__tdw_cloud_license__/.test(disconnect), 'disconnect clears license cache
 check(/clearGoogleDerivedBootstrapState/.test(disconnect), 'disconnect clears derived bootstrap state');
 
 check(/verifyPostRestore/.test(verify) && /formatSummaryHtml/.test(verify), 'restore verification contract');
-check(/verifyPostRestore/.test(boot) && /restore_verification_failed|restore_owner_missing/.test(verify), 'BootFlow calls restore verification');
+check(/verifyPostRestore/.test(boot) && /restore_verification_failed|restore_owner_missing|restore_cloud_identity_missing/.test(verify), 'restore verification error codes');
+check(/requireOwner:\s*false/.test(boot) && /cloud_hydrate/.test(boot), 'cloud hydrate skips strict owner gate');
+check(/readAuthoritativeUsers/.test(auth) && /hasActiveOwner|toLowerCase\(\) === 'owner'/.test(auth), 'auth reads users from richest source with owner');
 
 check(/فصل حساب Google/.test(boot) && /تغيير حساب Google/.test(boot), 'BootFlow google disconnect buttons');
 check(/BootstrapGoogleDisconnect/.test(boot), 'BootFlow wires disconnect module');
@@ -94,6 +96,56 @@ Auth.syncUsersFromAuthoritativeStore();
 check(closureUsers[0].password === RESTORED_HASH, 'syncUsersFromAuthoritativeStore applies restored password to closure');
 check(Auth.shouldBlockOwnerSeed(restoredUsers), 'restored owner blocks seed');
 check(!Auth.hasRestoredOwnerCredential([{ role: 'owner', password: OWNER_SEED, seedDefaultPassword: true }]), 'seed hash alone is not restored credential');
+
+// readAuthoritativeUsers prefers source that has owner (SQLite stale vs DB merged)
+{
+  const mergeSandbox = { globalThis: {}, window: {}, console, module: { exports: {} }, DB: { get: () => null } };
+  mergeSandbox.window = mergeSandbox.globalThis;
+  mergeSandbox.globalThis.SqliteBridge = {
+    getCommittedRaw(key) {
+      if (key === 'users') return [{ id: '1', role: 'admin', active: true }];
+      return undefined;
+    },
+  };
+  mergeSandbox.globalThis.DB = {
+    get(key) {
+      if (key === 'users') return [{ id: '2', role: 'owner', username: 'owner', active: true, password: RESTORED_HASH }];
+      return null;
+    },
+  };
+  vm.runInNewContext(auth, mergeSandbox);
+  const Auth2 = mergeSandbox.AuthCredentialTruth || mergeSandbox.module.exports;
+  const merged = Auth2.readAuthoritativeUsers();
+  check(merged.some((u) => u.role === 'owner'), 'readAuthoritativeUsers picks DB owner over SQLite without owner');
+}
+
+// cloud_hydrate verification accepts center+license without local owner row
+{
+  const { spawnSync } = require('child_process');
+  const script = `
+    const vm = require('vm');
+    const fs = require('fs');
+    const src = fs.readFileSync('cloud/restore-verification.js', 'utf8');
+    const sb = { globalThis: {}, window: {}, console, module: { exports: {} } };
+    sb.window = sb.globalThis;
+    sb.globalThis.reconcileAuthUsersAfterHydrate = async () => {};
+    sb.globalThis.AuthCredentialTruth = { readAuthoritativeUsers: () => [{ id: '1', role: 'admin', active: true }] };
+    sb.globalThis.DB = { get: () => [] };
+    sb.globalThis.DeviceConfig = { load: () => ({ centerId: 'CTR-1', lockedBranchId: 'BR-MAIN' }) };
+    sb.globalThis.LicenseCloud = { loadLocal: () => ({ centerId: 'CTR-1', branches: [{ id: 'BR-MAIN' }] }) };
+    sb.globalThis.licLoad = () => ({ centerId: 'CTR-1', licenseId: 'L1' });
+    vm.runInNewContext(src, sb);
+    const RV = sb.RestoreVerification || sb.module.exports;
+    RV.verifyPostRestore({ kind: 'cloud_hydrate', source: 'bootflow_cloud_restore', requireOwner: false })
+      .then((res) => {
+        if (!res?.verified) process.exit(2);
+        if (!res?.summary?.ownerDeferred) process.exit(3);
+        process.exit(0);
+      }).catch(() => process.exit(1));
+  `;
+  const r = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', timeout: 5000 });
+  check(r.status === 0, 'cloud_hydrate verify passes with center+license, no local owner');
+}
 
 // Electron renderer: `global` is undefined — globalThis assignment must not throw
 {

@@ -28267,9 +28267,9 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
     }
     if (typeof BootFlow !== 'undefined') {
       BootFlow?.ensureLoginAccessible?.();
-      // V2-5.9: never auto Owner Bootstrap on startup — only incomplete activation wizard.
+      BootFlow?.applyLoginGate?.();
+      // Only explicit ?boot=1 opens wizard — otherwise login screen + CTA hint.
       if (BootFlow?.shouldAutoOpenBoot?.()) BootFlow.forceOpen?.();
-      else BootFlow?.updateLoginSetupHint?.();
     }
     const cloudStatus = typeof getCloudModulesLoadStatus === 'function' ? getCloudModulesLoadStatus() : {};
     if (!cloudStatus.bootstrap || !cloudStatus.centerSetup) {

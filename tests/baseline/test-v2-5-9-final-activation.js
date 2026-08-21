@@ -22,8 +22,8 @@ check(/autoDiscoverActivationAfterGoogle/.test(bootSrc), 'auto discovery after G
 check(/NEW_STEPS\s*=\s*\[[^\]]*restore[^\]]*sync[^\]]*ready/.test(bootSrc.replace(/\s+/g, ' ')), 'NEW_STEPS includes restore/sync/ready');
 check(!/NEW_STEPS\s*=\s*\[[^\]]*owner[^\]]*restore/.test(bootSrc.replace(/\s+/g, ' ')), 'NEW_STEPS must not include owner before restore');
 check(/v2_5_9_no_auto_owner_bootstrap/.test(bootSrc), 'Owner Bootstrap gated for non-emergency');
-check(/shouldAutoOpenBoot[\s\S]{0,500}needsBootScreen\(\)/.test(bootSrc), 'shouldAutoOpenBoot uses needsBootScreen');
-check(!/shouldAutoOpenBoot[\s\S]{0,400}NO_OWNER/.test(bootSrc), 'shouldAutoOpenBoot ignores NO_OWNER');
+check(/shouldAutoOpenBoot[\s\S]{0,500}bootParam === '1'/.test(bootSrc), 'shouldAutoOpenBoot only for explicit URL param');
+check(!/shouldAutoOpenBoot[\s\S]{0,250}needsBootScreen\(\)/.test(bootSrc), 'shouldAutoOpenBoot must not auto-open incomplete setup');
 check(/branch_name_placeholder|اسمًا مخصصًا|اسماً مخصصاً/.test(bootSrc), 'custom first branch name enforced');
 check(/restoreChoice === 'local'|restoreChoice === 'file'|markRestore\('local'/.test(bootSrc)
   || /markRestore\('local'|markRestore\('file'|markRestore\('empty'/.test(bootSrc), 'data source choices');

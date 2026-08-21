@@ -44,10 +44,11 @@
   }
 
   /**
-   * Verify restore actually landed in SQLite before wizard advances.
+   * Verify restore actually landed before wizard advances.
    */
   async function verifyPostRestore(options = {}) {
     options = options || {};
+    try { await global.reconcileAuthUsersAfterHydrate?.(); } catch { /* empty */ }
     await rehydrateOperationalCaches();
 
     const integrity = await verifyDatabaseIntegrity();
@@ -62,6 +63,7 @@
       || global.LicenseCloud?.loadLocal?.()?.centerId
       || global.settings?.centerId
       || null;
+    const licenseDoc = typeof global.licLoad === 'function' ? global.licLoad() : null;
 
     const counts = {
       clients: countRecords('clientsRegistry'),
@@ -70,20 +72,33 @@
       branches: (global.LicenseCloud?.loadLocal?.()?.branches || []).length,
     };
 
+    const kind = options.kind || options.restoreKind || null;
+    const isCloudHydrate = kind === 'cloud_hydrate' || options.source === 'bootflow_cloud_restore';
+
     const summary = {
       centerId,
       branchId: global.DeviceConfig?.load?.()?.lockedBranchId || null,
       ownerUsername: owner?.username || null,
       ownerPresent: !!owner,
       counts,
-      restoreKind: options.kind || options.restoreKind || null,
+      restoreKind: kind,
       backupPoint: options.point?.path || options.point?.name || null,
+      cloudHydrate: isCloudHydrate,
     };
 
-    const requireOwner = options.requireOwner !== false;
+    const requireOwner = options.requireOwner !== false && !isCloudHydrate;
     const requireData = options.requireData === true;
     if (requireOwner && !owner) {
       return { ok: false, verified: false, error: 'restore_owner_missing', summary };
+    }
+    if (isCloudHydrate && !owner) {
+      const hasIdentity = !!(centerId || licenseDoc?.centerId || licenseDoc?.licenseId);
+      const hasAnyData = counts.clients > 0 || counts.visits > 0 || counts.bookings > 0;
+      if (!hasIdentity && !hasAnyData) {
+        return { ok: false, verified: false, error: 'restore_cloud_identity_missing', summary };
+      }
+      summary.ownerPresent = false;
+      summary.ownerDeferred = true;
     }
     if (requireData && counts.clients === 0 && counts.visits === 0 && counts.bookings === 0) {
       return { ok: false, verified: false, error: 'restore_data_empty', summary };
@@ -102,10 +117,13 @@
   function formatSummaryHtml(summary) {
     if (!summary) return '';
     const c = summary.counts || {};
+    const ownerLine = summary.ownerDeferred
+      ? 'Owner: سيُؤكَّد بعد المزامنة الكاملة'
+      : `Owner: ${summary.ownerUsername || '—'}`;
     return `<div class="bf-restore-verify" dir="rtl">
       <strong>تمت الاستعادة والتحقق من البيانات ✓</strong><br>
       Center: <code dir="ltr">${summary.centerId || '—'}</code><br>
-      Owner: ${summary.ownerUsername || '—'}<br>
+      ${ownerLine}<br>
       العملاء: ${c.clients ?? '—'} · الجلسات: ${c.visits ?? '—'} · الحجوزات: ${c.bookings ?? '—'} · الفروع: ${c.branches ?? '—'}
     </div>`;
   }

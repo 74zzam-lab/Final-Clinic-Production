@@ -7,13 +7,24 @@
   const OWNER_SEED_HASH = 'pbkdf2:owner:f28c4134eec2cebf7631ab559ec0eb794280730d728919f259438a3441f5266b';
 
   function readAuthoritativeUsers() {
+    const candidates = [];
     if (global.SqliteBridge?.getCommittedRaw) {
       const raw = global.SqliteBridge.getCommittedRaw('users');
-      if (Array.isArray(raw) && raw.length) return raw.slice();
+      if (Array.isArray(raw) && raw.length) candidates.push(raw);
     }
     const fromDb = global.DB?.get?.('users', null);
-    if (Array.isArray(fromDb) && fromDb.length) return fromDb.slice();
-    return Array.isArray(global.users) ? global.users.slice() : [];
+    if (Array.isArray(fromDb) && fromDb.length) candidates.push(fromDb);
+    if (Array.isArray(global.users) && global.users.length) candidates.push(global.users);
+
+    const hasActiveOwner = (list) => (list || []).some((u) => u
+      && String(u.role || '').toLowerCase() === 'owner'
+      && u.active !== false);
+
+    for (const list of candidates) {
+      if (hasActiveOwner(list)) return list.slice();
+    }
+    const longest = candidates.reduce((best, list) => (list.length > best.length ? list : best), []);
+    return longest.slice();
   }
 
   function hasRestoredOwnerCredential(list) {
