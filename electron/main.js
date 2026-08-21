@@ -489,7 +489,7 @@ handle('backup:discoverCloudRestorePoints', async (event, options) => {
   let timeoutMs;
   if (opts.timeoutMs != null) {
     const n = Number(opts.timeoutMs);
-    if (!Number.isFinite(n) || n < 1000 || n > 90000) V.fail('INVALID_TIMEOUT', 'timeoutMs_out_of_range');
+    if (!Number.isFinite(n) || n < 1000 || n > 180000) V.fail('INVALID_TIMEOUT', 'timeoutMs_out_of_range');
     timeoutMs = Math.floor(n);
   }
   return backupDiscoverCloudRestorePoints({

@@ -484,6 +484,10 @@
     const db = api();
     if (!db) return { ok: false, error: 'database_api_unavailable' };
     const snapshot = options?.snapshot || collectSnapshotFromLocal();
+    if (!options?.skipSafetyTdw && global.PreInstallSafetySnapshot?.ensureSafetySnapshotBeforeMigration) {
+      const safety = await global.PreInstallSafetySnapshot.ensureSafetySnapshotBeforeMigration({ snapshot });
+      if (safety.blocked) return safety;
+    }
     const report = await db.migrateFromBackup(snapshot, {
       sourceLabel: options?.sourceLabel || 'localStorage',
       dryRun: !!options?.dryRun,

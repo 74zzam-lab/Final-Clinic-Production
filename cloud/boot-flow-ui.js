@@ -975,22 +975,32 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
         const lic = global.LicenseCloud?.loadLocal?.() || {};
         const cid = lic.centerId || global.CenterId?.getStoredCenterId?.() || '';
         const cname = lic.centerName || global.settings?.centerName || '';
-        content.innerHTML = `
-          <p>المؤسسة المصرّح بها من الترخيص:</p>
-          <div class="form-group"><label>Center ID</label><input class="form-control" id="bf-org-id" dir="ltr" value="${String(cid).replace(/"/g, '&quot;')}" readonly></div>
-          <div class="form-group"><label>اسم المؤسسة</label><input class="form-control" id="bf-org-name" value="${String(cname).replace(/"/g, '&quot;')}"></div>`;
-        addBtn(actions, '💾 تأكيد المؤسسة', 'btn-primary', () => {
+        const isExisting = w.path === PATHS.EXISTING;
+        const nameReadonly = isExisting;
+        const intro = isExisting
+          ? '<p>هوية المؤسسة من الترخيص/Drive — للعرض والتأكيد فقط (لا تعديل أثناء الإعداد).</p>'
+          : '<p>أدخل اسم المؤسسة قبل الإنشاء. <code dir="ltr">Center ID</code> يُثبت من النظام/الترخيص.</p>';
+        content.innerHTML = `${intro}
+          <div class="form-group"><label>Center ID</label><input class="form-control" id="bf-org-id" dir="ltr" value="${String(cid).replace(/"/g, '&quot;')}" readonly tabindex="-1"></div>
+          <div class="form-group"><label>اسم المؤسسة</label><input class="form-control" id="bf-org-name" value="${String(cname).replace(/"/g, '&quot;')}" ${nameReadonly ? 'readonly tabindex="-1"' : ''}></div>`;
+        addBtn(actions, isExisting ? '✔️ تأكيد هوية المؤسسة' : '💾 تأكيد المؤسسة', 'btn-primary', () => {
           const name = String(document.getElementById('bf-org-name')?.value || '').trim();
           if (!name) { setStatus('⚠️ أدخل اسم المؤسسة', true); return; }
-          if (!global.settings) global.settings = global.DB?.get?.('settings', {}) || {};
-          global.settings.centerName = name;
-          global.DB?.set?.('settings', global.settings);
-          if (lic.centerId) {
-            lic.centerName = name;
-            global.LicenseCloud?.saveLocal?.(lic);
+          if (isExisting && cname && name !== cname) {
+            setStatus('⚠️ في مسار عميل حالي لا يُسمح بتغيير اسم المؤسسة أثناء الإعداد', true);
+            return;
           }
-          try { global.Organization?.saveDisplayName?.(name); } catch { /* empty */ }
-          setStatus('✅ تم تأكيد المؤسسة');
+          if (!global.settings) global.settings = global.DB?.get?.('settings', {}) || {};
+          if (!isExisting) {
+            global.settings.centerName = name;
+            global.DB?.set?.('settings', global.settings);
+            if (lic.centerId) {
+              lic.centerName = name;
+              global.LicenseCloud?.saveLocal?.(lic);
+            }
+            try { global.Organization?.saveDisplayName?.(name); } catch { /* empty */ }
+          }
+          setStatus(isExisting ? '✅ تم تأكيد هوية المؤسسة' : '✅ تم تأكيد المؤسسة');
           renderNavButtons(loadWizard());
         });
         if (hasCenterData()) setStatus('✅ بيانات المؤسسة جاهزة');
@@ -1086,6 +1096,8 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
           const stageLine = snap.stageCount
             ? `${snap.stageIndex || 0}/${snap.stageCount} — ${snap.stageLabel || '—'}`
             : (snap.stageLabel || 'فحص مصادر البيانات');
+          const eta = snap.etaMs > 0 ? ` · متبقٍ ~${Math.round(snap.etaMs / 1000)}ث` : '';
+          const stalled = snap.stalled ? '<br><span class="tdw-field-error">⚠️ لم يصل تقدم جديد — يمكنك إعادة الفحص</span>' : '';
           progressHost.innerHTML = `<div class="bf-restore-progress" dir="rtl">
             <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">
               <span>${stageLine}</span>
@@ -1093,15 +1105,39 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             </div>
             <div class="bar"><i style="width:${snap.percent || 0}%"></i></div>
             <div class="bf-source-meta" style="margin-top:6px">
-              المنقضي: ${Math.round((snap.elapsedMs || 0) / 1000)}ث
+              المنقضي: ${Math.round((snap.elapsedMs || 0) / 1000)}ث${eta}
               ${snap.budgetMs ? ` / ~${Math.round(snap.budgetMs / 1000)}ث` : ''}
-              ${snap.foundCount ? ` · وُجد: ${snap.foundCount}` : ''}
+              ${snap.backupCount ? ` · نسخ Backup: ${snap.backupCount}` : (snap.foundCount ? ` · وُجد: ${snap.foundCount}` : '')}
               ${snap.downloadedBytes ? ` · منزّل: ${Discovery.formatBytes(snap.downloadedBytes)}` : ''}
               ${snap.totalBytes ? ` / ${Discovery.formatBytes(snap.totalBytes)}` : ''}<br>
               آخر نشاط: ${snap.lastActivity || '—'}
               ${snap.diagnosticId ? `<br>Diagnostic ID: <code dir="ltr">${snap.diagnosticId}</code>` : ''}
+              ${stalled}
             </div>
           </div>`;
+        };
+
+        const renderBackupTable = (backups, hostEl, onSelect) => {
+          if (!hostEl || !Array.isArray(backups) || !backups.length) return;
+          const rows = backups.map((bp, i) => {
+            const rec = i === 0 ? ' (الأحدث — موصى به)' : '';
+            return `<tr>
+              <td>#${i + 1}${rec}</td>
+              <td>${Discovery.formatWhen(bp.modifiedAt)}</td>
+              <td dir="ltr">${Discovery.formatBytes(bp.sizeBytes)}</td>
+              <td>${bp.validation || 'metadata_ok'}</td>
+              <td><button type="button" class="btn btn-sm btn-secondary bf-pick-backup" data-idx="${i}">اختيار</button></td>
+            </tr>`;
+          }).join('');
+          hostEl.innerHTML = `<table class="table table-sm" dir="rtl" style="width:100%;margin-top:8px">
+            <thead><tr><th>النسخة</th><th>التاريخ</th><th>الحجم</th><th>الحالة</th><th></th></tr></thead>
+            <tbody>${rows}</tbody></table>`;
+          hostEl.querySelectorAll('.bf-pick-backup').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const idx = Number(btn.getAttribute('data-idx'));
+              if (backups[idx]) onSelect(backups[idx]);
+            });
+          });
         };
 
         const addSourceCard = (opts) => {
@@ -1190,63 +1226,81 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             : (cloudHasPoint && cloud.timedOut ? '⚠️ نتائج جزئية — يمكن التأكيد' : '✅ نتائج الفحص جاهزة'));
 
           // --- Cloud card ---
-          const newest = cloud.newest;
+          const latestBackups = (cloud.latestBackups && cloud.latestBackups.length)
+            ? cloud.latestBackups
+            : (cloud.newest ? [cloud.newest] : []);
+          const newest = latestBackups[0] || cloud.newest;
           const cloudStatus = cloud.status || 'unknown';
+          const summaryHtml = cloud.summary && Discovery.formatDiscoverySummaryHtml
+            ? `<div class="bf-discovery-summary" style="margin:8px 0;padding:8px;border:1px solid var(--border,#ddd);border-radius:6px">${Discovery.formatDiscoverySummaryHtml(cloud.summary)}</div>`
+            : '';
           const cloudMeta = newest
             ? `الحالة: <strong>${cloud.timedOut ? 'جاهزة (فحص جزئي)' : 'جاهزة للتأكيد'}</strong><br>
-               ${cloud.timedOut ? `<span class="bf-source-meta">⚠️ ${cloud.message || 'انتهت المهلة لكن وُجدت نسخة.'}</span><br>` : ''}
-               النوع: ${newest.kind === 'backup_file' ? 'نسخة Backup' : 'نقطة مزامنة سحابية'}<br>
-               المركز: <code dir="ltr">${cloud.centerId || discovery?.identity?.centerId || '—'}</code><br>
-               الفرع: ${global.BranchDisplay?.resolveBranchName?.(cloud.branchId || discovery?.identity?.branchId) || cloud.branchId || discovery?.identity?.branchId || '—'}<br>
-               آخر نسخة: ${Discovery.formatWhen(newest.modifiedAt)}<br>
-               الحجم: ${Discovery.formatBytes(newest.sizeBytes)}<br>
-               الملف: <code dir="ltr">${newest.name || newest.path || '—'}</code><br>
-               التحقق: ${newest.validation || 'metadata_ok'}`
-            : `الحالة: <strong>${cloudStatus}</strong><br>${cloud.message || 'لم يتم العثور على نسخ سحابية — جرّب «ملف Backup» أو تأكد من حساب Google.'}`;
+               ${cloud.timedOut ? `<span class="bf-source-meta">⚠️ ${cloud.message || 'انتهت المهلة لكن وُجدت نسخ.'}</span><br>` : ''}
+               ${summaryHtml}
+               <div id="bf-cloud-backup-table"></div>`
+            : `${summaryHtml}الحالة: <strong>${cloudStatus}</strong><br>${cloud.message || 'لم يتم العثور على نسخ سحابية — جرّب «ملف Backup» أو تأكد من حساب Google.'}`;
 
           const cloudCard = addSourceCard({
-            title: '☁️ أحدث بيانات سحابية',
+            title: '☁️ بيانات سحابية (آخر 3 نسخ Backup V2)',
             status: newest ? 'ready' : cloudStatus,
             metaHtml: cloudMeta,
           });
 
-          if (newest && (cloudStatus === 'ready' || cloudStatus === 'ipc_missing')) {
-            addBtn(cloudCard.actions, 'سحب بيانات الفرع من السحابة', 'btn-primary', async () => {
-              if (restoreInFlight || Discovery.isRestoreLocked?.()) {
-                setStatus('⚠️ عملية سحب جارية — انتظر', true);
+          if (latestBackups.length) {
+            const tableHost = cloudCard.card.querySelector('#bf-cloud-backup-table');
+            renderBackupTable(latestBackups, tableHost, (point) => {
+              cloudCard.card.dataset.selectedBackup = point.path || point.name;
+            });
+          }
+
+          const runCloudHydrate = async (point) => {
+            if (!point) return;
+            if (restoreInFlight || Discovery.isRestoreLocked?.()) {
+              setStatus('⚠️ عملية سحب جارية — انتظر', true);
+              return;
+            }
+            restoreInFlight = true;
+            try { global.OwnerManagement?.setSystemBusy?.('restore'); } catch { /* empty */ }
+            setStatus('⏳ جارٍ سحب/دمج حالة السحابة (sync hydrate — بدون استبدال DB)…');
+            try {
+              const result = await Discovery.confirmedCloudRestore(point, {
+                onProgress: (snap) => {
+                  renderProgress(snap);
+                  setStatus(`⏳ ${snap.stageLabel} — ${snap.percent}%`);
+                },
+              });
+              if (!result?.ok) {
+                setStatus(
+                  `❌ فشل سحب السحابة: ${result?.message || result?.error || 'unknown'}`
+                  + (result?.diagnosticId ? ` · ID ${result.diagnosticId}` : ''),
+                  true
+                );
+                if (progressHost) {
+                  progressHost.innerHTML += `<p class="bf-source-meta">لم تُستبدل قاعدة البيانات المحلية — هذا مسار sync hydrate فقط.</p>`;
+                }
                 return;
               }
-              restoreInFlight = true;
-              try { global.OwnerManagement?.setSystemBusy?.('restore'); } catch { /* empty */ }
-              setStatus('⏳ جارٍ سحب/دمج حالة السحابة (sync hydrate — بدون استبدال DB)…');
-              try {
-                const result = await Discovery.confirmedCloudRestore(newest, {
-                  onProgress: (snap) => {
-                    renderProgress(snap);
-                    setStatus(`⏳ ${snap.stageLabel} — ${snap.percent}%`);
-                  },
-                });
-                if (!result?.ok) {
-                  setStatus(
-                    `❌ فشل سحب السحابة: ${result?.message || result?.error || 'unknown'}`
-                    + (result?.diagnosticId ? ` · ID ${result.diagnosticId}` : ''),
-                    true
-                  );
-                  if (progressHost) {
-                    progressHost.innerHTML += `<p class="bf-source-meta">لم تُستبدل قاعدة البيانات المحلية — هذا مسار sync hydrate فقط. الترخيص والجهاز والفرع محفوظون.</p>`;
-                  }
-                  return;
-                }
-                markRestore('cloud', '✅ تم سحب/دمج بيانات السحابة — انتقل للمزامنة');
-                setStatus('✅ تم سحب السحابة — المزامنة التالية تسحب الأحدث فقط');
-              } catch (e) {
-                setStatusFromErr(e, 'restore_interrupted');
-              } finally {
-                restoreInFlight = false;
-                try { global.OwnerManagement?.clearSystemBusy?.('restore'); } catch { /* empty */ }
-                renderNavButtons(loadWizard());
-              }
-            });
+              markRestore('cloud', '✅ تم سحب/دمج بيانات السحابة — انتقل للمزامنة');
+              setStatus('✅ تم سحب السحابة — المزامنة التالية تسحب الأحدث فقط');
+            } catch (e) {
+              setStatusFromErr(e, 'restore_interrupted');
+            } finally {
+              restoreInFlight = false;
+              try { global.OwnerManagement?.clearSystemBusy?.('restore'); } catch { /* empty */ }
+              renderNavButtons(loadWizard());
+            }
+          };
+
+          if (newest && (cloudStatus === 'ready' || cloudStatus === 'ipc_missing')) {
+            addBtn(cloudCard.actions, 'سحب الأحدث (موصى به)', 'btn-primary', () => runCloudHydrate(newest));
+            if (latestBackups.length > 1) {
+              addBtn(cloudCard.actions, 'سحب النسخة المحددة', 'btn-secondary', () => {
+                const sel = cloudCard.card.dataset.selectedBackup;
+                const point = latestBackups.find((p) => (p.path || p.name) === sel) || newest;
+                runCloudHydrate(point);
+              });
+            }
           } else {
             addBtn(cloudCard.actions, 'إعادة فحص السحابة', 'btn-secondary', () => {
               renderStepUI(loadWizard());
@@ -1345,15 +1399,21 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
         break;
       }
       case 'sync': {
-        const readiness = global.SyncEngine?.getReadiness?.() || null;
+        const lifecycle = global.SyncLifecycle?.resolveLifecycle?.() || null;
         content.innerHTML = `<p>نفّذ المزامنة الأولية بعد الاستعادة/البدء.</p>
           <div class="bf-source-meta" id="bf-sync-readiness">${
-            readiness
-              ? (readiness.ready
-                ? `✅ الجاهزية: ${readiness.state}`
-                : `⚠️ غير جاهز بعد: ${(readiness.missing || []).join(', ') || readiness.messageAr || ''}`)
-              : 'جارٍ فحص جاهزية المزامنة…'
-          }</div>`;
+            lifecycle
+              ? global.SyncLifecycle.renderPanelHtml(lifecycle)
+              : (() => {
+                const readiness = global.SyncEngine?.getReadiness?.() || null;
+                return readiness
+                  ? (readiness.ready
+                    ? `✅ ${readiness.messageAr || readiness.state}`
+                    : `⚠️ ${readiness.messageAr || (readiness.missing || []).join(', ')}`)
+                  : 'جارٍ فحص جاهزية المزامنة…';
+              })()
+          }</div>
+          <div id="bf-sync-progress-host"></div>`;
         addBtn(actions, '▶️ بدء المزامنة الأولية', 'btn-primary', async () => {
           if (syncInFlight || ownerCreateInFlight()) {
             setStatus('⚠️ عملية جارية — انتظر', true);
@@ -1406,6 +1466,17 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             renderStepUI(loadWizard());
           }
         });
+        if (lifecycle?.lifecycle === 'CONFLICT_REQUIRES_ACTION' && global.ConflictManagerUI?.open) {
+          addBtn(actions, '⚖️ مراجعة التعارضات', 'btn-secondary', () => {
+            try { global.ConflictManagerUI.open(); } catch { /* empty */ }
+          });
+        }
+        if (lifecycle?.readiness?.recoverablePause) {
+          addBtn(actions, '▶️ استئناف المزامنة', 'btn-secondary', () => {
+            global.SyncEngine?.resumeFromGuard?.('bootflow_resume');
+            renderStepUI(loadWizard());
+          });
+        }
         if (hasSyncDone()) setStatus('✅ المزامنة مسجّلة كمكتملة');
         break;
       }

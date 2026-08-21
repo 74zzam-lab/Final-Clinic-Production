@@ -6,8 +6,8 @@
 (function (global) {
   'use strict';
 
-  const DISCOVERY_TIMEOUT_MS = 60000;
-  const NO_PROGRESS_WATCHDOG_MS = 30000;
+  const DISCOVERY_TIMEOUT_MS = 150000;
+  const NO_PROGRESS_WATCHDOG_MS = 35000;
 
   const RESTORE_STAGES = [
     { id: 'verify_point', label: 'التحقق من نقطة السحابة', weight: 5 },
@@ -151,6 +151,8 @@
     activeAbort = abort;
     const started = Date.now();
     const identity = getIdentity();
+    const lic = identity.lic || {};
+    const localBranches = Array.isArray(lic.branches) ? lic.branches : [];
 
     // Hard rule: never start sync during discovery
     const syncWasRunning = !!global.SyncEngine?.isRunning?.();
@@ -169,17 +171,11 @@
       label: 'بدء الفحص — سحابة / محلي / نسخ',
       elapsedMs: 0,
       budgetMs: timeoutMs,
-      percent: 3,
+      percent: 5,
+      stageId: 'oauth',
     }));
 
-    const tick = setInterval(() => {
-      if (opId !== discoveryOpId) return;
-      emitDiscovery(buildDiscoveryProgressState({
-        label: 'جارٍ الفحص…',
-        elapsedMs: Date.now() - started,
-        budgetMs: timeoutMs,
-      }));
-    }, 400);
+    // Progress from main-process discovery only — no fake time-based tick.
 
     const electronBackup = global.cuppingElectron?.backup || global.tadawiElectron?.backup || null;
     if (electronBackup?.onDiscoveryProgress) {
@@ -216,6 +212,7 @@
         branchId: identity.branchId,
         branchName: identity.branchName,
         centerName: identity.centerName,
+        localBranches,
         timeoutMs,
       });
     })();
@@ -234,13 +231,16 @@
         probeLocalBackups(),
       ]);
 
-      clearInterval(tick);
       emitDiscovery(buildDiscoveryProgressState({
         label: 'اكتمل الفحص',
         elapsedMs: Date.now() - started,
         budgetMs: timeoutMs,
         percent: 100,
+        stageId: 'done',
         foundCount: cloud?.restorePoints?.length || 0,
+        backupCount: cloud?.latestBackups?.length || cloud?.restorePoints?.filter?.((p) => p.kind === 'backup_file')?.length || 0,
+        summary: cloud?.summary || null,
+        realProgress: true,
       }));
 
       if (opId !== discoveryOpId) {
@@ -270,10 +270,8 @@
       lastDiscovery = result;
       return result;
     } catch (err) {
-      clearInterval(tick);
       throw err;
     } finally {
-      clearInterval(tick);
       if (opId === discoveryOpId) {
         discoveryLock = false;
         if (activeAbort === abort) activeAbort = null;
@@ -286,19 +284,73 @@
     const elapsedMs = extra.elapsedMs || 0;
     const percent = extra.percent != null
       ? extra.percent
-      : Math.min(92, Math.round((elapsedMs / budgetMs) * 88));
+      : (extra.stageId ? 5 : null);
+    const stalled = !!extra.stalled;
+    let etaLine = '';
+    if (extra.etaMs != null && extra.etaMs > 0) {
+      etaLine = ` · متبقٍ ~${Math.round(extra.etaMs / 1000)}ث`;
+    }
     return {
       phase: extra.phase || 'discovery',
+      stageId: extra.stageId || extra.stage || null,
       stageLabel: extra.label || 'فحص مصادر البيانات',
       stageIndex: extra.foldersDone || 0,
       stageCount: extra.foldersTotal || null,
-      percent,
+      percent: percent != null ? percent : 5,
       elapsedMs,
+      etaMs: extra.etaMs || null,
       lastActivity: extra.folder
         ? `Drive: ${extra.folder}`
-        : (extra.label || 'فحص بيانات وصفية — بلا تنزيل'),
-      foundCount: extra.foundCount || 0,
+        : (stalled
+          ? `لم يصل تقدم جديد منذ ${Math.round((extra.stalledMs || NO_PROGRESS_WATCHDOG_MS) / 1000)} ثانية`
+          : (extra.label || 'فحص بيانات وصفية — بلا تنزيل')),
+      foundCount: extra.foundCount || extra.backupCount || 0,
+      backupCount: extra.backupCount || 0,
       budgetMs,
+      stalled,
+      summary: extra.summary || null,
+      detailLine: `المنقضي: ${Math.round(elapsedMs / 1000)}ث${etaLine}${extra.backupCount ? ` · نسخ: ${extra.backupCount}` : ''}`,
+    };
+  }
+
+  function formatDiscoverySummaryHtml(summary) {
+    if (!summary) return '';
+    const rows = [
+      ['Google', summary.googleConnected ? 'متصل ✓' : 'غير متصل'],
+      ['المؤسسات', summary.organizations ?? '—'],
+      ['التراخيص', summary.licenses ?? '—'],
+      ['الفروع', summary.branches ?? '—'],
+      ['الأجهزة', summary.devices ?? '—'],
+      ['مجموعات البيانات', summary.datasets ?? '—'],
+      ['Backup V2', summary.backups ?? '—'],
+      ['Attachments', summary.attachments != null ? summary.attachments : '—'],
+    ];
+    return rows.map(([k, v]) => `<div>${k}: <strong>${v}</strong></div>`).join('');
+  }
+
+  /**
+   * Unified cloud scan for Backup page — same engine/contract as BootFlow.
+   * Idempotent: does not start sync or restore.
+   */
+  async function runCloudScanForBackupPage(options = {}) {
+    if (discoveryLock) {
+      return { ok: false, error: 'discovery_in_flight', last: lastDiscovery };
+    }
+    const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+    const result = await discoverAllSources({
+      timeoutMs: options.timeoutMs || DISCOVERY_TIMEOUT_MS,
+      onProgress,
+    });
+    const cloud = result?.cloud || {};
+    return {
+      ok: result?.ok !== false,
+      cloud,
+      latestBackups: cloud.latestBackups || [],
+      restorePoints: cloud.restorePoints || [],
+      summary: cloud.summary || null,
+      newest: cloud.newest || null,
+      durationMs: result?.durationMs || cloud.durationMs || 0,
+      discovery: result,
     };
   }
 
@@ -476,11 +528,14 @@
 
   global.CloudDataDiscovery = {
     DISCOVERY_TIMEOUT_MS,
+    NO_PROGRESS_WATCHDOG_MS,
     RESTORE_STAGES,
     discoverAllSources,
     confirmedCloudRestore,
+    runCloudScanForBackupPage,
     buildProgressState,
     buildDiscoveryProgressState,
+    formatDiscoverySummaryHtml,
     formatBytes,
     formatWhen,
     cancelDiscovery,
