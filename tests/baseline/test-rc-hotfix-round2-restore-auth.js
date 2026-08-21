@@ -29,6 +29,12 @@ check(/Non-blocking: SQLite user hydrate/.test(index) || /startup auth reconcile
 check(/ensureAuthCredentialsReady/.test(index) && /doLogin/.test(index), 'doLogin awaits credential ready');
 check(/cp-return-login/.test(index) && /cancelForcedPasswordChange/.test(index), 'forced password return to login');
 check(/__assignUsersClosure/.test(index), 'users closure hook for hydrate sync');
+check(/globalThis\.__assignUsersClosure/.test(index), 'users closure uses globalThis (Electron renderer safe)');
+check(!/[^A-Za-z0-9_]global\.__assignUsersClosure/.test(index), 'must not assign users closure on bare global');
+check(/window\.doLogin = doLogin/.test(index), 'doLogin exposed on window for inline onclick');
+check(/window\.openBootWizardFromLogin = openBootWizardFromLogin/.test(index), 'BootFlow CTA exposed on window');
+check(/if \(bootOpen\) return true/.test(index), 'assertPreAuthViewport preserves open BootFlow');
+check(/Do not tear down an open BootFlow wizard/.test(index), 'ensureUserLoginScreenVisible preserves BootFlow');
 
 check(/shouldBlockOwnerSeed/.test(auth) && /hasRestoredOwnerCredential/.test(auth), 'auth credential truth guards seed');
 check(/syncUsersFromAuthoritativeStore/.test(auth), 'auth syncs users from SQLite');
@@ -88,6 +94,23 @@ Auth.syncUsersFromAuthoritativeStore();
 check(closureUsers[0].password === RESTORED_HASH, 'syncUsersFromAuthoritativeStore applies restored password to closure');
 check(Auth.shouldBlockOwnerSeed(restoredUsers), 'restored owner blocks seed');
 check(!Auth.hasRestoredOwnerCredential([{ role: 'owner', password: OWNER_SEED, seedDefaultPassword: true }]), 'seed hash alone is not restored credential');
+
+// Electron renderer: `global` is undefined — globalThis assignment must not throw
+{
+  const electronSandbox = { globalThis: {}, window: {}, console };
+  electronSandbox.window = electronSandbox.globalThis;
+  try {
+    vm.runInNewContext(
+      "let users=[];\nglobalThis.__assignUsersClosure = (store) => { users = store; };\nfunction doLogin(){ return 'ok'; }\nwindow.doLogin = doLogin;",
+      electronSandbox,
+      { timeout: 2000 }
+    );
+    check(typeof electronSandbox.globalThis.__assignUsersClosure === 'function', 'globalThis closure assign in renderer');
+    check(electronSandbox.globalThis.doLogin?.() === 'ok' || electronSandbox.window.doLogin?.() === 'ok', 'doLogin survives renderer bootstrap');
+  } catch (e) {
+    errors.push('Electron renderer simulation failed: ' + e.message);
+  }
+}
 
 if (errors.length) {
   console.error('FAIL:', errors.join('\n'));

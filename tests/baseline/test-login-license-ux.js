@@ -37,6 +37,10 @@ check(/let expenses = DB\.get\('expenses'/.test(html), 'expenses store must be d
   check(expensesDeclIdx < topSyncIdx, 'expenses must be declared before top-level syncAppGlobals()');
 }
 check(html.includes('clearPendingLoginLicenseStatus'), 'early login license safety net missing');
+check(html.includes('globalThis.__assignUsersClosure'), 'users closure must use globalThis in Electron renderer');
+check(!/[^A-Za-z0-9_]global\.__assignUsersClosure/.test(html), 'must not use bare global.__assignUsersClosure');
+check(html.includes('window.doLogin = doLogin'), 'doLogin must be on window for inline onclick');
+check(html.includes('if (bootOpen) return true'), 'assertPreAuthViewport must preserve BootFlow overlay');
 
 // ── Inline script syntax ──
 {

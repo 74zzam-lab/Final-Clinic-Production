@@ -201,8 +201,8 @@
     else if (tableKey === 'expenses') global.expenses = value;
     else if (tableKey === 'users') {
       global.users = value;
-      if (typeof global.__assignUsersClosure === 'function') {
-        try { global.__assignUsersClosure(value); } catch { /* empty */ }
+      if (typeof globalThis.__assignUsersClosure === 'function') {
+        try { globalThis.__assignUsersClosure(value); } catch { /* empty */ }
       }
     }
     else if (tableKey === 'services') global.services = value;

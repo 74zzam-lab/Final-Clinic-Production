@@ -11165,8 +11165,8 @@ function initProductionErrorHandlers() {
   if (window._prodErrorHandlers) return;
   window._prodErrorHandlers = true;
   const isBenignCloudErr = (msg) => {
-    if (global.BenignOperationalErrors?.isBenignOperationalError) {
-      return global.BenignOperationalErrors.isBenignOperationalError(msg);
+    if (globalThis.BenignOperationalErrors?.isBenignOperationalError) {
+      return globalThis.BenignOperationalErrors.isBenignOperationalError(msg);
     }
     if (!msg) return true;
     const m = String(msg);
@@ -23097,7 +23097,7 @@ function setTablePageSize(n) {
 function onTablePageSizeChange(size) {
   setTablePageSize(size);
   messageLogPage = bulkTablePage = invoiceSearchPage = clientsListPage = dailyTablePage = attLogPage = bookingsPage = expensesPage = 1;
-  if (typeof global._invoicesListPage !== 'undefined') global._invoicesListPage = 1;
+  if (typeof globalThis._invoicesListPage !== 'undefined') globalThis._invoicesListPage = 1;
   if (typeof refreshMessageLog === 'function') refreshMessageLog();
   if (typeof refreshBulkTable === 'function') refreshBulkTable();
   if (typeof refreshClientsView === 'function') refreshClientsView(false);
