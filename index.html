@@ -9595,7 +9595,7 @@ const defaultUsers = [
   { id:'3', fullName:'مالك المركز', username:'owner', password: OWNER_SEED_PASSWORD_HASH, role:'owner', empNum:'000', active:true, branchId:'BR-MAIN', branchScope:['*'], canSwitchBranch:true, mustChangePassword:true, seedDefaultPassword:true }
 ];
 let users = DB.get('users', defaultUsers);
-global.__assignUsersClosure = (store) => { users = store; };
+globalThis.__assignUsersClosure = (store) => { users = store; };
 if (typeof BranchDataIsolation !== 'undefined' && BranchDataIsolation.migrateUsersBranchIds) {
   const migrated = BranchDataIsolation.migrateUsersBranchIds(users);
   if (migrated !== users) {
@@ -27289,14 +27289,18 @@ function openBootWizardFromLogin() {
 function ensureUserLoginScreenVisible() {
   const login = document.getElementById('loginScreen');
   const license = document.getElementById('licenseScreen');
+  const bootOpen = document.getElementById('bootFlowOverlay')?.classList.contains('open');
   if (license) {
     license.classList.add('hidden');
     license.style.display = '';
   }
   // Never leave a blank viewport: if no authenticated session, force login visible.
+  // Do not tear down an open BootFlow wizard — it is a valid pre-auth surface.
   try {
-    document.getElementById('bootFlowOverlay')?.classList.remove('open');
-    document.body.classList.remove('bf-active');
+    if (!bootOpen) {
+      document.getElementById('bootFlowOverlay')?.classList.remove('open');
+      document.body.classList.remove('bf-active');
+    }
     document.getElementById('centerSetupModal')?.classList.remove('open');
     document.getElementById('cloudConnectModal')?.classList.remove('open');
     document.getElementById('devContactModal')?.classList.remove('open');
@@ -27304,7 +27308,7 @@ function ensureUserLoginScreenVisible() {
     document.getElementById('commProviderModal')?.classList.remove('open');
   } catch { /* empty */ }
   try { licSetVisibleStep('auth'); } catch { /* empty */ }
-  if (login) {
+  if (login && !bootOpen) {
     login.classList.remove('hidden');
     login.style.display = '';
     login.style.pointerEvents = '';
@@ -27329,8 +27333,10 @@ function assertPreAuthViewport() {
   if (currentUser || _appAuthed) return true;
   const login = document.getElementById('loginScreen');
   const license = document.getElementById('licenseScreen');
+  const bootOpen = document.getElementById('bootFlowOverlay')?.classList.contains('open');
   const licenseOpen = !!(license && !license.classList.contains('hidden'));
   const loginHidden = !!(login && login.classList.contains('hidden'));
+  if (bootOpen) return true;
   if (loginHidden && !licenseOpen) {
     ensureUserLoginScreenVisible();
     return false;
@@ -27437,6 +27443,8 @@ try {
   window.syncAppGlobals = syncAppGlobals;
   window.getUiScopedRecords = getUiScopedRecords;
   window.finalizeLicCheckUi = finalizeLicCheckUi;
+  window.doLogin = doLogin;
+  window.openBootWizardFromLogin = openBootWizardFromLogin;
   window.isPreAuthDbKeyAllowed = isPreAuthDbKeyAllowed;
   window.loginConnectGoogleAndBootstrap = loginConnectGoogleAndBootstrap;
   window.connectGoogleDriveOnly = connectGoogleDriveOnly;
