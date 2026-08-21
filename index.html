@@ -3953,7 +3953,18 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
   margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border);
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
 }
-.backup-combined-actions span { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-inline-end: 4px; }
+.license-readonly-banner {
+  position: sticky; top: 0; z-index: 100200;
+  background: linear-gradient(90deg, #7c2d12, #b45309);
+  color: #fff; font-size: 12px; font-weight: 600;
+  padding: 8px 14px; text-align: center; line-height: 1.6;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+body.license-readonly-mode .page-readonly input:not([data-readonly-ok]),
+body.license-readonly-mode .page-readonly select,
+body.license-readonly-mode .page-readonly textarea {
+  pointer-events: none; opacity: 0.85;
+}
 .backup-role-badge {
   display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 99px; margin-bottom: 8px;
 }
@@ -4092,7 +4103,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         function clearPendingLoginLicenseStatus(reason) {
           var el = document.getElementById('login-license-status');
           if (!el || !/جار[ٍي]?\s*التحقق/.test(String(el.textContent || ''))) return;
-          el.textContent = reason || 'ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو دخول موظف (قراءة)';
+          el.textContent = reason || 'ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو الدخول بوضع قراءة فقط';
           el.style.color = '#ffa05a';
         }
         setTimeout(function () { clearPendingLoginLicenseStatus(); }, 8000);
@@ -4115,7 +4126,7 @@ tr.client-row-selected { background: #ecfdf5 !important; outline: 2px solid var(
         <div id="login-drive-bootstrap-status" class="login-drive-status"></div>
         </div>
       </div>
-      <div id="login-employee-notice" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(45,122,95,0.2);border:1px solid rgba(45,122,95,0.4);border-radius:8px;font-size:12px;color:#5dde8a">👤 يمكن للموظفين تسجيل الدخول بصلاحية القراءة فقط</div>
+      <div id="login-readonly-notice" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(45,122,95,0.2);border:1px solid rgba(45,122,95,0.4);border-radius:8px;font-size:12px;color:#5dde8a">👁️ يمكن ل<strong>جميع المستخدمين</strong> الدخول بوضع <strong>قراءة فقط</strong> — مراجعة البيانات، طباعة التقارير، ونسخ احتياطي محلي/سحابي (بدون إدخال يومي)</div>
       <div id="login-dev-contact-panel" class="login-dev-contact-panel">
         <div id="login-dev-contact-notice" style="display:none"></div>
       </div>
@@ -9838,6 +9849,10 @@ function dbSetGuarded(key, value) {
   if (key === 'users' && (typeof _pendingForcedPwChange !== 'undefined' && _pendingForcedPwChange)) {
     return true;
   }
+  if (typeof LicenseReadOnlyMode !== 'undefined' && LicenseReadOnlyMode.isDbKeyBlocked?.(key)) {
+    try { console.warn('dbSetGuarded blocked (license read-only):', key); } catch { /* empty */ }
+    return false;
+  }
   if (!_appAuthed && !_authPending && !isPreAuthDbKeyAllowed(key)) {
     // Silent deny for automatic/pre-auth writes. User actions already call requireAuth().
     // Do NOT toast here — it caused blank-screen confusion after opening/closing activation.
@@ -10023,20 +10038,9 @@ async function doLogin() {
   await upgradeUserPassword(u, pw);
 
   if (_licStatus === 'expired' || _licStatus === 'none') {
-    // Owner/Admin must still reach license renewal + Owner Hub; employees may enter limited mode.
-    const allowWithoutValidLicense =
-      u.role === 'employee'
-      || u.role === 'owner'
-      || u.role === 'hq_admin'
-      || u.role === 'admin'
-      || !!(typeof RolePolicy !== 'undefined' && RolePolicy.isManager?.(u));
-    if (allowWithoutValidLicense) {
-      currentUser = u;
-      await finishLogin();
-      return;
-    }
-    errEl.style.display='block';
-    errEl.textContent='⛔ يرجى تجديد التفعيل للتمكن من استخدام هذا الحساب.';
+    // All active roles may enter read-only: review, print, backup — no daily operations.
+    currentUser = u;
+    await finishLogin();
     return;
   }
 
@@ -10131,9 +10135,16 @@ async function completeAuthenticatedLogin() {
   applyRoleUI();
   if (typeof applyLicensedFeatures === 'function') applyLicensedFeatures();
   init();
-  // Pull latest cloud ops + ensure sync engine running after login.
   try {
-    if (typeof ActivationSyncDefaults !== 'undefined' && ActivationSyncDefaults.isActivationBound?.()) {
+    if (typeof LicenseReadOnlyMode !== 'undefined') {
+      LicenseReadOnlyMode.syncSessionMode?.();
+      LicenseReadOnlyMode.applyUiLocks?.();
+    }
+  } catch { /* empty */ }
+  // Pull latest cloud ops + ensure sync engine running after login (skip in license read-only).
+  try {
+    const licReadOnly = typeof LicenseReadOnlyMode !== 'undefined' && LicenseReadOnlyMode.isActive?.();
+    if (!licReadOnly && typeof ActivationSyncDefaults !== 'undefined' && ActivationSyncDefaults.isActivationBound?.()) {
       ActivationSyncDefaults.applyDefaults?.({ startSync: true });
     }
   } catch { /* empty */ }
@@ -11468,6 +11479,7 @@ function showPageAfterRestoreGate(id) {
   }
   if (typeof applyPageReadOnly === 'function') applyPageReadOnly(id);
   if (typeof applyGlobalEditLocks === 'function') applyGlobalEditLocks();
+  try { LicenseReadOnlyMode?.applyUiLocks?.(); } catch { /* empty */ }
 }
 
 // ═══════════════════════════════════════════════
@@ -14776,6 +14788,7 @@ function clearForm() {
 }
 
 function saveCase() {
+  if (typeof LicenseReadOnlyMode !== 'undefined' && !LicenseReadOnlyMode.guardDailyWrite('حفظ الفاتورة')) return;
   if (window._saveCaseBusy) return;
   if (typeof hasPermission === 'function' && !hasPermission('cases.edit')) {
     notify('⛔ ليس لديك صلاحية تعديل الفواتير', 'danger'); return;
@@ -16666,6 +16679,7 @@ window.BackupBridge = BackupBridge;
 <script src="cloud/owner-setup-state.js"></script>
 <script src="cloud/owner-lifecycle-authority.js"></script>
 <script src="cloud/auth-credential-truth.js"></script>
+<script src="cloud/license-read-only-mode.js"></script>
 <script src="cloud/owner-trusted-authority.js"></script>
 <script src="cloud/owner-migration.js"></script>
 <script src="cloud/owner-bootstrap.js"></script>
@@ -17628,6 +17642,7 @@ async function refreshBackupV2Status() {
 }
 
 async function runBackupV2Create(options = {}) {
+  const exec = async () => {
   const api = getBackupV2Api();
   if (!api?.v2Create) {
     notify('⚠️ Backup V2 غير متاح في هذه الجلسة', 'danger');
@@ -17673,6 +17688,11 @@ async function runBackupV2Create(options = {}) {
     notify('⚠️ ' + (err?.message || err), 'danger');
     return null;
   }
+  };
+  if (typeof LicenseReadOnlyMode !== 'undefined' && LicenseReadOnlyMode.isActive?.()) {
+    return LicenseReadOnlyMode.runWithBackupWriteAsync(exec);
+  }
+  return exec();
 }
 
 async function runBackupV2CreateLocal() {
@@ -17890,6 +17910,7 @@ async function scanDriveBackupsV2() {
 }
 
 async function runBackupV2RestoreManual() {
+  if (typeof LicenseReadOnlyMode !== 'undefined' && !LicenseReadOnlyMode.guardRestore('استعادة النسخ الاحتياطية')) return;
   const api = getBackupV2Api();
   if (!api?.v2Restore) {
     notify('Backup V2 unavailable', 'danger');
@@ -17949,6 +17970,7 @@ async function runBackupV2RestoreManual() {
 }
 
 async function runBackupV2RestoreLatest() {
+  if (typeof LicenseReadOnlyMode !== 'undefined' && !LicenseReadOnlyMode.guardRestore('استعادة أحدث نسخة')) return;
   const api = getBackupV2Api();
   if (!api?.v2RestoreLatest) {
     notify('Backup V2 unavailable', 'danger');
@@ -18035,6 +18057,7 @@ async function runBackupV2ImportLegacy() {
 }
 
 async function saveBackupV2ScheduleFromUI() {
+  const exec = async () => {
   const api = getBackupV2Api();
   if (!api?.v2ScheduleConfigure) return;
   const mins = Number(document.getElementById('bk-v2-schedule-interval')?.value || 0);
@@ -18054,6 +18077,11 @@ async function saveBackupV2ScheduleFromUI() {
   } catch (err) {
     notify('⚠️ ' + (err?.message || err), 'danger');
   }
+  };
+  if (typeof LicenseReadOnlyMode !== 'undefined' && LicenseReadOnlyMode.isActive?.()) {
+    return LicenseReadOnlyMode.runWithBackupWriteAsync(exec);
+  }
+  return exec();
 }
 
 async function enforceBackupV2RestoreGate(pageId) {
@@ -18074,7 +18102,7 @@ async function enforceBackupV2RestoreGate(pageId) {
 async function runBackupNow(trigger) {
   if (window._backupRunning) return;
   window._backupRunning = true;
-  try {
+  const exec = async () => {
   const cfg = settings.backup;
   const data = buildFullBackupObject();
   let payload = JSON.stringify(data, null, 2);
@@ -18151,6 +18179,13 @@ async function runBackupNow(trigger) {
     logBackupEntry('fail', 'فشل النسخ: ' + (err.message || 'خطأ غير معروف'), trigger);
     notify('⚠️ فشل النسخ الاحتياطي', 'danger');
   }
+  };
+  try {
+    if (typeof LicenseReadOnlyMode !== 'undefined' && LicenseReadOnlyMode.isActive?.()) {
+      await LicenseReadOnlyMode.runWithBackupWriteAsync(exec);
+    } else {
+      await exec();
+    }
   } finally {
     window._backupRunning = false;
   }
@@ -19730,6 +19765,9 @@ function refreshAfterBackupRestore(data, res) {
 }
 
 async function applyImportedBackup(data, meta) {
+  if (typeof LicenseReadOnlyMode !== 'undefined' && !LicenseReadOnlyMode.guardRestore('استيراد النسخة الاحتياطية')) {
+    return { ok: false, error: 'license_readonly' };
+  }
   if (!requireAuth('استيراد البيانات')) return { ok: false, error: 'auth' };
   meta = meta || { source: 'migration_import', migrationOnly: true };
   if (typeof SyncedWrite === 'undefined' || !SyncedWrite.restoreFromBackup) {
@@ -25984,8 +26022,8 @@ function licIsTokenUsed(token) {
 
 // ── License status flags ──
 // 'valid'   = active license
-// 'expired' = license exists but expired → only employees can login (read-only)
-// 'none'    = no license → only employees can login (read-only)
+// 'expired' = license exists but expired → all roles login read-only
+// 'none'    = no license → all roles login read-only
 // 'blocked' = fingerprint mismatch (hard block for all non-dev)
 let _licStatus = 'none'; // 'valid' | 'expired' | 'none' | 'blocked'
 let _licDaysLeft = null;
@@ -26979,8 +27017,8 @@ function finalizeLicCheckUi(reason) {
   }
   statusEl.textContent = reason
     || (licStatus === 'expired'
-      ? '❌ انتهت صلاحية الترخيص — الدخول للموظفين فقط (قراءة)'
-      : 'ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو دخول موظف (قراءة)');
+      ? '❌ انتهت صلاحية الترخيص — دخول قراءة فقط لجميع المستخدمين'
+      : 'ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو الدخول بوضع قراءة فقط');
   statusEl.style.color = licStatus === 'expired' ? '#ff8888' : '#ffa05a';
   try { _licApplyLoginRestrictions(); } catch { /* empty */ }
   try { licUpdateLoginDevNotice(); } catch { /* empty */ }
@@ -27081,7 +27119,7 @@ async function licCheck() {
     _licStatus = 'none';
     _licDaysLeft = null;
     _licExpiringSoon = false;
-    if (statusEl) { statusEl.textContent = '⛔ البرنامج غير مفعل — الدخول للموظفين فقط (قراءة)'; statusEl.style.color = '#ffa05a'; }
+    if (statusEl) { statusEl.textContent = '⛔ البرنامج غير مفعل — دخول قراءة فقط لجميع المستخدمين'; statusEl.style.color = '#ffa05a'; }
     licLog('no_license', 'لا يوجد ترخيص');
     _licApplyLoginRestrictions();
     licUpdateLoginDevNotice();
@@ -27101,7 +27139,7 @@ async function licCheck() {
     _licStatus = 'expired';
     _licDaysLeft = 0;
     _licExpiringSoon = false;
-    if (statusEl) { statusEl.textContent = `❌ انتهت صلاحية البرنامج في ${lic.expiry} — الدخول للموظفين فقط`; statusEl.style.color = '#ff8888'; }
+    if (statusEl) { statusEl.textContent = `❌ انتهت صلاحية البرنامج في ${lic.expiry} — دخول قراءة فقط لجميع المستخدمين`; statusEl.style.color = '#ff8888'; }
     licLog('expired', `منتهي منذ ${lic.expiry}`);
     _licApplyLoginRestrictions();
     licUpdateLoginDevNotice();
@@ -27133,7 +27171,7 @@ async function licCheck() {
     _licDaysLeft = null;
     _licExpiringSoon = false;
     if (statusEl) {
-      statusEl.textContent = '⛔ تعذّر التحقق من الترخيص — الدخول للموظفين فقط (قراءة)';
+      statusEl.textContent = '⛔ تعذّر التحقق من الترخيص — دخول قراءة فقط لجميع المستخدمين';
       statusEl.style.color = '#ffa05a';
     }
     try { licLog('check_error', String(err?.message || err).slice(0, 120)); } catch {}
@@ -27149,7 +27187,7 @@ async function licCheck() {
     run(),
     new Promise((resolve) => setTimeout(() => {
       if (stillCurrent()) {
-        finalizeLicCheckUi('ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو دخول موظف (قراءة)');
+        finalizeLicCheckUi('ℹ️ لم يُفعّل الترخيص بعد — يمكنك «بدء الإعداد» أو الدخول بوضع قراءة فقط');
       }
       resolve(false);
     }, 3500))
@@ -27175,11 +27213,11 @@ function _licHardBlock(msg) {
 
 // Apply login restrictions based on license status
 // valid   → all roles can login normally
-// expired/none → admin & reception BLOCKED, employee allowed (read-only)
+// expired/none → all roles can login (read-only)
 // blocked → everyone blocked (except dev via password)
 function _licApplyLoginRestrictions() {
   const loginBtn    = document.querySelector('.login-btn');
-  const noticeEl    = document.getElementById('login-employee-notice');
+  const noticeEl    = document.getElementById('login-readonly-notice');
   if (!loginBtn) return;
   if (_licStatus === 'valid') {
     loginBtn.disabled = false; loginBtn.style.opacity = ''; loginBtn.style.cursor = '';
@@ -27191,7 +27229,7 @@ function _licApplyLoginRestrictions() {
     if (noticeEl) noticeEl.style.display = 'none';
     return;
   }
-  // expired or none: keep button enabled, show employee notice
+  // expired or none: keep button enabled, show read-only notice for all users
   loginBtn.disabled = false; loginBtn.style.opacity = ''; loginBtn.style.cursor = '';
   if (noticeEl) noticeEl.style.display = 'block';
 }
@@ -27571,13 +27609,13 @@ function licRefreshStatus() {
   if (el) {
     if (!lic) {
       el.className = 'lic-status none';
-      el.textContent = '⛔ البرنامج غير مفعل — الدخول للموظفين فقط (قراءة)';
+      el.textContent = '⛔ البرنامج غير مفعل — دخول قراءة فقط لجميع المستخدمين';
     } else {
       const now    = new Date();
       const expiry = new Date(lic.expiry);
       if (now > expiry) {
         el.className = 'lic-status expired';
-        el.textContent = `✗ انتهت الصلاحية في: ${lic.expiry} — الدخول للموظفين فقط`;
+        el.textContent = `✗ انتهت الصلاحية في: ${lic.expiry} — دخول قراءة فقط لجميع المستخدمين`;
       } else {
         const days = Math.ceil((expiry - now) / 86400000);
         el.className = 'lic-status valid';
@@ -28255,11 +28293,7 @@ if (typeof CommercialLicense !== 'undefined' && CommercialLicense.engine) {
         ensureUserLoginScreenVisible();
         return;
       }
-      if ((_licStatus === 'expired' || _licStatus === 'none') && u.role !== 'employee') {
-        clearUserSession();
-        ensureUserLoginScreenVisible();
-        return;
-      }
+      // expired/none: all roles may restore session in license read-only mode
       // Password reset / ownership transfer invalidates prior session epochs.
       const userEpoch = Number(u.sessionEpoch) || 0;
       const sessEpoch = Number(session.sessionEpoch) || 0;

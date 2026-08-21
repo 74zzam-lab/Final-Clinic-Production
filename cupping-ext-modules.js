@@ -244,7 +244,10 @@ function requirePermission(key, action) {
   return true;
 }
 
-function canEditPermission(key) { return hasPermission(key); }
+function canEditPermission(key) {
+  if (typeof window !== 'undefined' && window.LicenseReadOnlyMode?.isActive?.()) return false;
+  return hasPermission(key);
+}
 
 if (typeof window !== 'undefined') {
   window.PermissionPolicy = window.PermissionPolicy || {};
@@ -385,6 +388,7 @@ function logSystem(category, action, detail, meta) {
 }
 
 function canEditPage(pageId) {
+  if (typeof window !== 'undefined' && window.LicenseReadOnlyMode?.isActive?.()) return false;
   const key = PAGE_EDIT_PERMISSIONS[pageId];
   if (!key) return false;
   return hasPermission(key);
@@ -399,6 +403,7 @@ function parseNavPageId(el) {
 }
 
 function applyGlobalEditLocks() {
+  const licReadOnly = typeof window !== 'undefined' && window.LicenseReadOnlyMode?.isActive?.();
   const locks = [
     { sel: 'button[onclick="saveCase()"]', perm: 'cases.edit' },
     { sel: 'button[onclick*="saveBooking"]', perm: 'bookings.edit' },
@@ -414,7 +419,7 @@ function applyGlobalEditLocks() {
   ];
   locks.forEach(({ sel, perm }) => {
     document.querySelectorAll(sel).forEach(btn => {
-      const ok = hasPermission(perm);
+      const ok = !licReadOnly && hasPermission(perm);
       btn.classList.toggle('perm-locked', !ok);
       if (btn.classList.contains('btn-danger') || btn.classList.contains('btn-primary') || sel.includes('save') || sel.includes('delete')) {
         btn.style.display = ok ? '' : 'none';

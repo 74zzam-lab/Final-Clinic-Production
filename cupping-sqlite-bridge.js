@@ -642,6 +642,9 @@
 
   async function commitOperational(tableKey, records, options) {
     options = options || {};
+    if (global.LicenseReadOnlyMode?.isDbKeyBlocked?.(tableKey)) {
+      return { ok: false, error: 'license_readonly_mode' };
+    }
     const writeGate = assertOperationalWriteBranch();
     if (!writeGate.ok) return { ok: false, error: writeGate.error || 'operational_write_branch_required' };
     const db = api();
@@ -701,6 +704,9 @@
   }
 
   async function commitKv(key, value) {
+    if (global.LicenseReadOnlyMode?.isDbKeyBlocked?.(key)) {
+      return { ok: false, error: 'license_readonly_mode' };
+    }
     const writeGate = assertOperationalWriteBranch();
     if (!writeGate.ok) return { ok: false, error: writeGate.error || 'operational_write_branch_required' };
     const db = api();
