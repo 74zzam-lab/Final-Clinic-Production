@@ -238,7 +238,9 @@
         percent: 100,
         stageId: 'done',
         foundCount: cloud?.restorePoints?.length || 0,
-        backupCount: cloud?.latestBackups?.length || cloud?.restorePoints?.filter?.((p) => p.kind === 'backup_file')?.length || 0,
+        backupCount: cloud?.latestBackups?.length
+          || cloud?.restorePoints?.filter?.((p) => p.kind === 'backup_v2' || p.kind === 'backup_file')?.length
+          || 0,
         summary: cloud?.summary || null,
         realProgress: true,
       }));
@@ -401,11 +403,18 @@
   async function confirmedCloudRestore(point, options = {}) {
     if (restoreLock) return { ok: false, error: 'restore_in_flight' };
     if (!point) return { ok: false, error: 'no_restore_point' };
-    if (point.kind === 'backup_file' || point.source === 'cloud_backup') {
+    if (isBackupV2RestorePoint(point)) {
       return {
         ok: false,
         error: 'backup_v2_requires_atomic_restore',
         message: 'نسخ Backup V2 تتطلب استعادة atomic — لا تستخدم مسار Sync Hydrate.',
+      };
+    }
+    if (!isSyncHydrateRestorePoint(point)) {
+      return {
+        ok: false,
+        error: 'sync_hydrate_point_required',
+        message: 'لا توجد بيانات Sync للفرع — استخدم استعادة Backup V2 أو انتظر المزامنة.',
       };
     }
 
@@ -540,7 +549,15 @@
   }
 
   function isBackupV2RestorePoint(point) {
-    return !!(point && (point.kind === 'backup_file' || point.source === 'cloud_backup'));
+    return !!(point && (
+      point.kind === 'backup_v2'
+      || point.kind === 'backup_file'
+      || point.source === 'cloud_backup'
+    ));
+  }
+
+  function isSyncHydrateRestorePoint(point) {
+    return !!(point && (point.kind === 'sync_checkpoint' || point.kind === 'sync_dataset'));
   }
 
   /**
@@ -756,6 +773,7 @@
     confirmedCloudRestore,
     confirmedBackupV2Restore,
     isBackupV2RestorePoint,
+    isSyncHydrateRestorePoint,
     runCloudScanForBackupPage,
     buildProgressState,
     buildDiscoveryProgressState,

@@ -60,7 +60,7 @@ const cloud = require(path.join(root, 'electron/backup-v2-cloud'));
 bootstrapMod.configure({
   getUserDataPath: () => '/tmp/test-userdata',
   readKv: (key) => (key === '__tdw_boot_wizard__' ? { syncDone: false } : null),
-  getCloudStatus: async () => ({ ok: true }),
+  getCloudStatus: async () => ({ connected: true, email: 'test@clinic.test', oauth: true }),
   readLicense: (centerId) => ({
     ok: true,
     data: { centerId, branches: [{ id: 'B1', active: true }] },

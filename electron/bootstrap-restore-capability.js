@@ -7,6 +7,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { assertCloudProviderAuthenticated } = require('./cloud-provider-auth');
 
 const CAPABILITY_TTL_MS = 5 * 60 * 1000;
 
@@ -17,7 +18,8 @@ const BOOTSTRAP_RESTORE_CHANNELS = new Set([
 let deps = {
   getUserDataPath: () => '',
   readKv: () => null,
-  getCloudStatus: async () => ({ ok: false }),
+  getCloudStatus: async () => ({ connected: false }),
+  assertDriveReadable: null,
   readLicense: () => ({ ok: false }),
   getSession: () => null,
 };
@@ -100,8 +102,25 @@ async function issueRestoreCapability(event, request) {
   }
 
   const google = await deps.getCloudStatus('google');
-  if (!google?.ok) {
-    return { ok: false, error: 'google_not_connected' };
+  const authGate = assertCloudProviderAuthenticated(google);
+  if (!authGate.ok) {
+    return {
+      ok: false,
+      error: authGate.error || 'google_not_connected',
+      reason: authGate.reason || 'google_status_contract_mismatch',
+      message: authGate.detail || undefined,
+    };
+  }
+
+  if (typeof deps.assertDriveReadable === 'function') {
+    const driveGate = await deps.assertDriveReadable(remotePath);
+    if (!driveGate?.ok) {
+      return {
+        ok: false,
+        error: driveGate.error || 'drive_download_auth_failed',
+        reason: driveGate.reason || 'drive_path_unreachable',
+      };
+    }
   }
 
   const settingsId = readSettingsIdentity(deps.getUserDataPath());

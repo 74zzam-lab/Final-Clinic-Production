@@ -141,6 +141,7 @@ const baseline = [
   ['tests/baseline/test-rc-hotfix-round3-uat-truth.js', 'rc-hotfix-round3:uat-truth'],
   ['tests/baseline/test-rc-hotfix-round4-backup-routing-sync-truth.js', 'rc-hotfix-round4:backup-routing-sync-truth'],
   ['tests/baseline/test-rc-hotfix-round5-bootstrap-restore-auth.js', 'rc-hotfix-round5:bootstrap-restore-auth'],
+  ['tests/baseline/test-rc-hotfix-round6-google-hydrate-routing.js', 'rc-hotfix-round6:google-hydrate-routing'],
   ['tests/baseline/test-license-read-only-all-roles.js', 'license-read-only:all-roles'],
   ['scripts/v2-5-8-scenarios-all.cjs', 'v2-5.8:scenarios'],
   ['scripts/windows-uat/v2-5-8-activation-runtime.cjs', 'v2-5.8:windows-uat'],

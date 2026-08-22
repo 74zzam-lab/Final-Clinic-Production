@@ -229,17 +229,42 @@ async function probeFileMeta(googleDrive, remotePath) {
   };
 }
 
+async function assertDrivePathReadable(remotePath) {
+  const googleDrive = require('./cloud-providers/google-drive');
+  try {
+    const meta = await probeFileMeta(googleDrive, remotePath);
+    if (!meta.found) {
+      return { ok: false, error: 'drive_download_auth_failed', reason: 'path_not_found' };
+    }
+    return { ok: true, item: meta.item, requests: meta.requests };
+  } catch (err) {
+    const msg = err?.message || String(err);
+    if (/google_not_connected|google_no_access_token|unauthorized|401|invalid_grant/i.test(msg)) {
+      return { ok: false, error: 'google_token_unavailable', reason: 'drive_auth_failed', detail: msg };
+    }
+    return { ok: false, error: 'drive_download_auth_failed', reason: 'probe_failed', detail: msg };
+  }
+}
+
 function finalizeRestorePoints(out) {
   out.restorePoints.sort((a, b) => String(b.modifiedAt || '').localeCompare(String(a.modifiedAt || '')));
-  const backupFiles = out.restorePoints.filter((p) => p.kind === 'backup_file');
+  const backupFiles = filterBackupRestorePoints(out.restorePoints);
+  const syncPoints = filterSyncHydratePoints(out.restorePoints);
   out.latestBackups = backupFiles.slice(0, BACKUP_RETENTION_DISPLAY);
-  const newestBackup = backupFiles[0] || null;
-  const newestAny = out.restorePoints[0] || null;
-  out.newest = newestBackup || newestAny;
+  out.newestBackup = backupFiles[0] || null;
+  out.syncRestorePoints = syncPoints;
+  out.newestSyncCheckpoint = syncPoints[0] || null;
+  out.newest = out.newestBackup || out.newestSyncCheckpoint || out.restorePoints[0] || null;
   return out.newest;
 }
 
 const { classifyBackupFile, classifyLabelAr } = require('./backup-v2-classify');
+const {
+  filterBackupRestorePoints,
+  filterSyncHydratePoints,
+  isBackupRestorePoint,
+} = require('./restore-point-kinds');
+const { isCloudProviderAuthenticated } = require('./cloud-provider-auth');
 
 function buildDiscoverySummary(out, options = {}) {
   const branchIds = new Set();
@@ -248,7 +273,7 @@ function buildDiscoverySummary(out, options = {}) {
   }
   const localBranches = Array.isArray(options.localBranches) ? options.localBranches.length : 0;
   const branchCount = Math.max(branchIds.size, localBranches, options.branchId ? 1 : 0);
-  const backupFiles = (out.restorePoints || []).filter((p) => p.kind === 'backup_file');
+  const backupFiles = filterBackupRestorePoints(out.restorePoints || []);
   const backupCount = backupFiles.length;
   const retentionDisplay = options.backupRetentionDisplay || 3;
   const breakdown = { automatic: 0, manual: 0, safety: 0, pinned: 0, other: 0 };
@@ -387,7 +412,7 @@ async function discoverCloudRestorePoints(options = {}) {
       foldersDone,
       foldersTotal,
       foundCount: out.restorePoints.length,
-      backupCount: (out.restorePoints || []).filter((p) => p.kind === 'backup_file').length,
+      backupCount: filterBackupRestorePoints(out.restorePoints || []).length,
       elapsedMs,
       budgetMs: overallMs,
       etaMs,
@@ -436,7 +461,7 @@ async function discoverCloudRestorePoints(options = {}) {
       if (seen.has(item.id || item.path)) continue;
       seen.add(item.id || item.path);
       out.restorePoints.push({
-        kind: 'backup_file',
+        kind: 'backup_v2',
         source: 'cloud_backup',
         id: item.id,
         name: item.name,
@@ -506,7 +531,7 @@ async function discoverCloudRestorePoints(options = {}) {
         raw: s,
       };
     });
-    out.googleConnected = !!status?.ok;
+    out.googleConnected = isCloudProviderAuthenticated(status?.raw || status);
     if (!out.googleConnected) {
       out.status = status?.status === 'needs_reauth' ? 'token_expired' : 'offline';
       out.message = status?.status === 'needs_reauth'
@@ -567,14 +592,14 @@ async function discoverCloudRestorePoints(options = {}) {
       folder === 'Backups/V2' ? v2DeepList : {}
     )));
 
-    const backupCount = out.restorePoints.filter((p) => p.kind === 'backup_file').length;
+    const backupCount = filterBackupRestorePoints(out.restorePoints).length;
     if (backupCount < BACKUP_RETENTION_DISPLAY) {
       for (const folder of remainingFolders) {
         if (Date.now() >= overallDeadline) {
           out.partialScan = foldersProbed < foldersTotal;
           break;
         }
-        if (out.restorePoints.filter((p) => p.kind === 'backup_file').length >= BACKUP_RETENTION_DISPLAY
+        if (filterBackupRestorePoints(out.restorePoints).length >= BACKUP_RETENTION_DISPLAY
           && folder !== 'Backups/V2') {
           continue;
         }
@@ -703,4 +728,6 @@ module.exports = {
   computeStagePercent,
   finalizeRestorePoints,
   discoverCloudRestorePoints,
+  assertDrivePathReadable,
+  isBackupRestorePoint,
 };

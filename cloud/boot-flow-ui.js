@@ -1178,7 +1178,7 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             </tr>`;
           }).join('');
           hostEl.innerHTML = `<table class="table table-sm" dir="rtl" style="width:100%;margin-top:8px">
-            <thead><tr><th>النسخة</th><th>التاريخ</th><th>الحج</th><th>النوع / النطاق</th><th></th></tr></thead>
+            <thead><tr><th>النسخة</th><th>التاريخ</th><th>الحجم</th><th>النوع / النطاق</th><th></th></tr></thead>
             <tbody>${rows}</tbody></table>`;
           hostEl.querySelectorAll('.bf-pick-backup').forEach((btn) => {
             btn.addEventListener('click', () => {
@@ -1259,7 +1259,7 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
 
           const cloud = discovery?.cloud || {};
           const dur = discovery?.durationMs != null ? `${discovery.durationMs}ms` : '—';
-          const cloudHasPoint = !!(cloud.newest && (cloud.status === 'ready' || cloud.status === 'ipc_missing'));
+          const cloudHasPoint = !!(cloud.newestBackup || (cloud.newest && (cloud.newest.kind === 'backup_v2' || cloud.newest.kind === 'backup_file')) || (cloud.status === 'ready' || cloud.status === 'ipc_missing') && cloud.latestBackups?.length);
           if (statusEl) {
             if (cloudHasPoint && cloud.timedOut) {
               statusEl.textContent = `⚠️ اكتمل الفحص جزئياً (${dur}) — وُجدت نسخة سحابية للتأكيد.`;
@@ -1276,22 +1276,25 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
           // --- Cloud card ---
           const latestBackups = (cloud.latestBackups && cloud.latestBackups.length)
             ? cloud.latestBackups
-            : (cloud.newest ? [cloud.newest] : []);
-          const newest = latestBackups[0] || cloud.newest;
+            : (cloud.newestBackup ? [cloud.newestBackup] : (cloud.newest && (cloud.newest.kind === 'backup_v2' || cloud.newest.kind === 'backup_file') ? [cloud.newest] : []));
+          const newestBackup = cloud.newestBackup || latestBackups[0] || null;
+          const syncRestorePoints = cloud.syncRestorePoints || [];
+          const newestSyncCheckpoint = cloud.newestSyncCheckpoint || syncRestorePoints[0] || null;
           const cloudStatus = cloud.status || 'unknown';
           const summaryHtml = cloud.summary && Discovery.formatDiscoverySummaryHtml
             ? `<div class="bf-discovery-summary" style="margin:8px 0;padding:8px;border:1px solid var(--border,#ddd);border-radius:6px">${Discovery.formatDiscoverySummaryHtml(cloud.summary)}</div>`
             : '';
-          const cloudMeta = newest
+          const cloudMeta = newestBackup
             ? `الحالة: <strong>${cloud.timedOut ? 'جاهزة (فحص جزئي)' : 'جاهزة للتأكيد'}</strong><br>
                ${cloud.timedOut ? `<span class="bf-source-meta">⚠️ ${cloud.message || 'انتهت المهلة لكن وُجدت نسخ.'}</span><br>` : ''}
                ${summaryHtml}
+               ${newestSyncCheckpoint ? `<span class="bf-source-meta">Sync checkpoint: <code dir="ltr">${newestSyncCheckpoint.path || newestSyncCheckpoint.name || '—'}</code></span><br>` : '<span class="bf-source-meta">Sync hydrate: لا توجد بيانات Sync للفرع في metadata</span><br>'}
                <div id="bf-cloud-backup-table"></div>`
             : `${summaryHtml}الحالة: <strong>${cloudStatus}</strong><br>${cloud.message || 'لم يتم العثور على نسخ سحابية — جرّب «ملف Backup» أو تأكد من حساب Google.'}`;
 
           const cloudCard = addSourceCard({
             title: '☁️ بيانات سحابية (آخر 3 نسخ Backup V2)',
-            status: newest ? 'ready' : cloudStatus,
+            status: newestBackup ? 'ready' : cloudStatus,
             metaHtml: cloudMeta,
           });
 
@@ -1351,6 +1354,10 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
 
           const runCloudSyncHydrate = async (point) => {
             if (!point) return;
+            if (!Discovery?.isSyncHydrateRestorePoint?.(point)) {
+              setStatus('⚠️ لا توجد بيانات Sync صالحة — استخدم استعادة Backup V2', true);
+              return;
+            }
             if (restoreInFlight || Discovery.isRestoreLocked?.()) {
               setStatus('⚠️ عملية سحب جارية — انتظر', true);
               return;
@@ -1410,13 +1417,19 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             }
           };
 
-          if (newest && (cloudStatus === 'ready' || cloudStatus === 'ipc_missing')) {
-            addBtn(cloudCard.actions, 'استعادة أحدث نسخة Backup V2', 'btn-primary', () => runCloudBackupV2Restore(newest));
-            addBtn(cloudCard.actions, 'سحب Sync Hydrate (بدون Backup)', 'btn-secondary', () => runCloudSyncHydrate(newest));
+          if (newestBackup && (cloudStatus === 'ready' || cloudStatus === 'ipc_missing')) {
+            addBtn(cloudCard.actions, 'استعادة أحدث نسخة Backup V2', 'btn-primary', () => runCloudBackupV2Restore(newestBackup));
+            if (newestSyncCheckpoint) {
+              addBtn(cloudCard.actions, 'سحب Sync Hydrate (بدون Backup)', 'btn-secondary', () => runCloudSyncHydrate(newestSyncCheckpoint));
+            } else {
+              addBtn(cloudCard.actions, 'سحب Sync Hydrate (لا توجد بيانات Sync)', 'btn-secondary', () => {
+                setStatus('⚠️ لا توجد بيانات Sync للفرع — استخدم استعادة Backup V2', true);
+              }, true);
+            }
             if (latestBackups.length > 1) {
               addBtn(cloudCard.actions, 'استعادة النسخة المحددة Backup V2', 'btn-secondary', () => {
                 const sel = cloudCard.card.dataset.selectedBackup;
-                const point = latestBackups.find((p) => (p.path || p.name) === sel) || newest;
+                const point = latestBackups.find((p) => (p.path || p.name) === sel) || newestBackup;
                 runCloudBackupV2Restore(point);
               });
             }
