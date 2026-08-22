@@ -67,6 +67,7 @@ const ALLOWED_INVOKE = new Set([
   'backup:v2:restoreUnified',
   'backup:v2:downloadAndRestore',
   'backup:v2:restoreFromCloudRemote',
+  'backup:restoreRehydrateResult',
   'backup:v2:prune',
   'backup:v2:formatPolicy',
   'backup:v2:scheduleStatus',
@@ -230,6 +231,12 @@ const cuppingApi = {
       ipcRenderer.on('backup:restoreProgress', listener);
       return () => ipcRenderer.removeListener('backup:restoreProgress', listener);
     },
+    onRestoreRehydrateRequest: (handler) => {
+      const listener = (_event, payload) => { try { handler(payload); } catch { /* observer */ } };
+      ipcRenderer.on('backup:restoreRehydrateRequest', listener);
+      return () => ipcRenderer.removeListener('backup:restoreRehydrateRequest', listener);
+    },
+    restoreRehydrateResult: (payload) => invoke('backup:restoreRehydrateResult', payload),
     v2DownloadAndRestore: (options) => invoke('backup:v2:downloadAndRestore', options),
     v2RestoreFromCloudRemote: (options) => invoke('backup:v2:restoreFromCloudRemote', options),
     v2Prune: (options) => invoke('backup:v2:prune', options),

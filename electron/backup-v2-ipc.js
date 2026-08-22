@@ -6,7 +6,7 @@
  */
 const path = require('path');
 const fs = require('fs');
-const { dialog } = require('electron');
+const { dialog, webContents } = require('electron');
 const backupV2 = require('./backup-v2-core');
 const restoreAuthority = require('./restore-authority');
 const backupV2Cloud = require('./backup-v2-cloud');
@@ -155,6 +155,76 @@ function registerBackupV2Ipc({
   }
 
   configureRestoreCoordinator();
+
+  const pendingRehydrates = new Map();
+  const REHYDRATE_TIMEOUT_MS = 120000;
+
+  async function rehydrateRuntime(opts = {}) {
+    const diagnosticId = String(opts.diagnosticId || '').trim();
+    const wcId = Number(opts.webContentsId);
+    if (!diagnosticId || !Number.isFinite(wcId) || wcId < 0) {
+      return { ok: true, skipped: true, reason: 'no_renderer' };
+    }
+    const wc = webContents.fromId(wcId);
+    if (!wc || wc.isDestroyed?.()) {
+      return { ok: false, error: 'restore_rehydrate_renderer_unavailable' };
+    }
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        pendingRehydrates.delete(diagnosticId);
+        resolve({ ok: false, error: 'restore_rehydrate_timeout' });
+      }, Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : REHYDRATE_TIMEOUT_MS);
+
+      pendingRehydrates.set(diagnosticId, {
+        resolve: (result) => {
+          clearTimeout(timeout);
+          resolve(result || { ok: false, error: 'restore_rehydrate_empty_result' });
+        },
+      });
+
+      try {
+        wc.send('backup:restoreRehydrateRequest', {
+          diagnosticId,
+          rowCounts: opts.rowCounts || null,
+          manifest: opts.manifest || null,
+          scopeTruth: opts.scopeTruth || null,
+          source: opts.source || 'backup_v2_restore_rehydrate',
+        });
+      } catch (err) {
+        clearTimeout(timeout);
+        pendingRehydrates.delete(diagnosticId);
+        resolve({ ok: false, error: String(err?.message || err || 'restore_rehydrate_send_failed') });
+      }
+    });
+  }
+
+  handle('backup:restoreRehydrateResult', async (_event, payload) => {
+    const diagnosticId = String(payload?.diagnosticId || '').trim();
+    const pending = diagnosticId ? pendingRehydrates.get(diagnosticId) : null;
+    if (pending) {
+      pendingRehydrates.delete(diagnosticId);
+      pending.resolve(payload);
+    }
+    return { ok: true, received: !!pending };
+  });
+
+  backupRestoreCoordinator.configure({
+    rehydrateRuntime,
+    runLocalRestore: async (filePath, opts) => {
+      try {
+        return await runRestore(filePath, opts);
+      } catch (error) {
+        return {
+          ok: false,
+          error: error.code || error.message || 'restore_failed',
+          message: error.message || error.code || 'restore_failed',
+          rolledBack: error.rollbackError == null,
+          progress: error.progress,
+        };
+      }
+    },
+  });
 
   function buildScopeContext(opts = {}, identity = {}) {
     return {

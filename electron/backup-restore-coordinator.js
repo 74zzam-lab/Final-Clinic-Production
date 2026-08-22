@@ -17,6 +17,7 @@ const STAGES = Object.freeze([
   'safety_snapshot',
   'restoring',
   'reopening',
+  'rehydrating_runtime',
   'verifying_data',
   'completed',
 ]);
@@ -29,6 +30,7 @@ const STAGE_LABELS_AR = Object.freeze({
   safety_snapshot: 'إنشاء نسخة أمان للحالة الحالية',
   restoring: 'استعادة قاعدة البيانات',
   reopening: 'إعادة فتح SQLite',
+  rehydrating_runtime: 'تحديث الذاكرة من قاعدة البيانات',
   verifying_data: 'التحقق من البيانات المستعادة',
   completed: 'تجهيز المزامنة',
 });
@@ -41,6 +43,7 @@ let deps = {
   runLocalRestore: async () => ({ ok: false }),
   reopenDatabase: async () => {},
   countDatabaseRows: () => ({ ok: false, counts: {} }),
+  rehydrateRuntime: async () => ({ ok: true, skipped: true }),
   inspectBackupBuffer: () => ({ manifest: null }),
   verifyBackupFile: () => ({ ok: true }),
   scopeFromManifest: () => ({}),
@@ -302,6 +305,22 @@ async function restore(request = {}) {
       onProgress: (evt) => emit('restoring', { intraRatio: 0.5, restoreProgress: evt }),
     });
 
+    if (!restoreRes || restoreRes.ok === false) {
+      if (identitySnapshot) {
+        try { deviceIdentity.restore(userDataDir, identitySnapshot); } catch { /* best effort */ }
+      }
+      return {
+        ok: false,
+        error: restoreRes?.error || restoreRes?.message || 'restore_failed',
+        message: restoreRes?.message || restoreRes?.error || 'restore_failed',
+        stage: 'restoring',
+        diagnosticId,
+        restoreVerified: false,
+        preservedIdentity: !!identitySnapshot,
+        restore: restoreRes || null,
+      };
+    }
+
     emit('reopening', { intraRatio: 0.3 });
     await deps.reopenDatabase?.();
     deviceIdentity.restore(userDataDir, identitySnapshot);
@@ -311,37 +330,95 @@ async function restore(request = {}) {
       deps.consumeBootstrapCapability(bootstrapRestoreCapabilityId);
     }
 
-    emit('verifying_data', { intraRatio: 0.2 });
     const dbPath = path.join(userDataDir, 'database', 'tadawi.db');
     const rowCountRes = deps.countDatabaseRows(dbPath);
-    const manifest = restoreRes?.manifest || downloadResult?.manifest || null;
-    const scopeTruth = restoreRes?.scopeTruth || downloadResult?.scopeTruth || null;
-    const countVerify = verifyCountsAgainstManifest(manifest, scopeTruth, rowCountRes?.counts || restoreRes?.rowCounts);
-    emit('verifying_data', {
+    const sqliteCounts = rowCountRes?.counts || restoreRes?.rowCounts || {};
+
+    emit('rehydrating_runtime', { intraRatio: 0.05 });
+    const rehydrateRes = await deps.rehydrateRuntime?.({
+      diagnosticId,
+      webContentsId: request.webContentsId,
+      manifest: restoreRes?.manifest || downloadResult?.manifest || null,
+      scopeTruth: restoreRes?.scopeTruth || downloadResult?.scopeTruth || null,
+      rowCounts: sqliteCounts,
+      onSubstage: (_name, ratio) => emit('rehydrating_runtime', { intraRatio: Math.min(0.95, 0.1 + (ratio || 0) * 0.85) }),
+    }) || { ok: true, skipped: true };
+
+    if (!rehydrateRes || rehydrateRes.ok === false) {
+      return {
+        ok: false,
+        error: rehydrateRes?.error || 'restore_rehydrate_failed',
+        stage: 'rehydrating_runtime',
+        diagnosticId,
+        restoreVerified: false,
+        rehydrate: rehydrateRes || null,
+        rowCounts: sqliteCounts,
+        preservedIdentity: !!identitySnapshot,
+        restore: restoreRes,
+      };
+    }
+    emit('rehydrating_runtime', {
       intraRatio: 1,
-      rowCounts: rowCountRes?.counts || restoreRes?.rowCounts,
-      countVerify,
+      memoryCounts: rehydrateRes.memoryCounts,
+      sqliteCounts: rehydrateRes.sqliteCounts || sqliteCounts,
     });
 
-    const restoreVerified = countVerify.ok !== false;
+    emit('verifying_data', { intraRatio: 0.2 });
+    const manifest = restoreRes?.manifest || downloadResult?.manifest || null;
+    const scopeTruth = restoreRes?.scopeTruth || downloadResult?.scopeTruth || null;
+    const countVerify = verifyCountsAgainstManifest(manifest, scopeTruth, sqliteCounts);
+    const memoryVerify = rehydrateRes.skipped
+      ? { ok: true, skipped: true }
+      : {
+        ok: rehydrateRes.ok !== false,
+        memoryCounts: rehydrateRes.memoryCounts,
+        sqliteCounts: rehydrateRes.sqliteCounts || sqliteCounts,
+        mismatches: rehydrateRes.mismatches || [],
+      };
+    emit('verifying_data', {
+      intraRatio: 1,
+      rowCounts: sqliteCounts,
+      countVerify,
+      memoryVerify,
+    });
+
+    const restoreVerified = countVerify.ok !== false && memoryVerify.ok !== false;
+    if (!restoreVerified) {
+      return {
+        ok: false,
+        error: memoryVerify.ok === false ? 'restore_rehydrate_memory_mismatch' : 'restore_count_mismatch',
+        stage: memoryVerify.ok === false ? 'rehydrating_runtime' : 'verifying_data',
+        diagnosticId,
+        restoreVerified: false,
+        countVerify,
+        memoryVerify,
+        rehydrate: rehydrateRes,
+        rowCounts: sqliteCounts,
+        preservedIdentity: !!identitySnapshot,
+        restore: restoreRes,
+      };
+    }
+
     emit('completed', {
       intraRatio: 1,
       percent: 100,
-      restoreVerified,
+      restoreVerified: true,
       reconciliationRequired: true,
     });
 
     return {
-      ok: restoreRes?.ok !== false && restoreVerified,
+      ok: true,
       diagnosticId,
       filePath: localPath,
       remotePath: request.remotePath || downloadResult?.remotePath || null,
       googleFileId: request.googleFileId || downloadResult?.googleFileId || null,
       download: downloadResult,
       restore: restoreRes,
-      rowCounts: rowCountRes?.counts || restoreRes?.rowCounts,
+      rehydrate: rehydrateRes,
+      rowCounts: sqliteCounts,
       countVerify,
-      restoreVerified,
+      memoryVerify,
+      restoreVerified: true,
       preservedIdentity: identitySnapshot,
       bootstrapRestore: context === 'bootstrap',
       durationMs: Date.now() - startedMs,

@@ -638,6 +638,7 @@
         safety_snapshot: 'local_safety',
         restoring: 'cloud_merge',
         reopening: 'cloud_merge',
+        rehydrating_runtime: 'reconcile',
         verifying_data: 'reconcile',
         completed: 'restart_prep',
       };
