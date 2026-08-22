@@ -316,9 +316,15 @@
   function formatDiscoverySummaryHtml(summary) {
     if (!summary) return '';
     const backupLine = summary.backupsDetail
-      || (summary.backupsTotal != null && summary.backupsRetention != null
-        ? `${summary.backupsTotal} (دورية retention: ${summary.backupsRetention})`
-        : (summary.backups ?? '—'));
+      || (summary.backupsBreakdown
+        ? `${summary.backupsTotal ?? summary.backups ?? '—'} (${[
+          summary.backupsBreakdown.automatic ? `دورية: ${summary.backupsBreakdown.automatic}` : '',
+          summary.backupsBreakdown.manual ? `يدوية: ${summary.backupsBreakdown.manual}` : '',
+          summary.backupsBreakdown.safety ? `أمان: ${summary.backupsBreakdown.safety}` : '',
+        ].filter(Boolean).join(' · ')})`
+        : (summary.backupsTotal != null && summary.backupsRetention != null
+          ? `${summary.backupsTotal} (دورية retention: ${summary.backupsRetention})`
+          : (summary.backups ?? '—')));
     const attachLine = summary.attachments != null
       ? summary.attachments
       : 'غير متاح في metadata';
@@ -390,10 +396,18 @@
 
   /**
    * Confirmed restore only — after user presses استعادة هذه البيانات.
+   * Sync hydrate only — NOT for Backup V2 .tdw files (use confirmedBackupV2Restore).
    */
   async function confirmedCloudRestore(point, options = {}) {
     if (restoreLock) return { ok: false, error: 'restore_in_flight' };
     if (!point) return { ok: false, error: 'no_restore_point' };
+    if (point.kind === 'backup_file' || point.source === 'cloud_backup') {
+      return {
+        ok: false,
+        error: 'backup_v2_requires_atomic_restore',
+        message: 'نسخ Backup V2 تتطلب استعادة atomic — لا تستخدم مسار Sync Hydrate.',
+      };
+    }
 
     restoreLock = true;
     const opId = ++restoreOpId;
@@ -525,6 +539,165 @@
     }
   }
 
+  function isBackupV2RestorePoint(point) {
+    return !!(point && (point.kind === 'backup_file' || point.source === 'cloud_backup'));
+  }
+
+  /**
+   * Backup V2 atomic restore from a cloud discovery point (.tdw on Drive).
+   */
+  async function confirmedBackupV2Restore(point, options = {}) {
+    if (restoreLock) return { ok: false, error: 'restore_in_flight' };
+    if (!isBackupV2RestorePoint(point)) return { ok: false, error: 'not_backup_v2_point' };
+
+    restoreLock = true;
+    const opId = ++restoreOpId;
+    const started = Date.now();
+    const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+    const diagnosticId = `BKP-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    let lastProgressAt = Date.now();
+    let watchdog = null;
+
+    const emit = (stageId, extra = {}) => {
+      lastProgressAt = Date.now();
+      const snap = buildProgressState(stageId, {
+        ...extra,
+        elapsedMs: Date.now() - started,
+        diagnosticId,
+      });
+      try { onProgress(snap); } catch { /* empty */ }
+      return snap;
+    };
+
+    try {
+      const preSnapshot = {
+        license: !!global.LicenseCloud?.loadLocal?.(),
+        deviceId: global.DeviceConfig?.load?.()?.deviceId || null,
+        branchId: global.DeviceConfig?.load?.()?.lockedBranchId || null,
+        centerId: getIdentity().centerId,
+      };
+
+      emit('verify_point', { lastActivity: 'التحقق من نقطة Backup V2' });
+      if (point.validation && point.validation !== 'metadata_ok' && point.validation !== 'ready') {
+        return {
+          ok: false,
+          error: 'invalid_restore_point',
+          message: 'النسخة غير صالحة للاستعادة.',
+          diagnosticId,
+          preserved: preSnapshot,
+        };
+      }
+
+      emit('local_safety', { lastActivity: 'الاحتفاظ بلقطة أمان محلية قبل الاستبدال' });
+      try {
+        await global.RestoreReconciliation?.createMandatoryPreRestoreSnapshot?.({ allowEmptySkip: true });
+      } catch { /* empty */ }
+
+      watchdog = setInterval(() => {
+        if (Date.now() - lastProgressAt > NO_PROGRESS_WATCHDOG_MS) {
+          emit('download_db', {
+            lastActivity: 'تحذير: لا يوجد تحديث منذ أكثر من 30 ثانية',
+            stageRatio: 0.2,
+          });
+        }
+      }, 5000);
+
+      const api = global.cuppingElectron?.backup || global.tadawiElectron?.backup || global.tadawi?.backup;
+      if (!api?.v2RestoreFromCloudRemote) {
+        return { ok: false, error: 'backup_v2_ipc_unavailable', diagnosticId, preserved: preSnapshot };
+      }
+
+      const identity = getIdentity();
+      const lic = identity.lic || global.LicenseCloud?.loadLocal?.() || null;
+      emit('download_db', { lastActivity: 'تنزيل ملف Backup V2 من Drive', stageRatio: 0.35 });
+
+      const restoreRes = await api.v2RestoreFromCloudRemote({
+        remotePath: point.path,
+        relaunch: false,
+        centerId: identity.centerId,
+        organizationId: lic?.organizationId || identity.centerId,
+        branchId: identity.branchId,
+        licensedBranchIds: (lic?.branches || []).filter((b) => b && b.active !== false).map((b) => b.id),
+      });
+
+      if (!restoreRes?.ok) {
+        return {
+          ok: false,
+          error: restoreRes?.error || 'backup_v2_restore_failed',
+          message: restoreRes?.message || restoreRes?.error || 'فشل استعادة Backup V2',
+          diagnosticId,
+          preserved: preSnapshot,
+          restore: restoreRes,
+        };
+      }
+
+      emit('checksums', { stageRatio: 0.55, lastActivity: 'التحقق من manifest و scopeTruth' });
+      emit('cloud_merge', { stageRatio: 0.75, lastActivity: 'استبدال SQLite عبر Backup V2 atomic pipeline' });
+
+      try { await global.reconcileAuthUsersAfterHydrate?.(); } catch { /* empty */ }
+
+      emit('reconcile', { lastActivity: 'التحقق من counts في SQLite بعد الاستعادة' });
+      const verified = await global.RestoreVerification?.verifyPostRestore?.({
+        kind: 'backup_v2',
+        restoreKind: 'backup_v2',
+        point: {
+          ...point,
+          manifest: restoreRes.manifest,
+          scopeTruth: restoreRes.scopeTruth,
+        },
+        source: 'bootflow_backup_v2_cloud',
+        requireOwner: true,
+        requireData: false,
+      });
+
+      if (!verified?.verified) {
+        return {
+          ok: false,
+          error: verified?.error || 'restore_verification_failed',
+          diagnosticId,
+          preserved: preSnapshot,
+          verified,
+          restore: restoreRes,
+        };
+      }
+
+      emit('restart_prep', { stageRatio: 1, lastActivity: 'مواءمة ما بعد الاستعادة (سحب الأحدث فقط)' });
+      if (global.RestoreReconciliation?.afterRestoreDataSourceSelected) {
+        await global.RestoreReconciliation.afterRestoreDataSourceSelected('backup_v2');
+      }
+      try { global.SyncBaseline?.enterReconciliationRequired?.({ source: 'backup_v2_restore' }); } catch { /* empty */ }
+
+      if (opId !== restoreOpId) {
+        return { ok: false, error: 'stale_restore', ignored: true, diagnosticId };
+      }
+
+      return {
+        ok: true,
+        mode: 'backup_v2',
+        diagnosticId,
+        durationMs: Date.now() - started,
+        preserved: preSnapshot,
+        restore: restoreRes,
+        verified,
+        point,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err.message || String(err),
+        diagnosticId,
+        preserved: {
+          license: !!global.LicenseCloud?.loadLocal?.(),
+          deviceId: global.DeviceConfig?.load?.()?.deviceId || null,
+          branchId: global.DeviceConfig?.load?.()?.lockedBranchId || null,
+        },
+      };
+    } finally {
+      if (watchdog) clearInterval(watchdog);
+      if (opId === restoreOpId) restoreLock = false;
+    }
+  }
+
   function cancelDiscovery() {
     discoveryOpId += 1;
     discoveryLock = false;
@@ -543,6 +716,8 @@
     RESTORE_STAGES,
     discoverAllSources,
     confirmedCloudRestore,
+    confirmedBackupV2Restore,
+    isBackupV2RestorePoint,
     runCloudScanForBackupPage,
     buildProgressState,
     buildDiscoveryProgressState,

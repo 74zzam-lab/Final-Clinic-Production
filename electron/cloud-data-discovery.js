@@ -239,6 +239,15 @@ function finalizeRestorePoints(out) {
   return out.newest;
 }
 
+function classifyBackupFile(name) {
+  const n = String(name || '').toLowerCase();
+  if (/emergency|pre-?restore|safety|before-?restore/.test(n)) return 'safety';
+  if (/manual|custom|user/.test(n)) return 'manual';
+  if (/scheduled|auto|periodic/.test(n)) return 'automatic';
+  if (/pinned|keep/.test(n)) return 'pinned';
+  return 'automatic';
+}
+
 function buildDiscoverySummary(out, options = {}) {
   const branchIds = new Set();
   for (const p of out.restorePoints || []) {
@@ -246,8 +255,22 @@ function buildDiscoverySummary(out, options = {}) {
   }
   const localBranches = Array.isArray(options.localBranches) ? options.localBranches.length : 0;
   const branchCount = Math.max(branchIds.size, localBranches, options.branchId ? 1 : 0);
-  const backupCount = (out.restorePoints || []).filter((p) => p.kind === 'backup_file').length;
+  const backupFiles = (out.restorePoints || []).filter((p) => p.kind === 'backup_file');
+  const backupCount = backupFiles.length;
   const retentionDisplay = options.backupRetentionDisplay || 3;
+  const breakdown = { automatic: 0, manual: 0, safety: 0, pinned: 0, other: 0 };
+  backupFiles.forEach((p) => {
+    const kind = classifyBackupFile(p.name);
+    if (breakdown[kind] != null) breakdown[kind] += 1;
+    else breakdown.other += 1;
+  });
+  const breakdownParts = [];
+  if (breakdown.automatic) breakdownParts.push(`دورية: ${breakdown.automatic}`);
+  if (breakdown.manual) breakdownParts.push(`يدوية: ${breakdown.manual}`);
+  if (breakdown.safety) breakdownParts.push(`أمان: ${breakdown.safety}`);
+  if (breakdown.pinned) breakdownParts.push(`مثبتة: ${breakdown.pinned}`);
+  if (breakdown.other) breakdownParts.push(`أخرى: ${breakdown.other}`);
+  const breakdownLine = breakdownParts.length ? breakdownParts.join(' · ') : null;
   return {
     googleConnected: !!out.googleConnected,
     organizations: out.googleConnected && options.centerId ? 1 : 0,
@@ -260,9 +283,10 @@ function buildDiscoverySummary(out, options = {}) {
     backups: backupCount,
     backupsTotal: backupCount,
     backupsRetention: retentionDisplay,
+    backupsBreakdown: breakdown,
     backupsDetail: backupCount > retentionDisplay
-      ? `${backupCount} (إجمالي) · retention: ${retentionDisplay}`
-      : String(backupCount),
+      ? `${backupCount} (إجمالي) · retention: ${retentionDisplay}${breakdownLine ? ` · ${breakdownLine}` : ''}`
+      : `${backupCount}${breakdownLine ? ` · ${breakdownLine}` : ''}`,
     attachments: out.attachmentsFound ?? null,
     syncCheckpoints: (out.restorePoints || []).filter((p) => p.kind === 'sync_checkpoint').length,
   };
