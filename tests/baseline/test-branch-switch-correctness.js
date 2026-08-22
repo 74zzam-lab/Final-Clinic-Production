@@ -93,8 +93,11 @@ function runBehavioralSuite() {
   check(!BSC.isGenerationCurrent(genA), 'async token stale after invalidateAll');
 
   sb._setDeviceCfg({ lockedBranchId: 'BR-A', branchLocked: true, lastViewBranchId: 'BR-A' });
-  const lockGate = BA.assertSwitchAllowed({ id: 'o1', role: 'owner', branchScope: ['*'] }, 'BR-B');
-  check(lockGate.ok === false && lockGate.error === 'device_branch_locked', 'locked device cannot switch to B');
+  const lockGate = BA.assertSwitchAllowed({ id: 'o1', role: 'owner', branchScope: ['*'], canSwitchBranch: true }, 'BR-B');
+  check(lockGate.ok === true && lockGate.viewOnly === true && lockGate.deviceLockedBranchId === 'BR-A',
+    'locked device owner can view-switch to B (write stays on A)');
+  const staffGate = BA.assertSwitchAllowed({ id: 's1', role: 'reception', branchScope: ['BR-A'] }, 'BR-B');
+  check(staffGate.ok === false && staffGate.error === 'device_branch_locked', 'staff cannot switch on locked device');
 
   sb.BranchScope.setActiveBranchId('*');
   sb.BranchContexts.clearOperationalWriteBranch();

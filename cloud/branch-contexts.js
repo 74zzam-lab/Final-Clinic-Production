@@ -71,6 +71,17 @@
     return { ok: true, branchId, deviceBound: options.bindDevice === true };
   }
 
+  /** Owner view branch ≠ device operational write branch (read-only cross-branch view). */
+  function setViewBranchOnly(viewBranchId, writeBranchId) {
+    viewBranchId = String(viewBranchId || '').trim();
+    writeBranchId = String(writeBranchId || '').trim();
+    if (!viewBranchId || !writeBranchId) return { ok: false, error: 'branch_required' };
+    try { sessionStorage.setItem(WRITE_KEY, writeBranchId); } catch { /* empty */ }
+    setSelectedReportingBranch(viewBranchId);
+    global.BranchScope?.setActiveBranchId?.(viewBranchId);
+    return { ok: true, viewBranchId, writeBranchId, viewOnly: true };
+  }
+
   function clearOperationalWriteBranch() {
     try { sessionStorage.removeItem(WRITE_KEY); } catch { /* empty */ }
     return { ok: true };
@@ -109,6 +120,7 @@
     setSelectedReportingBranch,
     getOperationalWriteBranch,
     setOperationalWriteBranch,
+    setViewBranchOnly,
     clearOperationalWriteBranch,
     assertOperationalWriteContext,
     snapshot,

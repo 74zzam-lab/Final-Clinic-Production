@@ -1,5 +1,5 @@
 /**
- * RC Hotfix Round 2 — post-restore verification before wizard marks restore complete.
+ * RC Hotfix Round 2/3 — post-restore verification before wizard marks restore complete.
  */
 (function (global) {
   'use strict';
@@ -23,6 +23,10 @@
 
   function countRecords(key) {
     try {
+      if (global.SqliteBridge?.getCommittedRaw) {
+        const raw = global.SqliteBridge.getCommittedRaw(key);
+        if (Array.isArray(raw)) return raw.length;
+      }
       const v = global.DB?.get?.(key, []);
       return Array.isArray(v) ? v.length : 0;
     } catch {
@@ -30,7 +34,45 @@
     }
   }
 
+  function extractExpectedCounts(options) {
+    options = options || {};
+    const point = options.point || {};
+    const manifest = point.manifest || options.manifest || {};
+    const scopeTruth = point.scopeTruth || manifest.scopeTruth || manifest.scope || {};
+    const rc = scopeTruth.recordCounts || manifest.recordCounts || options.expectedCounts || null;
+    if (!rc || typeof rc !== 'object') return null;
+    return {
+      clients: Number(rc.clients ?? rc.clientsRegistry ?? rc.clientCount ?? -1),
+      visits: Number(rc.cases ?? rc.visits ?? rc.caseCount ?? -1),
+      bookings: Number(rc.bookings ?? rc.bookingCount ?? -1),
+    };
+  }
+
+  function compareExpectedCounts(expected, actual) {
+    if (!expected) return { ok: true, mismatches: [] };
+    const mismatches = [];
+    const pairs = [
+      ['clients', 'clients'],
+      ['visits', 'visits'],
+      ['bookings', 'bookings'],
+    ];
+    pairs.forEach(([expKey, actKey]) => {
+      const exp = Number(expected[expKey]);
+      if (!Number.isFinite(exp) || exp < 0) return;
+      const got = Number(actual[actKey]) || 0;
+      if (exp > 0 && got === 0) {
+        mismatches.push({ key: actKey, expected: exp, actual: got });
+      }
+    });
+    return { ok: mismatches.length === 0, mismatches };
+  }
+
   async function rehydrateOperationalCaches() {
+    try {
+      if (global.SqliteBridge?.bootFromSQLiteSoTOnce) {
+        await global.SqliteBridge.bootFromSQLiteSoTOnce();
+      }
+    } catch { /* empty */ }
     if (global.SqliteBridge?.rehydrateBranchView) {
       await global.SqliteBridge.rehydrateBranchView();
     }
@@ -64,16 +106,25 @@
       || global.settings?.centerId
       || null;
     const licenseDoc = typeof global.licLoad === 'function' ? global.licLoad() : null;
+    const licenseBranches = global.LicenseCloud?.loadLocal?.()?.branches || [];
+    const backupBranches = options.point?.manifest?.scopeTruth?.includedBranchIds
+      || options.point?.scopeTruth?.includedBranchIds
+      || null;
 
     const counts = {
       clients: countRecords('clientsRegistry'),
       visits: countRecords('cases'),
       bookings: countRecords('bookings'),
-      branches: (global.LicenseCloud?.loadLocal?.()?.branches || []).length,
+      licenseBranches: Array.isArray(licenseBranches) ? licenseBranches.length : 0,
+      backupBranches: Array.isArray(backupBranches) ? backupBranches.length : 0,
     };
 
     const kind = options.kind || options.restoreKind || null;
     const isCloudHydrate = kind === 'cloud_hydrate' || options.source === 'bootflow_cloud_restore';
+    const isBackupRestore = kind === 'backup_v2' || kind === 'file' || kind === 'local_backup';
+
+    const expectedCounts = extractExpectedCounts(options);
+    const countCompare = compareExpectedCounts(expectedCounts, counts);
 
     const summary = {
       centerId,
@@ -81,9 +132,13 @@
       ownerUsername: owner?.username || null,
       ownerPresent: !!owner,
       counts,
+      expectedCounts,
+      countMismatches: countCompare.mismatches,
       restoreKind: kind,
       backupPoint: options.point?.path || options.point?.name || null,
       cloudHydrate: isCloudHydrate,
+      branchesInLicense: counts.licenseBranches,
+      branchesInBackup: counts.backupBranches,
     };
 
     const requireOwner = options.requireOwner !== false && !isCloudHydrate;
@@ -99,6 +154,9 @@
       }
       summary.ownerPresent = false;
       summary.ownerDeferred = true;
+    }
+    if (isBackupRestore && !countCompare.ok) {
+      return { ok: false, verified: false, error: 'restore_count_mismatch', summary };
     }
     if (requireData && counts.clients === 0 && counts.visits === 0 && counts.bookings === 0) {
       return { ok: false, verified: false, error: 'restore_data_empty', summary };
@@ -117,14 +175,24 @@
   function formatSummaryHtml(summary) {
     if (!summary) return '';
     const c = summary.counts || {};
+    const exp = summary.expectedCounts || {};
     const ownerLine = summary.ownerDeferred
       ? 'Owner: سيُؤكَّد بعد المزامنة الكاملة'
       : `Owner: ${summary.ownerUsername || '—'}`;
+    const branchLine = summary.branchesInBackup > 0 && summary.branchesInLicense !== summary.branchesInBackup
+      ? `الفروع: ${c.licenseBranches ?? '—'} (في الترخيص) · ${summary.branchesInBackup} (في النسخة)`
+      : `الفروع: ${c.licenseBranches ?? summary.branchesInBackup ?? '—'}`;
+    const countLine = (exp.clients >= 0 && exp.clients > 0)
+      ? `العملاء: ${c.clients ?? 0}/${exp.clients} · الجلسات: ${c.visits ?? 0}/${exp.visits >= 0 ? exp.visits : '—'} · الحجوزات: ${c.bookings ?? 0}/${exp.bookings >= 0 ? exp.bookings : '—'}`
+      : `العملاء: ${c.clients ?? '—'} · الجلسات: ${c.visits ?? '—'} · الحجوزات: ${c.bookings ?? '—'} · ${branchLine}`;
+    const kindLabel = summary.cloudHydrate
+      ? 'تم سحب/دمج بيانات السحابة (Sync Hydrate) ✓'
+      : 'تمت الاستعادة والتحقق من البيانات ✓';
     return `<div class="bf-restore-verify" dir="rtl">
-      <strong>تمت الاستعادة والتحقق من البيانات ✓</strong><br>
+      <strong>${kindLabel}</strong><br>
       Center: <code dir="ltr">${summary.centerId || '—'}</code><br>
       ${ownerLine}<br>
-      العملاء: ${c.clients ?? '—'} · الجلسات: ${c.visits ?? '—'} · الحجوزات: ${c.bookings ?? '—'} · الفروع: ${c.branches ?? '—'}
+      ${countLine}
     </div>`;
   }
 
@@ -132,6 +200,8 @@
     verifyPostRestore,
     formatSummaryHtml,
     rehydrateOperationalCaches,
+    extractExpectedCounts,
+    compareExpectedCounts,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
