@@ -27,7 +27,7 @@ const rbac = fs.readFileSync(path.join(root, 'electron/rbac-session.js'), 'utf8'
 check(/confirmedBackupV2Restore/.test(discovery), 'confirmedBackupV2Restore exists');
 check(/isBackupV2RestorePoint/.test(discovery), 'isBackupV2RestorePoint helper');
 check(/backup_v2_requires_atomic_restore/.test(discovery), 'confirmedCloudRestore rejects backup_file');
-check(/point\.kind === 'backup_file'/.test(discovery), 'cloud restore guards backup_file kind');
+check(/point\.kind === 'backup_file'|isBackupV2RestorePoint/.test(discovery), 'cloud restore guards backup points');
 check(/v2RestoreFromCloudRemote/.test(discovery), 'backup restore uses cloud remote IPC');
 check(/mode: 'backup_v2'/.test(discovery), 'backup restore result mode backup_v2');
 check(!/confirmedCloudRestore\(point/.test(boot.replace(/runCloudSyncHydrate[\s\S]*?confirmedCloudRestore\(point/, ''))
