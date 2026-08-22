@@ -79,7 +79,7 @@ async function main() {
   check(indexSrc.includes('restore-surface-authority.js'), 'index loads restore-surface-authority');
   check(indexSrc.includes("source: 'migration_import'"), 'import uses migration_import source');
   check(!indexSrc.includes("source: 'backup_import'"), 'backup_import source removed');
-  check(/سحب (بيانات الفرع من السحابة|الأحدث \(موصى به\)|Sync Hydrate)/.test(bootSrc), 'bootflow cloud hydrate label');
+  check(/سحب (أحدث بيانات المزامنة للفرع|بيانات الفرع من السحابة|الأحدث \(موصى به\)|Sync Hydrate)/.test(bootSrc), 'bootflow cloud hydrate label');
   check(/confirmedBackupV2Restore|runCloudBackupV2Restore/.test(bootSrc), 'bootflow backup V2 cloud restore path');
   check(bootSrc.includes('v2Restore'), 'bootflow file path uses V2 restore');
   check(!discoverySrc.includes("id: 'atomic_swap'"), 'cloud discovery removed atomic_swap stage label');

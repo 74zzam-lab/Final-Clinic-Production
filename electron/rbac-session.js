@@ -91,8 +91,8 @@ const CHANNEL_POLICY = {
   'backup:v2:pruneCloud': { minRank: 4 },
   'backup:v2:downloadAndRestore': { minRank: 4 },
   'backup:v2:downloadCloud': { minRank: 4 },
-  'backup:v2:restoreUnified': { minRank: 4 },
-  'backup:v2:restoreFromCloudRemote': { minRank: 4 },
+  'backup:v2:restoreUnified': { minRank: 4, bootstrapCapability: 'restore' },
+  'backup:v2:restoreFromCloudRemote': { minRank: 4, bootstrapCapability: 'restore' },
   'backup:restoreDbBackup': { minRank: 4 },
   'attachments:validate': { minRank: 2 },
   'attachments:hashBuffer': { minRank: 2 },
@@ -235,9 +235,42 @@ function assertSyncOpAllowed(event, op) {
   return { ok: true, session };
 }
 
-function assertChannelAllowed(event, channel) {
+function assertChannelAllowed(event, channel, opts) {
   if (PUBLIC_CHANNELS.has(channel)) return { ok: true, public: true };
+  const policy = CHANNEL_POLICY[channel];
+  if (policy && policy.public === true) return { ok: true, public: true };
+
   const session = getSession(event);
+  if (session) {
+    const gate = sessionAllowsChannel(session, channel);
+    if (!gate.ok) {
+      const err = new Error(gate.error || 'rbac_denied');
+      err.code = gate.error || 'RBAC_DENIED';
+      err.ok = false;
+      err.rbac = gate;
+      throw err;
+    }
+    return gate;
+  }
+
+  if (policy?.bootstrapCapability) {
+    const bootstrapRestoreCap = require('./bootstrap-restore-capability');
+    const capGate = bootstrapRestoreCap.tryAuthorizeChannel(event, channel, opts);
+    if (capGate.ok) return capGate;
+    if (opts?.bootstrapRestoreCapabilityId) {
+      const err = new Error(capGate.error || 'restore_authorization_required');
+      err.code = capGate.error || 'restore_authorization_required';
+      err.ok = false;
+      err.rbac = capGate;
+      throw err;
+    }
+    const err = new Error('rbac_session_required');
+    err.code = 'rbac_session_required';
+    err.ok = false;
+    err.rbac = { ok: false, error: 'rbac_session_required' };
+    throw err;
+  }
+
   const gate = sessionAllowsChannel(session, channel);
   if (!gate.ok) {
     const err = new Error(gate.error || 'rbac_denied');

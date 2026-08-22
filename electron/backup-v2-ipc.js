@@ -720,16 +720,19 @@ function registerBackupV2Ipc({
     };
   });
 
-  handle('backup:v2:restoreUnified', async (event, options) => {
+  async function invokeRestoreUnified(event, options) {
     const opts = V.asObject(options, { name: 'options', required: true });
     const source = opts.source === 'local' ? 'local' : 'cloud';
-    const context = opts.context === 'bootstrap' ? 'bootstrap' : 'authenticated';
+    const context = opts.bootstrapRestoreCapabilityId
+      ? 'bootstrap'
+      : (opts.context === 'bootstrap' ? 'bootstrap' : 'authenticated');
     const progressSender = event?.sender;
     const onProgress = (snap) => {
       if (progressSender && !progressSender.isDestroyed?.()) {
         try { progressSender.send('backup:restoreProgress', snap); } catch { /* observer */ }
       }
     };
+    const identity = resolveIdentity(opts);
     return backupRestoreCoordinator.restore({
       ...opts,
       source,
@@ -737,14 +740,15 @@ function registerBackupV2Ipc({
       localPath: opts.localPath || opts.filePath,
       onProgress,
       webContentsId: event?.sender?.id,
-      identity: resolveIdentity(opts),
+      identity,
       licensedBranchIds: Array.isArray(opts.licensedBranchIds) ? opts.licensedBranchIds : [],
-      centerId: opts.centerId || resolveIdentity(opts).centerId,
-      organizationId: opts.organizationId || resolveIdentity(opts).organizationId,
-      branchId: opts.branchId || resolveIdentity(opts).branchId,
-      identity: resolveIdentity(opts),
+      centerId: opts.centerId || identity.centerId,
+      organizationId: opts.organizationId || identity.organizationId,
+      branchId: opts.branchId || identity.branchId,
     });
-  });
+  }
+
+  handle('backup:v2:restoreUnified', async (event, options) => invokeRestoreUnified(event, options));
 
   handle('backup:v2:downloadAndRestore', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
@@ -769,34 +773,14 @@ function registerBackupV2Ipc({
       : null;
     if (!remotePath && !googleFileId) V.fail('IPC_REQUIRED', 'remotePath_or_googleFileId_required');
 
-    const progressSender = event?.sender;
-    const onProgress = (snap) => {
-      if (progressSender && !progressSender.isDestroyed?.()) {
-        try { progressSender.send('backup:restoreProgress', snap); } catch { /* observer */ }
-      }
-    };
-
     const context = opts.bootstrapRestoreCapabilityId
       ? 'bootstrap'
       : (opts.context === 'bootstrap' ? 'bootstrap' : 'authenticated');
-    const result = await backupRestoreCoordinator.restore({
+    const result = await invokeRestoreUnified(event, {
+      ...opts,
       source: 'cloud',
-      context,
       remotePath,
       googleFileId,
-      backupId: opts.backupId,
-      expectedSize: opts.expectedSize,
-      expectedModifiedAt: opts.expectedModifiedAt,
-      bootstrapRestoreCapabilityId: opts.bootstrapRestoreCapabilityId,
-      licenseSnapshot: opts.licenseSnapshot,
-      centerId: opts.centerId,
-      organizationId: opts.organizationId,
-      branchId: opts.branchId,
-      licensedBranchIds: opts.licensedBranchIds,
-      relaunch: opts.relaunch === true,
-      diagnosticId: opts.diagnosticId,
-      onProgress,
-      webContentsId: event?.sender?.id,
     });
 
     if (!result.ok) return result;

@@ -1364,7 +1364,7 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             }
             restoreInFlight = true;
             try { global.OwnerManagement?.setSystemBusy?.('restore'); } catch { /* empty */ }
-            setStatus('⏳ جارٍ سحب/دمج حالة السحابة (sync hydrate — بدون استبدال DB)…');
+            setStatus('⏳ جارٍ سحب/دمج أحدث بيانات المزامنة للفرع (بدون استبدال DB)…');
             try {
               const result = await Discovery.confirmedCloudRestore(point, {
                 onProgress: (snap) => {
@@ -1379,7 +1379,7 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
                   true
                 );
                 if (progressHost) {
-                  progressHost.innerHTML += `<p class="bf-source-meta">لم تُستبدل قاعدة البيانات المحلية — هذا مسار sync hydrate فقط.</p>`;
+                  progressHost.innerHTML += `<p class="bf-source-meta">لم تُستبدل قاعدة البيانات المحلية — هذا سحب أحدث بيانات المزامنة للفرع فقط.</p>`;
                 }
                 return;
               }
@@ -1420,9 +1420,9 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
           if (newestBackup && (cloudStatus === 'ready' || cloudStatus === 'ipc_missing')) {
             addBtn(cloudCard.actions, 'استعادة أحدث نسخة Backup V2', 'btn-primary', () => runCloudBackupV2Restore(newestBackup));
             if (newestSyncCheckpoint) {
-              addBtn(cloudCard.actions, 'سحب Sync Hydrate (بدون Backup)', 'btn-secondary', () => runCloudSyncHydrate(newestSyncCheckpoint));
+              addBtn(cloudCard.actions, 'سحب أحدث بيانات المزامنة للفرع', 'btn-secondary', () => runCloudSyncHydrate(newestSyncCheckpoint));
             } else {
-              addBtn(cloudCard.actions, 'سحب Sync Hydrate (لا توجد بيانات Sync)', 'btn-secondary', () => {
+              addBtn(cloudCard.actions, 'سحب أحدث بيانات المزامنة للفرع (لا توجد بيانات)', 'btn-secondary', () => {
                 setStatus('⚠️ لا توجد بيانات Sync للفرع — استخدم استعادة Backup V2', true);
               }, true);
             }
@@ -1481,48 +1481,113 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             metaHtml: `${lb.message || 'اختيار ملف Backup V2...'}<br>النسخ المحلية: ${lb.count || 0}<br><small>مسار DR الوحيد — atomic pipeline</small>`,
           });
           addBtn(fileCard.actions, 'اختيار ملف Backup V2…', 'btn-secondary', async () => {
+            if (restoreInFlight || Discovery.isRestoreLocked?.()) {
+              setStatus('⚠️ عملية استعادة جارية — انتظر', true);
+              return;
+            }
             try {
               const api = global.cuppingElectron?.backup;
-              if (!api?.v2PickFile || !api?.v2Restore) {
+              const bootstrapApi = global.cuppingElectron?.bootstrap || global.tadawiElectron?.bootstrap;
+              if (!api?.v2PickFile || !api?.v2RestoreUnified) {
                 setStatus('⚠️ Backup V2 غير متاح — استخدم نسخة Electron كاملة', true);
                 return;
               }
               const picked = await api.v2PickFile();
               if (picked?.canceled || !picked?.filePath) return;
+
+              setStatus('⏳ فحص ملف النسخة…');
+              let inspected = null;
+              try {
+                inspected = await api.v2Inspect?.({ filePath: picked.filePath });
+              } catch { /* inspect optional */ }
+              const manifest = inspected?.manifest || inspected?.data?.manifest || null;
+              const scopeTruth = manifest?.scopeTruth || inspected?.scopeTruth || null;
+              const lic = global.LicenseCloud?.loadLocal?.() || null;
               const identity = {
-                centerId: global.DeviceConfig?.load?.()?.centerId || global.settings?.centerId,
-                branchId: global.DeviceConfig?.load?.()?.lockedBranchId || global.BranchScope?.getActiveBranchId?.(),
-                organizationId: global.settings?.organizationId,
+                centerId: manifest?.centerId || scopeTruth?.centerId || lic?.centerId || global.DeviceConfig?.load?.()?.centerId || global.settings?.centerId,
+                branchId: manifest?.branchId || scopeTruth?.includedBranchIds?.[0] || global.DeviceConfig?.load?.()?.lockedBranchId || global.BranchScope?.getActiveBranchId?.(),
+                organizationId: manifest?.organizationId || lic?.organizationId || lic?.centerId,
               };
+              const licensedBranchIds = (lic?.branches || []).filter((b) => b && b.active !== false).map((b) => b.id);
+
               const flow = await global.OpsUxBridge?.openRestoreWizard?.({
                 filePath: picked.filePath,
                 identity,
-                validate: () => ({ ok: true, validation: 'valid' }),
-                execute: async () => api.v2Restore({
-                  filePath: picked.filePath,
-                  relaunch: true,
-                  ...identity,
-                }),
+                manifest,
+                scopeSummary: scopeTruth,
+                validate: () => ({ ok: true, validation: 'valid', filePath: picked.filePath }),
+                execute: async () => {
+                  if (!bootstrapApi?.issueRestoreCapability) {
+                    return { ok: false, error: 'bootstrap_restore_unavailable' };
+                  }
+                  const cap = await bootstrapApi.issueRestoreCapability({
+                    bootFlow: true,
+                    source: 'local',
+                    localPath: picked.filePath,
+                    filePath: picked.filePath,
+                    centerId: identity.centerId,
+                    organizationId: identity.organizationId,
+                    branchId: identity.branchId,
+                    backupId: manifest?.backupId || picked.filePath,
+                    licensedBranchIds,
+                    licenseSnapshot: lic,
+                  });
+                  if (!cap?.ok) {
+                    return { ok: false, error: cap.error || 'restore_authorization_required', message: cap.message };
+                  }
+                  return api.v2RestoreUnified({
+                    source: 'local',
+                    context: 'bootstrap',
+                    localPath: picked.filePath,
+                    filePath: picked.filePath,
+                    relaunch: false,
+                    bootstrapRestoreCapabilityId: cap.capabilityId,
+                    centerId: identity.centerId,
+                    organizationId: identity.organizationId,
+                    branchId: identity.branchId,
+                    licensedBranchIds,
+                    licenseSnapshot: lic,
+                  });
+                },
               });
-              if (!flow?.ok && flow?.error !== 'overwrite_phrase_mismatch') {
-                setStatus('❌ فشلت استعادة Backup V2: ' + (flow?.error || 'unknown'), true);
+              if (!flow?.ok) {
+                if (flow?.error && flow.error !== 'overwrite_phrase_mismatch' && flow.error !== 'confirm_failed') {
+                  setStatus('❌ فشلت استعادة Backup V2: ' + (flow?.error || 'unknown'), true);
+                }
                 return;
               }
-              if (flow?.ok) {
-                markRestore('file', '✅ تمت استعادة Backup V2 — إعادة تشغيل');
-                return;
+              restoreInFlight = true;
+              try { global.OwnerManagement?.setSystemBusy?.('restore'); } catch { /* empty */ }
+              try {
+                setStatus('⏳ التحقق من البيانات بعد الاستعادة…');
+                try { await global.reconcileAuthUsersAfterHydrate?.(); } catch { /* empty */ }
+                const verified = await global.RestoreVerification?.verifyPostRestore?.({
+                  kind: 'backup_v2',
+                  restoreKind: 'backup_v2',
+                  source: 'bootflow_local_file',
+                  requireOwner: true,
+                  requireData: false,
+                });
+                if (!verified?.verified) {
+                  setStatus('❌ فشل التحقق: ' + (verified?.error || 'restore_verification_failed'), true);
+                  return;
+                }
+                if (progressHost && global.RestoreVerification?.formatSummaryHtml) {
+                  progressHost.innerHTML += global.RestoreVerification.formatSummaryHtml(verified.summary);
+                }
+                markRestore('file', '✅ تمت استعادة Backup V2 من ملف محلي');
+                setStatus('✅ تمت استعادة Backup V2 — تابع للمزامنة');
+                if (global.RestoreReconciliation?.afterRestoreDataSourceSelected) {
+                  await global.RestoreReconciliation.afterRestoreDataSourceSelected('file');
+                }
+              } finally {
+                restoreInFlight = false;
+                try { global.OwnerManagement?.clearSystemBusy?.('restore'); } catch { /* empty */ }
+                renderNavButtons(loadWizard());
               }
             } catch (e) {
               setStatusFromErr(e, 'restore_interrupted');
             }
-            markRestore('file', '✅ تم اختيار مسار ملف Backup V2');
-            try { global.ActivationSyncDefaults?.applyDefaults?.({ startSync: true }); } catch { /* empty */ }
-            try {
-              setStatus('⏳ مواءمة ما بعد الاستعادة (سحب الأحدث — بلا رفع فوري)...');
-              if (global.RestoreReconciliation?.afterRestoreDataSourceSelected) {
-                await global.RestoreReconciliation.afterRestoreDataSourceSelected('file');
-              }
-            } catch { /* empty */ }
           });
 
           // --- Empty start ---

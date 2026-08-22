@@ -132,21 +132,12 @@ function handle(channel, handler) {
   ipcMain.handle(channel, V.guard(async (event, ...args) => {
     assertTrustedSender(event);
     const opts = args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]) ? args[0] : null;
-    const capGate = bootstrapRestoreCap.tryAuthorizeChannel(event, channel, opts);
-    if (!capGate.ok) {
-      if (bootstrapRestoreCap.BOOTSTRAP_RESTORE_CHANNELS.has(channel) && opts?.bootstrapRestoreCapabilityId) {
-        const err = new Error(capGate.error || 'restore_authorization_required');
-        err.code = capGate.error || 'restore_authorization_required';
-        err.ok = false;
-        throw err;
-      }
-      rbacSession.assertChannelAllowed(event, channel);
-    }
+    const gate = rbacSession.assertChannelAllowed(event, channel, opts);
     try {
       return await handler(event, ...args);
     } finally {
-      if (capGate.ok && capGate.consumeOnComplete) {
-        bootstrapRestoreCap.consumeCapability(capGate.capabilityId);
+      if (gate.ok && gate.consumeOnComplete && gate.capabilityId) {
+        bootstrapRestoreCap.consumeCapability(gate.capabilityId);
       }
     }
   }));

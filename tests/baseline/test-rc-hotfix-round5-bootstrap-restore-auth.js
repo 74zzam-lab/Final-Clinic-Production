@@ -32,7 +32,7 @@ check(/bootstrap_restore_not_allowed_app_ready/.test(bootstrap), 'deny when app 
 check(/BOOTSTRAP_RESTORE_CHANNELS/.test(bootstrap), 'bootstrap restore channel set');
 
 check(/bootstrap:issueRestoreCapability/.test(rbac), 'bootstrap issue is public RBAC');
-check(/bootstrapRestoreCap\.tryAuthorizeChannel/.test(main), 'main handle checks bootstrap cap before RBAC');
+check(/rbacSession\.assertChannelAllowed\(event, channel, opts\)/.test(main), 'main IPC guard uses capability-aware RBAC');
 check(/bootstrap:issueRestoreCapability/.test(main), 'main registers bootstrap issue IPC');
 check(/readKv/.test(dbSvc), 'db service readKv for boot wizard state');
 
