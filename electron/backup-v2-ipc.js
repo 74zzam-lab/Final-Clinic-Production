@@ -414,6 +414,14 @@ function registerBackupV2Ipc({
     return { ok: true, dir, files: backupV2.listLocalBackupFiles(dir) };
   });
 
+  handle('backup:v2:deleteLocal', async (_e, options) => {
+    const opts = V.asObject(options || {}, { name: 'options', required: true });
+    const filePath = V.asString(opts.filePath, { name: 'filePath', required: true, allowEmpty: false });
+    if (!fs.existsSync(filePath)) return { ok: false, error: 'not_found' };
+    fs.unlinkSync(filePath);
+    return { ok: true, filePath };
+  });
+
   handle('backup:v2:listCloud', async (_e, options) => {
     const opts = V.asObject(options || {}, { name: 'options' });
     const prefix = opts.prefix

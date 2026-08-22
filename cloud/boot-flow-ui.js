@@ -1515,9 +1515,20 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
               }
             }
             const w2 = loadWizard();
-            w2.syncDone = ok !== false;
+            const lifecycleAfter = global.SyncLifecycle?.resolveLifecycle?.({ force: true }) || null;
+            const syncReady = lifecycleAfter?.lifecycle === 'READY'
+              && lifecycleAfter?.readiness?.ready !== false
+              && lifecycleAfter?.conflictCount === 0;
+            w2.syncDone = ok !== false && syncReady;
             saveWizard(w2);
-            if (ok) setStatus('✅ اكتملت المزامنة الأولية');
+            if (w2.syncDone) {
+              setStatus('✅ اكتملت المزامنة الأولية — الحالة: جاهزة');
+            } else if (ok !== false) {
+              setStatus(
+                `⚠️ المزامنة لم تصل READY بعد (${lifecycleAfter?.labelAr || lifecycleAfter?.lifecycle || '—'})`,
+                true
+              );
+            }
           } catch (e) {
             setStatusFromErr(e, 'sync_interrupted');
           } finally {
@@ -1538,7 +1549,14 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             renderStepUI(loadWizard());
           });
         }
-        if (hasSyncDone()) setStatus('✅ المزامنة مسجّلة كمكتملة');
+        if (hasSyncDone()) {
+          const lc = global.SyncLifecycle?.resolveLifecycle?.() || null;
+          if (lc?.lifecycle === 'READY') {
+            setStatus('✅ المزامنة مسجّلة كمكتملة');
+          } else {
+            setStatus(`⚠️ المزامنة غير جاهزة بعد — ${lc?.labelAr || lc?.lifecycle || '—'}`, true);
+          }
+        }
         break;
       }
       case 'ready': {

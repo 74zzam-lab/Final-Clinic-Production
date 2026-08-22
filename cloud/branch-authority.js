@@ -65,13 +65,17 @@
 
   function activeBranchId(user) {
     if (isOwnerAggregateMode(user)) return '*';
-    const write = normalizeBranchId(global.BranchContexts?.getOperationalWriteBranch?.());
-    if (write) return write;
     const sessionActive = global.BranchScope?.getActiveBranchId?.();
-    if (sessionActive && !AGGREGATE_MARKERS.has(String(sessionActive))) {
-      const bid = normalizeBranchId(sessionActive);
-      if (bid && isBranchAllowed(user, bid)) return bid;
+    const viewBid = sessionActive && !AGGREGATE_MARKERS.has(String(sessionActive))
+      ? normalizeBranchId(sessionActive)
+      : null;
+    const write = normalizeBranchId(global.BranchContexts?.getOperationalWriteBranch?.());
+    // Device-locked view-only: show selected view branch; writes stay on locked branch.
+    if (viewBid && write && viewBid !== write && isBranchAllowed(user, viewBid)) {
+      return viewBid;
     }
+    if (write) return write;
+    if (viewBid && isBranchAllowed(user, viewBid)) return viewBid;
     const durable = normalizeBranchId(global.DeviceConfig?.load?.()?.lastViewBranchId);
     if (durable && isBranchAllowed(user, durable)) return durable;
     const locked = lockedBranchId();
@@ -106,7 +110,13 @@
     if (global.DeviceConfig?.isBranchLocked?.()) {
       const locked = lockedBranchId();
       if (locked && locked !== bid) {
-        return { ok: false, error: 'device_branch_locked', lockedBranchId: locked };
+        const canViewSwitch = global.BranchScope?.canUserSwitchBranch?.(user)
+          || global.RolePolicy?.isOrganizationOwner?.(user)
+          || String(user?.role || '').toLowerCase() === 'owner';
+        if (!canViewSwitch) {
+          return { ok: false, error: 'device_branch_locked', lockedBranchId: locked };
+        }
+        return { ok: true, branchId: bid, viewOnly: true, deviceLockedBranchId: locked };
       }
     }
     if (!isBranchAllowed(user, bid)) {

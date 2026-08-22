@@ -315,15 +315,26 @@
 
   function formatDiscoverySummaryHtml(summary) {
     if (!summary) return '';
+    const backupLine = summary.backupsDetail
+      || (summary.backupsTotal != null && summary.backupsRetention != null
+        ? `${summary.backupsTotal} (دورية retention: ${summary.backupsRetention})`
+        : (summary.backups ?? '—'));
+    const attachLine = summary.attachments != null
+      ? summary.attachments
+      : 'غير متاح في metadata';
+    const branchLine = summary.branchesInLicense != null && summary.branchesInBackup != null
+      && summary.branchesInLicense !== summary.branchesInBackup
+      ? `${summary.branchesInLicense} (في الترخيص) · ${summary.branchesInBackup} (في النسخة)`
+      : (summary.branches ?? '—');
     const rows = [
       ['Google', summary.googleConnected ? 'متصل ✓' : 'غير متصل'],
       ['المؤسسات', summary.organizations ?? '—'],
       ['التراخيص', summary.licenses ?? '—'],
-      ['الفروع', summary.branches ?? '—'],
+      ['الفروع', branchLine],
       ['الأجهزة', summary.devices ?? '—'],
       ['مجموعات البيانات', summary.datasets ?? '—'],
-      ['Backup V2', summary.backups ?? '—'],
-      ['Attachments', summary.attachments != null ? summary.attachments : '—'],
+      ['Backup V2', backupLine],
+      ['Attachments', attachLine],
     ];
     return rows.map(([k, v]) => `<div>${k}: <strong>${v}</strong></div>`).join('');
   }

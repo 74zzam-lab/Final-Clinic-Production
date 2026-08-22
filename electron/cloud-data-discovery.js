@@ -247,14 +247,22 @@ function buildDiscoverySummary(out, options = {}) {
   const localBranches = Array.isArray(options.localBranches) ? options.localBranches.length : 0;
   const branchCount = Math.max(branchIds.size, localBranches, options.branchId ? 1 : 0);
   const backupCount = (out.restorePoints || []).filter((p) => p.kind === 'backup_file').length;
+  const retentionDisplay = options.backupRetentionDisplay || 3;
   return {
     googleConnected: !!out.googleConnected,
     organizations: out.googleConnected && options.centerId ? 1 : 0,
     licenses: out.licenseFound ? 1 : (options.centerId ? 1 : 0),
     branches: branchCount,
+    branchesInLicense: localBranches || (options.branchId ? 1 : 0),
+    branchesInBackup: branchIds.size || null,
     devices: out.devicesFound || 0,
     datasets: out.datasetsFound || branchCount,
     backups: backupCount,
+    backupsTotal: backupCount,
+    backupsRetention: retentionDisplay,
+    backupsDetail: backupCount > retentionDisplay
+      ? `${backupCount} (إجمالي) · retention: ${retentionDisplay}`
+      : String(backupCount),
     attachments: out.attachmentsFound ?? null,
     syncCheckpoints: (out.restorePoints || []).filter((p) => p.kind === 'sync_checkpoint').length,
   };

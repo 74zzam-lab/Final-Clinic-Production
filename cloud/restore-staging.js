@@ -23,18 +23,84 @@
     attachments_meta: 'attachments_meta'
   };
 
+  const MIGRATION_DENY_TOP_KEYS = new Set([
+    'license',
+    '__tdw_wizard__',
+    '__tdw_boot_done__',
+    '__tdw_setup_state__',
+    'deviceConfig',
+    'oauth',
+    'wizard',
+  ]);
+
+  function cloneJson(value) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return value;
+    }
+  }
+
+  function normalizeSettingsRow(settings) {
+    if (Array.isArray(settings)) return settings[0] && typeof settings[0] === 'object' ? { ...settings[0] } : {};
+    return settings && typeof settings === 'object' ? { ...settings } : {};
+  }
+
+  /** Strip identity / OAuth / setup keys from JSON migration imports. */
+  function sanitizeMigrationImport(data, meta) {
+    if (!data || typeof data !== 'object') return data;
+    if (!meta || meta.migrationOnly !== true) return data;
+    const clean = cloneJson(data);
+    MIGRATION_DENY_TOP_KEYS.forEach((key) => { delete clean[key]; });
+
+    const settings = normalizeSettingsRow(clean.settings);
+    if (settings && typeof settings === 'object') {
+      delete settings.centerId;
+      delete settings.licenseId;
+      delete settings.deviceId;
+      delete settings.wizard;
+      delete settings.bootComplete;
+      delete settings.__tdw_wizard__;
+      if (settings.backup && typeof settings.backup === 'object') {
+        const backup = { ...settings.backup };
+        if (backup.providers && typeof backup.providers === 'object') {
+          const providers = { ...backup.providers };
+          delete providers.google;
+          delete providers.oauth;
+          backup.providers = providers;
+        }
+        settings.backup = backup;
+      }
+      if (Array.isArray(clean.settings)) clean.settings = [settings];
+      else clean.settings = settings;
+    }
+
+    if (Array.isArray(clean.users)) {
+      clean.users = clean.users.map((u) => {
+        if (!u || typeof u !== 'object') return u;
+        const row = { ...u };
+        delete row.password;
+        delete row.passwordPlain;
+        return row;
+      });
+    }
+
+    return clean;
+  }
+
   function stageBackup(data, meta) {
     meta = meta || {};
+    const payload = sanitizeMigrationImport(data, meta);
     const staged = {
       stagedAt: new Date().toISOString(),
       source: meta.source || 'backup',
       fileName: meta.fileName || '',
-      data: data || {},
+      data: payload || {},
       tables: {}
     };
     Object.keys(SYNCED_MAP).forEach(key => {
-      if (data[key] != null) {
-        const rows = Array.isArray(data[key]) ? data[key] : (key === 'settings' ? [data[key]] : []);
+      if (payload[key] != null) {
+        const rows = Array.isArray(payload[key]) ? payload[key] : (key === 'settings' ? [payload[key]] : []);
         staged.tables[key] = rows;
       }
     });
@@ -175,6 +241,8 @@
   global.RestoreStaging = {
     STAGING_KEY,
     SYNCED_MAP,
+    MIGRATION_DENY_TOP_KEYS,
+    sanitizeMigrationImport,
     stageBackup,
     loadStaging,
     clearStaging,

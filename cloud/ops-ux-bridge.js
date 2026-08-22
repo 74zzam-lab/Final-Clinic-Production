@@ -155,19 +155,56 @@
     };
     const list = global.BackupHistory.sortByNewest((entries || []).map((e) => global.BackupHistory.normalizeEntry(e)));
     const title = options.title || 'سجل Backup V2 — محلي + Google Drive';
-    box.innerHTML = `<div class="card-title" style="font-size:14px;margin-bottom:8px">${title}</div>
-      <div style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto">
+    const showAll = !!options.showAll;
+    const totalCount = Number(options.totalCount) || list.length;
+    const toggleLabel = showAll ? 'عرض آخر 3' : `عرض الكل (${totalCount})`;
+    const handlers = options.handlers || {};
+    const maxH = showAll ? 'min(420px, 50vh)' : '260px';
+    box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+        <div class="card-title" style="font-size:14px;margin:0">${title}</div>
+        ${totalCount > 3 ? `<button type="button" class="btn btn-ghost btn-sm" data-backup-toggle-all="${panelId}">${toggleLabel}</button>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:${maxH};overflow:auto;overscroll-behavior:contain">
       ${list.map((e) => {
         const src = e.source === 'cloud' ? '☁️ Drive' : '💻 محلي';
         const when = e.createdAt || e.modifiedAt || '';
         const size = fmtSize(e.size);
         const scope = e.scopeLabelAr ? `<br><span style="font-size:10px;color:var(--primary)">${e.scopeLabelAr}</span>` : '';
-        return `<button type="button" class="btn btn-ghost btn-sm" data-restore-point="${e.id}" aria-label="Select restore point ${e.label}" style="justify-content:space-between;text-align:start;align-items:flex-start">
+        const safeId = String(e.id || '').replace(/"/g, '');
+        const actions = [];
+        if (handlers.onRestore) actions.push(`<button type="button" class="btn btn-accent btn-sm" data-backup-action="restore" data-backup-id="${safeId}" title="استعادة">♻️</button>`);
+        if (handlers.onDownload && e.source === 'cloud') actions.push(`<button type="button" class="btn btn-ghost btn-sm" data-backup-action="download" data-backup-id="${safeId}" title="تنزيل للجهاز">⬇️</button>`);
+        if (handlers.onReveal && e.source !== 'cloud') actions.push(`<button type="button" class="btn btn-ghost btn-sm" data-backup-action="reveal" data-backup-id="${safeId}" title="فتح المجلد">📂</button>`);
+        if (handlers.onDelete) actions.push(`<button type="button" class="btn btn-danger btn-sm" data-backup-action="delete" data-backup-id="${safeId}" title="حذف">🗑️</button>`);
+        return `<div class="backup-history-row" style="display:flex;gap:6px;align-items:stretch">
+        <button type="button" class="btn btn-ghost btn-sm" data-restore-point="${safeId}" aria-label="Select restore point ${e.label}" style="flex:1;justify-content:space-between;text-align:start;align-items:flex-start">
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%">${global.OpsStatus?.truncateName?.(e.label, 42) || e.label}${scope}</span>
         <span dir="ltr" style="font-size:11px;color:var(--text-muted);text-align:end;line-height:1.4">${src}<br>${size} · ${when}</span>
-      </button>`;
+      </button>
+      ${actions.length ? `<div style="display:flex;flex-direction:column;gap:4px">${actions.join('')}</div>` : ''}
+      </div>`;
       }).join('') || '<div class="oh-muted">لا توجد نقاط استعادة — أنشئ نسخة كاملة أو افحص Drive</div>'}
       </div>`;
+
+    const toggleBtn = box.querySelector('[data-backup-toggle-all]');
+    if (toggleBtn && typeof handlers.onToggleShowAll === 'function') {
+      toggleBtn.addEventListener('click', () => handlers.onToggleShowAll());
+    }
+    if (handlers.onRestore || handlers.onDelete || handlers.onDownload || handlers.onReveal) {
+      box.querySelectorAll('[data-backup-action]').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const action = btn.getAttribute('data-backup-action');
+          const id = btn.getAttribute('data-backup-id');
+          const entry = list.find((x) => String(x.id) === String(id));
+          if (!entry) return;
+          if (action === 'restore' && handlers.onRestore) handlers.onRestore(entry);
+          if (action === 'delete' && handlers.onDelete) handlers.onDelete(entry);
+          if (action === 'download' && handlers.onDownload) handlers.onDownload(entry);
+          if (action === 'reveal' && handlers.onReveal) handlers.onReveal(entry);
+        });
+      });
+    }
     return list;
   }
 

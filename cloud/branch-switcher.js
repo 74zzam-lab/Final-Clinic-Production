@@ -161,6 +161,12 @@
         global.BranchContexts?.clearOperationalWriteBranch?.();
         global.BranchScope?.setActiveBranchId?.('*');
         global.notify?.('🌐 عرض كل الفروع (تجميعي) — وضع قراءة للعمليات', 'info');
+      } else if (gate.viewOnly && gate.deviceLockedBranchId) {
+        global.BranchContexts?.setViewBranchOnly?.(bid, gate.deviceLockedBranchId);
+        global.notify?.(
+          `👁️ عرض فرع ${branchName(bid)} — الكتابة على ${branchName(gate.deviceLockedBranchId)} فقط`,
+          'info'
+        );
       } else {
         global.BranchContexts?.setOperationalWriteBranch?.(bid, { bindDevice: false });
         global.BranchScope?.setActiveBranchId?.(bid);
