@@ -136,6 +136,25 @@
     return ue;
   }
 
+  async function waitForSyncLifecycleReady(options = {}) {
+    const maxMs = Number(options.maxMs) || 120000;
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const start = Date.now();
+    while (Date.now() - start < maxMs) {
+      while (global.SyncCoordinator?.isCycleInFlight?.()) {
+        await sleep(250);
+      }
+      const lc = global.SyncLifecycle?.resolveLifecycle?.({
+        force: true,
+        relaxedBaseline: options.relaxedBaseline !== false,
+      }) || null;
+      if (lc?.lifecycle === 'READY') return lc;
+      if (lc && ['FAILED', 'CONFLICT_REQUIRES_ACTION', 'PAUSED_OFFLINE'].includes(lc.lifecycle)) return lc;
+      await sleep(350);
+    }
+    return global.SyncLifecycle?.resolveLifecycle?.({ force: true, relaxedBaseline: true }) || null;
+  }
+
   function hasValidLicense() {
     const lic = typeof global.licLoad === 'function' ? global.licLoad() : null;
     const cloud = global.LicenseCloud?.loadLocal?.();
@@ -186,7 +205,7 @@
 
   function hasRestoreDecision() {
     const w = loadWizard();
-    return ['empty', 'cloud', 'skip_existing', 'local', 'file'].includes(w.restoreChoice);
+    return ['empty', 'cloud', 'backup_v2', 'skip_existing', 'local', 'file'].includes(w.restoreChoice);
   }
 
   function hasSyncDone() {
@@ -1148,7 +1167,7 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
               <td>${Discovery.formatWhen(bp.modifiedAt)}</td>
               <td dir="ltr">${Discovery.formatBytes(bp.sizeBytes)}</td>
               <td>${bp.validation || 'metadata_ok'}</td>
-              <td><button type="button" class="btn btn-sm btn-secondary bf-pick-backup" data-idx="${i}">اختيار</button></td>
+              <td><button type="button" class="btn btn-sm btn-accent bf-pick-backup" data-idx="${i}">استعادة Backup V2</button></td>
             </tr>`;
           }).join('');
           hostEl.innerHTML = `<table class="table table-sm" dir="rtl" style="width:100%;margin-top:8px">
@@ -1273,10 +1292,57 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
             const tableHost = cloudCard.card.querySelector('#bf-cloud-backup-table');
             renderBackupTable(latestBackups, tableHost, (point) => {
               cloudCard.card.dataset.selectedBackup = point.path || point.name;
+              void runCloudBackupV2Restore(point);
             });
           }
 
-          const runCloudHydrate = async (point) => {
+          const runCloudBackupV2Restore = async (point) => {
+            if (!point) return;
+            if (restoreInFlight || Discovery.isRestoreLocked?.()) {
+              setStatus('⚠️ عملية استعادة جارية — انتظر', true);
+              return;
+            }
+            if (!Discovery?.confirmedBackupV2Restore) {
+              setStatus('⚠️ مسار استعادة Backup V2 غير متاح — حدّث التطبيق', true);
+              return;
+            }
+            restoreInFlight = true;
+            try { global.OwnerManagement?.setSystemBusy?.('restore'); } catch { /* empty */ }
+            setStatus('⏳ جارٍ تنزيل واستعادة Backup V2 (atomic — استبدال SQLite)…');
+            try {
+              const result = await Discovery.confirmedBackupV2Restore(point, {
+                onProgress: (snap) => {
+                  renderProgress(snap);
+                  setStatus(`⏳ ${snap.stageLabel} — ${snap.percent}%`);
+                },
+              });
+              if (!result?.ok) {
+                setStatus(
+                  `❌ فشل استعادة Backup V2: ${result?.message || result?.error || 'unknown'}`
+                  + (result?.diagnosticId ? ` · ID ${result.diagnosticId}` : ''),
+                  true
+                );
+                if (progressHost && result?.verified?.summary) {
+                  progressHost.innerHTML += global.RestoreVerification?.formatSummaryHtml?.(result.verified.summary) || '';
+                }
+                return;
+              }
+              try { await global.reconcileAuthUsersAfterHydrate?.(); } catch { /* empty */ }
+              if (progressHost && global.RestoreVerification?.formatSummaryHtml && result?.verified?.summary) {
+                progressHost.innerHTML += global.RestoreVerification.formatSummaryHtml(result.verified.summary);
+              }
+              markRestore('backup_v2', '✅ تمت استعادة Backup V2 والتحقق — انتقل للمزامنة');
+              setStatus('✅ تم استعادة Backup V2 والتحقق منه — المزامنة التالية تسحب الأحدث فقط');
+            } catch (e) {
+              setStatusFromErr(e, 'restore_interrupted');
+            } finally {
+              restoreInFlight = false;
+              try { global.OwnerManagement?.clearSystemBusy?.('restore'); } catch { /* empty */ }
+              renderNavButtons(loadWizard());
+            }
+          };
+
+          const runCloudSyncHydrate = async (point) => {
             if (!point) return;
             if (restoreInFlight || Discovery.isRestoreLocked?.()) {
               setStatus('⚠️ عملية سحب جارية — انتظر', true);
@@ -1338,12 +1404,13 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
           };
 
           if (newest && (cloudStatus === 'ready' || cloudStatus === 'ipc_missing')) {
-            addBtn(cloudCard.actions, 'سحب الأحدث (موصى به)', 'btn-primary', () => runCloudHydrate(newest));
+            addBtn(cloudCard.actions, 'استعادة أحدث نسخة Backup V2', 'btn-primary', () => runCloudBackupV2Restore(newest));
+            addBtn(cloudCard.actions, 'سحب Sync Hydrate (بدون Backup)', 'btn-secondary', () => runCloudSyncHydrate(newest));
             if (latestBackups.length > 1) {
-              addBtn(cloudCard.actions, 'سحب النسخة المحددة', 'btn-secondary', () => {
+              addBtn(cloudCard.actions, 'استعادة النسخة المحددة Backup V2', 'btn-secondary', () => {
                 const sel = cloudCard.card.dataset.selectedBackup;
                 const point = latestBackups.find((p) => (p.path || p.name) === sel) || newest;
-                runCloudHydrate(point);
+                runCloudBackupV2Restore(point);
               });
             }
           } else {
@@ -1494,9 +1561,19 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
               if (!global.SyncEngine.isRunning?.()) {
                 global.SyncEngine.start?.({ pollIntervalMs: global.SyncState?.load?.()?.pollIntervalMs });
               }
-              const r = await global.SyncEngine.runOnce({ force: true });
+              const restoreChoice = loadWizard().restoreChoice;
+              const afterRestore = restoreChoice === 'backup_v2' || restoreChoice === 'file';
+              const r = await global.SyncEngine.runOnce({
+                force: true,
+                afterRestore,
+                direction: afterRestore ? 'pull' : undefined,
+              });
               ok = r?.ok !== false;
               if (!ok) setStatus(`⚠️ فشلت المزامنة: ${r?.error || r?.message || ''}`, true);
+              else {
+                setStatus('⏳ انتظار اكتمال دورة المزامنة…');
+                await waitForSyncLifecycleReady({ relaxedBaseline: true });
+              }
             } else if (global.CloudBootstrap?.hydrateFromDrive && loadWizard().restoreChoice === 'cloud') {
               const r = await global.CloudBootstrap.hydrateFromDrive(null, { allowMissingLicense: true });
               ok = !!r?.ok || r?.skipped;
@@ -1515,7 +1592,9 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
               }
             }
             const w2 = loadWizard();
-            const lifecycleAfter = global.SyncLifecycle?.resolveLifecycle?.({ force: true }) || null;
+            const lifecycleAfter = await waitForSyncLifecycleReady({ relaxedBaseline: true })
+              || global.SyncLifecycle?.resolveLifecycle?.({ force: true, relaxedBaseline: true })
+              || null;
             const syncReady = lifecycleAfter?.lifecycle === 'READY'
               && lifecycleAfter?.readiness?.ready !== false
               && lifecycleAfter?.conflictCount === 0;

@@ -135,6 +135,7 @@
       expectedCounts,
       countMismatches: countCompare.mismatches,
       restoreKind: kind,
+      backupV2: isBackupRestore,
       backupPoint: options.point?.path || options.point?.name || null,
       cloudHydrate: isCloudHydrate,
       branchesInLicense: counts.licenseBranches,
@@ -185,9 +186,11 @@
     const countLine = (exp.clients >= 0 && exp.clients > 0)
       ? `العملاء: ${c.clients ?? 0}/${exp.clients} · الجلسات: ${c.visits ?? 0}/${exp.visits >= 0 ? exp.visits : '—'} · الحجوزات: ${c.bookings ?? 0}/${exp.bookings >= 0 ? exp.bookings : '—'}`
       : `العملاء: ${c.clients ?? '—'} · الجلسات: ${c.visits ?? '—'} · الحجوزات: ${c.bookings ?? '—'} · ${branchLine}`;
-    const kindLabel = summary.cloudHydrate
-      ? 'تم سحب/دمج بيانات السحابة (Sync Hydrate) ✓'
-      : 'تمت الاستعادة والتحقق من البيانات ✓';
+    const kindLabel = summary.backupV2 || summary.restoreKind === 'backup_v2'
+      ? 'تم استعادة Backup V2 والتحقق منه ✓'
+      : (summary.cloudHydrate
+        ? 'تم سحب/دمج بيانات السحابة (Sync Hydrate) ✓'
+        : 'تمت الاستعادة والتحقق من البيانات ✓');
     return `<div class="bf-restore-verify" dir="rtl">
       <strong>${kindLabel}</strong><br>
       Center: <code dir="ltr">${summary.centerId || '—'}</code><br>

@@ -48,7 +48,8 @@ check(/restore_in_flight|discovery_in_flight|stale_discovery|stale_restore/.test
 
 // --- BootFlow wiring ---
 check(/CloudDataDiscovery/.test(boot), 'BootFlow uses CloudDataDiscovery');
-check(/سحب (بيانات الفرع من السحابة|الأحدث \(موصى به\))/.test(boot), 'explicit cloud hydrate CTA (not full DR restore)');
+check(/سحب (بيانات الفرع من السحابة|الأحدث \(موصى به\)|Sync Hydrate)/.test(boot), 'explicit cloud hydrate CTA (not full DR restore)');
+check(/استعادة.*Backup V2|confirmedBackupV2Restore/.test(boot), 'backup V2 restore CTA separated from hydrate');
 check(/onProgress/.test(boot), 'BootFlow discovery progress callback');
 check(/DISCOVERY_TIMEOUT_MS/.test(boot), 'BootFlow uses discovery timeout constant');
 check(!/جارٍ الاستعادة من السحابة\.\.\./.test(boot)

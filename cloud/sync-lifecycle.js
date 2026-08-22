@@ -71,11 +71,17 @@
   function resolveLifecycle(options = {}) {
     const readiness = global.SyncEngine?.getReadiness?.(options) || null;
     const syncStatus = global.SyncEngine?.getStatus?.() || {};
-    const running = !!readiness?.running || !!syncStatus.running;
+    const engineEnabled = syncStatus.engineEnabled === true || !!readiness?.engineEnabled || !!syncStatus.running;
+    const cycleInFlight = syncStatus.cycleInFlight === true || !!readiness?.cycleInFlight
+      || !!global.SyncCoordinator?.isCycleInFlight?.();
     const conflictCount = countOpenConflicts();
     const outboxCount = countPendingOutbox();
     const lastPull = syncStatus.lastPullAt || syncStatus.lastSuccessfulPull || null;
     const lastPush = syncStatus.lastPushAt || syncStatus.lastSuccessfulPush || null;
+    const lastCycleResult = syncStatus.lastCycleResult || global.SyncCoordinator?.getLastCycleResult?.()?.result || null;
+    const baseline = global.SyncBaseline?.load?.() || {};
+    const baselineKnown = baseline.baselineKnown === true || baseline.lifecycle === 'READY' || baseline.lifecycle === 'BASELINE_KNOWN';
+    const reconciliationRequired = baseline.lifecycle === 'RECONCILIATION_REQUIRED' || baseline.pushBlockedUntilReconcile === true;
     const guardReason = (readiness?.missing || []).find((c) =>
       ['conflict', 'unsafe', 'UNSAFE', 'sync_guard_blocked', 'analysis_required'].includes(String(c))
     ) || null;
@@ -90,7 +96,7 @@
     } else if (conflictCount > 0 || guardReason === 'conflict') {
       lifecycle = LIFECYCLE.CONFLICT_REQUIRES_ACTION;
       notReadyReason = `يوجد ${conflictCount} تعارض(ات) — البيانات قد تكون متزامنة جزئياً`;
-    } else if (readiness?.ready && running) {
+    } else if (readiness?.ready && cycleInFlight) {
       const phase = String(syncStatus.phase || syncStatus.stage || '').toLowerCase();
       if (phase.includes('push')) lifecycle = LIFECYCLE.PUSHING;
       else if (phase.includes('merge')) lifecycle = LIFECYCLE.MERGING;
@@ -99,8 +105,20 @@
       else if (phase.includes('verify')) lifecycle = LIFECYCLE.VERIFYING;
       else lifecycle = LIFECYCLE.PREPARING;
       progressHint = syncStatus.lastActivity || readiness.messageAr;
-    } else if (readiness?.ready && !running) {
-      lifecycle = outboxCount > 0 ? LIFECYCLE.PUSHING : LIFECYCLE.READY;
+    } else if (readiness?.ready && !cycleInFlight) {
+      const cycleSucceeded = lastCycleResult === 'success';
+      if (reconciliationRequired && !cycleSucceeded) {
+        lifecycle = LIFECYCLE.VERIFYING;
+        notReadyReason = 'مواءمة ما بعد الاستعادة — انتظر اكتمال دورة المزامنة';
+      } else if (outboxCount > 0) {
+        lifecycle = LIFECYCLE.PUSHING;
+        progressHint = `قائمة انتظار: ${outboxCount}`;
+      } else if (!baselineKnown && !options.relaxedBaseline && !cycleSucceeded) {
+        lifecycle = LIFECYCLE.PREPARING;
+        notReadyReason = 'baseline غير معروف بعد — نفّذ المزامنة الأولية';
+      } else {
+        lifecycle = LIFECYCLE.READY;
+      }
     } else if (readiness?.recoverablePause) {
       lifecycle = LIFECYCLE.PREPARING;
       notReadyReason = readiness.messageAr || 'غير جاهزة — المزامنة موقوفة مؤقتاً';
@@ -136,7 +154,11 @@
       lastPull,
       lastPush,
       readiness,
-      running,
+      engineEnabled,
+      cycleInFlight,
+      lastCycleResult,
+      baselineKnown,
+      reconciliationRequired,
     };
   }
 
@@ -145,7 +167,8 @@
     const lines = [
       `<strong>${s.labelAr}</strong>`,
       s.notReadyReason ? `<span class="bf-source-meta">${s.notReadyReason}</span>` : '',
-      s.progressHint && s.running ? `<span class="bf-source-meta">آخر نشاط: ${s.progressHint}</span>` : '',
+      s.progressHint && s.cycleInFlight ? `<span class="bf-source-meta">آخر نشاط: ${s.progressHint}</span>` : '',
+      s.engineEnabled && !s.cycleInFlight ? `<span class="bf-source-meta">المحرك: يعمل بالخلفية</span>` : '',
       `<span class="bf-source-meta">تعارضات مفتوحة: ${s.conflictCount} · قائمة انتظار: ${s.outboxCount}</span>`,
       s.lastPull ? `<span class="bf-source-meta">آخر سحب: ${s.lastPull}</span>` : '',
       s.lastPush ? `<span class="bf-source-meta">آخر رفع: ${s.lastPush}</span>` : '',

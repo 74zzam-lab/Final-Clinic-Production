@@ -1016,6 +1016,8 @@
     // Guard pause alone is recoverable — expose resume hint but allow force paths.
     const ready = hardMissing.length === 0 && !guardPaused && cloudV2 && googleOk && !!centerId;
     const recoverablePause = hardMissing.length === 0 && guardPaused && cloudV2 && googleOk && !!centerId;
+    const engineEnabled = isRunning();
+    const cycleInFlight = !!global.SyncCoordinator?.isCycleInFlight?.();
     return {
       ready,
       ok: ready,
@@ -1023,17 +1025,21 @@
       missing: missingNorm,
       missingLabelsAr,
       state: ready
-        ? (isRunning() ? 'RUNNING' : 'READY_NOT_STARTED')
+        ? (cycleInFlight ? 'CYCLE_IN_FLIGHT' : (engineEnabled ? 'ENGINE_IDLE' : 'READY_NOT_STARTED'))
         : (recoverablePause ? 'SYNC_PAUSED_RECOVERABLE' : 'WAITING_FOR_PREREQUISITES'),
       enabled: isEnabled(),
       running: isRunning(),
+      engineEnabled: isRunning(),
+      cycleInFlight: !!global.SyncCoordinator?.isCycleInFlight?.(),
       cloudV2,
       googleConnected: googleOk,
       centerId: centerId || null,
       branchId: branchId || null,
       deviceId: deviceId || null,
       messageAr: ready
-        ? (isRunning() ? 'محرك المزامنة يعمل' : 'محرك المزامنة جاهز — لم يُبدأ بعد')
+        ? (cycleInFlight
+          ? 'دورة مزامنة جارية…'
+          : (isRunning() ? 'محرك المزامنة يعمل — جاهز' : 'محرك المزامنة جاهز — لم يُبدأ بعد'))
         : (recoverablePause
           ? `المزامنة موقوفة مؤقتاً — ${missingLabelsAr.join('؛ ')}. اضغط «استئناف المزامنة».`
           : `محرك المزامنة غير جاهز — المتطلبات الناقصة: ${missingLabelsAr.join('؛ ')}`),
@@ -1111,10 +1117,24 @@
     };
   }
 
+  function getCycleState() {
+    return {
+      engineEnabled: isRunning(),
+      cycleInFlight: !!global.SyncCoordinator?.isCycleInFlight?.() || !!global.SyncCoordinator?.isLocked?.(),
+      lastCycleResult: global.SyncCoordinator?.getLastCycleResult?.()?.result || null,
+      lastCycleCompletedAt: global.SyncCoordinator?.getLastCycleResult?.()?.completedAt || null,
+    };
+  }
+
   function getStatus() {
+    const cycle = getCycleState();
     const base = {
       enabled: isEnabled(),
-      running: isRunning(),
+      running: cycle.engineEnabled,
+      engineEnabled: cycle.engineEnabled,
+      cycleInFlight: cycle.cycleInFlight,
+      lastCycleResult: cycle.lastCycleResult,
+      lastCycleCompletedAt: cycle.lastCycleCompletedAt,
       readiness: getReadiness(),
       ...global.SyncState?.getStatus?.()
     };

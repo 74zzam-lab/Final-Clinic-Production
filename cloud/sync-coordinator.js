@@ -12,6 +12,9 @@
   let currentOperationId = null;
   let waiters = [];
   let debounceTimer = null;
+  let lastCycleResult = null;
+  let lastCycleCompletedAt = null;
+  let lastCycleError = null;
 
   function newOperationId(prefix) {
     prefix = prefix || 'sync';
@@ -120,7 +123,10 @@
       }
 
       const ok = pull?.ok !== false && push?.ok !== false;
-      return { ok, pull, push, operationId, at: new Date().toISOString() };
+      lastCycleResult = ok ? 'success' : 'failed';
+      lastCycleCompletedAt = new Date().toISOString();
+      lastCycleError = ok ? null : (pull?.error || push?.error || 'cycle_failed');
+      return { ok, pull, push, operationId, at: lastCycleCompletedAt, cycleCompleted: true };
     }, { operationId: options.operationId, prefix: 'cycle' });
   }
 
@@ -134,11 +140,25 @@
     }, ms);
   }
 
+  function isCycleInFlight() {
+    return locked;
+  }
+
+  function getLastCycleResult() {
+    return {
+      result: lastCycleResult,
+      completedAt: lastCycleCompletedAt,
+      error: lastCycleError,
+    };
+  }
+
   global.SyncCoordinator = {
     DEFAULT_DEBOUNCE_MS,
     DEFAULT_MAX_ATTEMPTS,
     newOperationId,
     isLocked,
+    isCycleInFlight,
+    getLastCycleResult,
     getCurrentOperationId,
     withMutex,
     runWithBoundedRetry,

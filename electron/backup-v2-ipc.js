@@ -537,6 +537,41 @@ function registerBackupV2Ipc({
     return { ...restored, staged, downloadProgress: progress };
   });
 
+  handle('backup:v2:restoreFromCloudRemote', async (_e, options) => {
+    const opts = V.asObject(options, { name: 'options', required: true });
+    const remotePath = V.asString(opts.remotePath, { name: 'remotePath', required: true, allowEmpty: false });
+    const dl = await backupMain.downloadCloudBackup(remotePath, 'google');
+    const buf = dl?.buffer || (dl?.text ? Buffer.from(String(dl.text), 'utf8') : null);
+    if (!buf || !buf.length) {
+      return { ok: false, error: 'download_failed', detail: dl?.message || dl?.error || null };
+    }
+    if (backupV2.isEncryptedBackupBuffer(buf)) {
+      const friendly = backupV2.friendlyBackupError({ code: 'backup_legacy_encrypted_direct_restore_blocked' });
+      return { ok: false, error: friendly.code, message: friendly.message };
+    }
+    const stageDir = path.join(getUserDataPath(), 'Backups', 'V2', 'cloud-restore-staging');
+    fs.mkdirSync(stageDir, { recursive: true });
+    const safeName = path.basename(remotePath).replace(/[^\w.\-]+/g, '_') || `cloud-${Date.now()}.tdw`;
+    const filePath = path.join(stageDir, safeName);
+    fs.writeFileSync(filePath, buf);
+    const inspected = backupV2.inspectBackupBuffer(buf, null, opts);
+    const scope = backupV2ScopeTruth.extractScopeSummaryFromManifest(inspected.manifest);
+    const restored = await runRestore(filePath, {
+      ...opts,
+      relaunch: opts.relaunch === true,
+    });
+    return {
+      ok: restored?.ok !== false,
+      filePath,
+      remotePath,
+      downloadBytes: buf.length,
+      manifest: inspected.manifest,
+      scopeTruth: inspected.manifest?.scopeTruth || scope,
+      recordCounts: scope?.recordCounts || inspected.manifest?.scopeTruth?.recordCounts || null,
+      restore: restored,
+    };
+  });
+
   handle('backup:v2:scheduleStatus', async () => {
     if (!scheduler) return { ok: false, enabled: false, error: 'scheduler_not_started' };
     return { ok: true, ...scheduler.status() };
