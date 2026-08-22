@@ -90,6 +90,8 @@ const CHANNEL_POLICY = {
   'backup:v2:restoreLatest': { minRank: 4 },
   'backup:v2:pruneCloud': { minRank: 4 },
   'backup:v2:downloadAndRestore': { minRank: 4 },
+  'backup:v2:downloadCloud': { minRank: 4 },
+  'backup:v2:restoreUnified': { minRank: 4 },
   'backup:v2:restoreFromCloudRemote': { minRank: 4 },
   'backup:restoreDbBackup': { minRank: 4 },
   'attachments:validate': { minRank: 2 },

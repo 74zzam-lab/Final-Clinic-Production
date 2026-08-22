@@ -63,6 +63,8 @@ const ALLOWED_INVOKE = new Set([
   'backup:v2:pickFile',
   'backup:v2:gate',
   'backup:v2:stageRemote',
+  'backup:v2:downloadCloud',
+  'backup:v2:restoreUnified',
   'backup:v2:downloadAndRestore',
   'backup:v2:restoreFromCloudRemote',
   'backup:v2:prune',
@@ -221,6 +223,13 @@ const cuppingApi = {
     v2PickFile: () => invoke('backup:v2:pickFile'),
     v2Gate: () => invoke('backup:v2:gate'),
     v2StageRemote: (options) => invoke('backup:v2:stageRemote', options),
+    v2DownloadCloud: (options) => invoke('backup:v2:downloadCloud', options),
+    v2RestoreUnified: (options) => invoke('backup:v2:restoreUnified', options),
+    onRestoreProgress: (handler) => {
+      const listener = (_event, payload) => { try { handler(payload); } catch { /* observer */ } };
+      ipcRenderer.on('backup:restoreProgress', listener);
+      return () => ipcRenderer.removeListener('backup:restoreProgress', listener);
+    },
     v2DownloadAndRestore: (options) => invoke('backup:v2:downloadAndRestore', options),
     v2RestoreFromCloudRemote: (options) => invoke('backup:v2:restoreFromCloudRemote', options),
     v2Prune: (options) => invoke('backup:v2:prune', options),

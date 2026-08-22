@@ -591,6 +591,10 @@ bootstrapRestoreCap.configure({
   getCloudStatus: backupGetCloudStatus,
   readLicense: (centerId) => getDeviceCache().readLicense(centerId),
   getSession: (event) => rbacSession.getSession(event),
+  verifyFileIdMetadata: (fileId, options) => {
+    const discovery = require('./cloud-data-discovery');
+    return discovery.verifyFileIdMetadata(fileId, options);
+  },
   assertDriveReadable: (remotePath) => {
     const discovery = require('./cloud-data-discovery');
     return discovery.assertDrivePathReadable(remotePath);

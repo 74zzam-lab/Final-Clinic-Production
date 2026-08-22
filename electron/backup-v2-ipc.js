@@ -15,6 +15,8 @@ const { BackupV2Scheduler } = require('./backup-v2-scheduler');
 const { copyWithResume, uploadWithResume } = require('./backup-v2-transfer');
 const backupMain = require('./backup');
 const bootstrapRestoreCap = require('./bootstrap-restore-capability');
+const backupRestoreCoordinator = require('./backup-restore-coordinator');
+const cloudDiscovery = require('./cloud-data-discovery');
 
 function isBackupV2Enabled() {
   const raw = process.env.HYBRID_BACKUP_V2;
@@ -111,6 +113,48 @@ function registerBackupV2Ipc({
   function databasePath() {
     return path.join(getUserDataPath(), 'database', 'tadawi.db');
   }
+
+  function configureRestoreCoordinator() {
+    backupRestoreCoordinator.configure({
+      getUserDataPath,
+      downloadCloudBackup: (remotePath, provider) => backupMain.downloadCloudBackup(remotePath, provider || 'google'),
+      downloadCloudBackupByFileId: (fileId, options) => backupMain.downloadCloudBackupByFileId(fileId, 'google', options),
+      verifyFileIdMetadata: (fileId, options) => cloudDiscovery.verifyFileIdMetadata(fileId, options),
+      runLocalRestore: (filePath, opts) => runRestore(filePath, opts),
+      reopenDatabase,
+      countDatabaseRows: (dbPath) => backupV2.countDatabaseRows(dbPath),
+      inspectBackupBuffer: (buf, password, opts) => backupV2.inspectBackupBuffer(buf, password, opts),
+      verifyBackupFile: (filePath, password, opts) => backupV2.verifyBackupFile(filePath, password, opts),
+      scopeFromManifest: (manifest) => backupV2ScopeTruth.extractScopeSummaryFromManifest(manifest),
+      issueBootstrapAuthorization: async (request) => {
+        const capReq = {
+          bootFlow: true,
+          centerId: request.centerId,
+          organizationId: request.organizationId,
+          branchId: request.branchId,
+          remotePath: request.remotePath,
+          googleFileId: request.googleFileId,
+          backupId: request.backupId,
+          expectedSize: request.expectedSize,
+          expectedModifiedAt: request.expectedModifiedAt,
+          licensedBranchIds: request.licensedBranchIds,
+          licenseSnapshot: request.licenseSnapshot,
+          diagnosticId: request.diagnosticId,
+        };
+        return bootstrapRestoreCap.issueRestoreCapability(
+          { sender: { id: request.webContentsId ?? -1 } },
+          capReq
+        );
+      },
+      consumeBootstrapCapability: (id) => bootstrapRestoreCap.consumeCapability(id),
+      assertBootstrapManifestScope: (cap, manifest, scope) => bootstrapRestoreCap.assertManifestScope(cap, manifest, scope),
+      getCapability: (id) => bootstrapRestoreCap.getCapability(id),
+      isBackupBufferEncrypted: (buf) => backupV2.isEncryptedBackupBuffer(buf),
+      friendlyError: (err) => backupV2.friendlyBackupError(err),
+    });
+  }
+
+  configureRestoreCoordinator();
 
   function buildScopeContext(opts = {}, identity = {}) {
     return {
@@ -506,7 +550,47 @@ function registerBackupV2Ipc({
 
   handle('backup:v2:stageRemote', async (_e, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
-    const sourcePath = V.asString(opts.sourcePath, { name: 'sourcePath', required: true, allowEmpty: false });
+    const remotePath = opts.remotePath
+      ? V.asString(opts.remotePath, { name: 'remotePath', required: false, allowEmpty: false })
+      : null;
+    const googleFileId = opts.googleFileId
+      ? V.asString(opts.googleFileId, { name: 'googleFileId', required: false, allowEmpty: false })
+      : null;
+    const sourcePath = opts.sourcePath
+      ? V.asString(opts.sourcePath, { name: 'sourcePath', required: false, allowEmpty: false })
+      : null;
+
+    if (remotePath || googleFileId) {
+      const outDir = backupRestoreCoordinator.downloadedDir(getUserDataPath());
+      fs.mkdirSync(outDir, { recursive: true });
+      const progress = [];
+      let dl;
+      if (googleFileId) {
+        dl = await backupMain.downloadCloudBackupByFileId(googleFileId, 'google', {
+          remotePath: remotePath || undefined,
+          expectedSize: opts.expectedSize,
+          onProgress: (evt) => progress.push(evt),
+        });
+      } else {
+        dl = await backupMain.downloadCloudBackup(remotePath, 'google');
+      }
+      const buf = dl?.buffer || (dl?.text ? Buffer.from(String(dl.text), 'utf8') : null);
+      if (!buf?.length) return { ok: false, error: dl?.error || 'download_failed', detail: dl?.message || null, progress };
+      const safeName = path.basename(remotePath || dl.file?.name || `cloud-${googleFileId || Date.now()}.tdw`).replace(/[^\w.\-]+/g, '_');
+      const destPath = path.join(outDir, safeName);
+      fs.writeFileSync(destPath, buf);
+      if (opts.verify !== false) {
+        try { backupV2.verifyBackupFile(destPath, null, opts); } catch (err) {
+          return { ok: false, error: err.code || 'verify_failed', message: err.message, progress };
+        }
+      }
+      return { ok: true, filePath: destPath, path: destPath, localPath: destPath, downloadBytes: buf.length, progress };
+    }
+
+    if (!sourcePath) {
+      V.fail('IPC_REQUIRED', 'sourcePath_or_remotePath_required');
+    }
+
     const password = optionalBackupPassword(opts);
     const stageDir = path.join(getUserDataPath(), 'Backups', 'V2', 'staging');
     fs.mkdirSync(stageDir, { recursive: true });
@@ -521,6 +605,75 @@ function registerBackupV2Ipc({
       backupV2.verifyBackupFile(staged.path, password, opts);
     }
     return { ...staged, progress };
+  });
+
+  handle('backup:v2:downloadCloud', async (_e, options) => {
+    const opts = V.asObject(options, { name: 'options', required: true });
+    const remotePath = opts.remotePath
+      ? V.asString(opts.remotePath, { name: 'remotePath', required: false, allowEmpty: false })
+      : null;
+    const googleFileId = opts.googleFileId
+      ? V.asString(opts.googleFileId, { name: 'googleFileId', required: false, allowEmpty: false })
+      : null;
+    if (!remotePath && !googleFileId) V.fail('IPC_REQUIRED', 'remotePath_or_googleFileId_required');
+
+    const outDir = backupRestoreCoordinator.downloadedDir(getUserDataPath());
+    fs.mkdirSync(outDir, { recursive: true });
+    const progress = [];
+    let dl;
+    if (googleFileId) {
+      dl = await backupMain.downloadCloudBackupByFileId(googleFileId, 'google', {
+        remotePath: remotePath || undefined,
+        expectedSize: opts.expectedSize,
+        onProgress: (evt) => progress.push(evt),
+      });
+    } else {
+      dl = await backupMain.downloadCloudBackup(remotePath, 'google');
+    }
+    const buf = dl?.buffer || (dl?.text ? Buffer.from(String(dl.text), 'utf8') : null);
+    if (!buf?.length) return { ok: false, error: dl?.error || 'download_failed', detail: dl?.message || null, progress };
+    const safeName = path.basename(remotePath || dl.file?.name || `cloud-${googleFileId || Date.now()}.tdw`).replace(/[^\w.\-]+/g, '_');
+    const filePath = path.join(outDir, safeName);
+    fs.writeFileSync(filePath, buf);
+    if (opts.verify !== false) {
+      backupV2.verifyBackupFile(filePath, null, opts);
+    }
+    return {
+      ok: true,
+      filePath,
+      path: filePath,
+      localPath: filePath,
+      remotePath,
+      googleFileId,
+      downloadBytes: buf.length,
+      progress,
+    };
+  });
+
+  handle('backup:v2:restoreUnified', async (event, options) => {
+    const opts = V.asObject(options, { name: 'options', required: true });
+    const source = opts.source === 'local' ? 'local' : 'cloud';
+    const context = opts.context === 'bootstrap' ? 'bootstrap' : 'authenticated';
+    const progressSender = event?.sender;
+    const onProgress = (snap) => {
+      if (progressSender && !progressSender.isDestroyed?.()) {
+        try { progressSender.send('backup:restoreProgress', snap); } catch { /* observer */ }
+      }
+    };
+    return backupRestoreCoordinator.restore({
+      ...opts,
+      source,
+      context,
+      localPath: opts.localPath || opts.filePath,
+      onProgress,
+      webContentsId: event?.sender?.id,
+      identity: resolveIdentity(opts),
+      licensedBranchIds: Array.isArray(opts.licensedBranchIds) ? opts.licensedBranchIds : [],
+      centerId: opts.centerId || resolveIdentity(opts).centerId,
+      organizationId: opts.organizationId || resolveIdentity(opts).organizationId,
+      branchId: opts.branchId || resolveIdentity(opts).branchId,
+      identity: resolveIdentity(opts),
+    });
   });
 
   handle('backup:v2:downloadAndRestore', async (_e, options) => {
@@ -538,49 +691,66 @@ function registerBackupV2Ipc({
     return { ...restored, staged, downloadProgress: progress };
   });
 
-  handle('backup:v2:restoreFromCloudRemote', async (_e, options) => {
+  handle('backup:v2:restoreFromCloudRemote', async (event, options) => {
     const opts = V.asObject(options, { name: 'options', required: true });
-    const remotePath = V.asString(opts.remotePath, { name: 'remotePath', required: true, allowEmpty: false });
-    const dl = await backupMain.downloadCloudBackup(remotePath, 'google');
-    const buf = dl?.buffer || (dl?.text ? Buffer.from(String(dl.text), 'utf8') : null);
-    if (!buf || !buf.length) {
-      return { ok: false, error: 'download_failed', detail: dl?.message || dl?.error || null };
-    }
-    if (backupV2.isEncryptedBackupBuffer(buf)) {
-      const friendly = backupV2.friendlyBackupError({ code: 'backup_legacy_encrypted_direct_restore_blocked' });
-      return { ok: false, error: friendly.code, message: friendly.message };
-    }
-    const stageDir = path.join(getUserDataPath(), 'Backups', 'V2', 'cloud-restore-staging');
-    fs.mkdirSync(stageDir, { recursive: true });
-    const safeName = path.basename(remotePath).replace(/[^\w.\-]+/g, '_') || `cloud-${Date.now()}.tdw`;
-    const filePath = path.join(stageDir, safeName);
-    fs.writeFileSync(filePath, buf);
-    const inspected = backupV2.inspectBackupBuffer(buf, null, opts);
-    const scope = backupV2ScopeTruth.extractScopeSummaryFromManifest(inspected.manifest);
+    const remotePath = V.asString(opts.remotePath, { name: 'remotePath', required: false, allowEmpty: false });
+    const googleFileId = opts.googleFileId
+      ? V.asString(opts.googleFileId, { name: 'googleFileId', required: false, allowEmpty: false })
+      : null;
+    if (!remotePath && !googleFileId) V.fail('IPC_REQUIRED', 'remotePath_or_googleFileId_required');
 
-    if (opts.bootstrapRestoreCapabilityId) {
-      const cap = bootstrapRestoreCap.getCapability(opts.bootstrapRestoreCapabilityId);
-      const scopeGate = bootstrapRestoreCap.assertManifestScope(cap, inspected.manifest, scope);
-      if (!scopeGate.ok) {
-        return { ok: false, error: scopeGate.error || 'restore_scope_mismatch' };
+    const progressSender = event?.sender;
+    const onProgress = (snap) => {
+      if (progressSender && !progressSender.isDestroyed?.()) {
+        try { progressSender.send('backup:restoreProgress', snap); } catch { /* observer */ }
       }
-    }
+    };
 
-    const restored = await runRestore(filePath, {
-      ...opts,
-      relaunch: opts.relaunch === true,
-      requireScopeTruth: opts.bootstrapRestoreCapabilityId ? true : opts.requireScopeTruth === true,
-    });
-    return {
-      ok: restored?.ok !== false,
-      filePath,
+    const context = opts.bootstrapRestoreCapabilityId
+      ? 'bootstrap'
+      : (opts.context === 'bootstrap' ? 'bootstrap' : 'authenticated');
+    const result = await backupRestoreCoordinator.restore({
+      source: 'cloud',
+      context,
       remotePath,
-      downloadBytes: buf.length,
-      manifest: inspected.manifest,
-      scopeTruth: inspected.manifest?.scopeTruth || scope,
-      recordCounts: scope?.recordCounts || inspected.manifest?.scopeTruth?.recordCounts || null,
-      restore: restored,
-      bootstrapRestore: !!opts.bootstrapRestoreCapabilityId,
+      googleFileId,
+      backupId: opts.backupId,
+      expectedSize: opts.expectedSize,
+      expectedModifiedAt: opts.expectedModifiedAt,
+      bootstrapRestoreCapabilityId: opts.bootstrapRestoreCapabilityId,
+      licenseSnapshot: opts.licenseSnapshot,
+      centerId: opts.centerId,
+      organizationId: opts.organizationId,
+      branchId: opts.branchId,
+      licensedBranchIds: opts.licensedBranchIds,
+      relaunch: opts.relaunch === true,
+      diagnosticId: opts.diagnosticId,
+      onProgress,
+      webContentsId: event?.sender?.id,
+    });
+
+    if (!result.ok) return result;
+
+    const inspected = result.restore?.manifest
+      ? { manifest: result.restore.manifest }
+      : (result.filePath ? backupV2.inspectBackupBuffer(fs.readFileSync(result.filePath), null, opts) : {});
+
+    return {
+      ok: result.ok,
+      filePath: result.filePath,
+      remotePath,
+      googleFileId,
+      downloadBytes: result.download?.downloadBytes || null,
+      manifest: inspected.manifest || result.restore?.manifest || null,
+      scopeTruth: result.restore?.manifest?.scopeTruth
+        || backupV2ScopeTruth.extractScopeSummaryFromManifest(inspected.manifest),
+      recordCounts: result.rowCounts || result.restore?.rowCounts || null,
+      restore: result.restore,
+      countVerify: result.countVerify,
+      restoreVerified: result.restoreVerified,
+      diagnosticId: result.diagnosticId,
+      bootstrapRestore: context === 'bootstrap',
+      progressStages: result.stages,
     };
   });
 

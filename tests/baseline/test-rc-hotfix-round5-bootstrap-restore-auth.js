@@ -21,6 +21,7 @@ const boot = fs.readFileSync(path.join(root, 'cloud/boot-flow-ui.js'), 'utf8');
 const classify = fs.readFileSync(path.join(root, 'electron/backup-v2-classify.js'), 'utf8');
 const cloudDiscovery = fs.readFileSync(path.join(root, 'electron/cloud-data-discovery.js'), 'utf8');
 const ipc = fs.readFileSync(path.join(root, 'electron/backup-v2-ipc.js'), 'utf8');
+const coordinator = fs.readFileSync(path.join(root, 'electron/backup-restore-coordinator.js'), 'utf8');
 const dbSvc = fs.readFileSync(path.join(root, 'electron/database/service.js'), 'utf8');
 
 check(/issueRestoreCapability/.test(bootstrap), 'bootstrap issueRestoreCapability');
@@ -50,7 +51,7 @@ check(/return 'manual'/.test(classify), 'classify defaults unknown to manual not
 check(/isPrunableAutomaticBackup/.test(classify), 'prunable automatic helper');
 
 check(/bootstrapRestoreCap\.getCapability/.test(ipc), 'restore validates manifest against capability');
-check(/requireScopeTruth: opts\.bootstrapRestoreCapabilityId/.test(ipc), 'bootstrap restore requires scope truth');
+check(/requireScopeTruth: bootstrapRestoreCapabilityId/.test(coordinator), 'bootstrap restore requires scope truth via coordinator');
 
 // Behavioral: bootstrap capability module
 const bootstrapMod = require(path.join(root, 'electron/bootstrap-restore-capability'));

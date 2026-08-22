@@ -624,17 +624,49 @@
       }, 5000);
 
       const api = global.cuppingElectron?.backup || global.tadawiElectron?.backup || global.tadawi?.backup;
-      if (!api?.v2RestoreFromCloudRemote) {
+      if (!api?.v2RestoreFromCloudRemote && !api?.v2RestoreUnified) {
         return { ok: false, error: 'backup_v2_ipc_unavailable', diagnosticId, preserved: preSnapshot };
       }
 
       const identity = getIdentity();
       const lic = identity.lic || global.LicenseCloud?.loadLocal?.() || null;
+      const coordinatorStageMap = {
+        authorization: 'download_db',
+        downloading: 'download_db',
+        verifying_archive: 'checksums',
+        inspecting_manifest: 'checksums',
+        safety_snapshot: 'local_safety',
+        restoring: 'cloud_merge',
+        reopening: 'cloud_merge',
+        verifying_data: 'reconcile',
+        completed: 'restart_prep',
+      };
+
+      let progressUnsub = null;
+      if (api.onRestoreProgress) {
+        progressUnsub = api.onRestoreProgress((snap) => {
+          const mapped = coordinatorStageMap[snap.stage] || snap.stage;
+          emit(mapped, {
+            lastActivity: snap.stageLabel || snap.stage,
+            stageRatio: (snap.percent || 0) / 100,
+            downloadProgress: snap.downloadedBytes != null ? {
+              downloadedBytes: snap.downloadedBytes,
+              totalBytes: snap.totalBytes,
+              percent: snap.percent,
+              speed: snap.speed,
+              elapsedMs: snap.elapsedMs,
+              etaMs: snap.etaMs,
+            } : undefined,
+          });
+        });
+      }
+
       emit('download_db', { lastActivity: 'تفويض استعادة Bootstrap (pre-login)', stageRatio: 0.32 });
 
       let bootstrapRestoreCapabilityId = null;
       const bootstrapApi = global.cuppingElectron?.bootstrap || global.tadawiElectron?.bootstrap;
       if (!bootstrapApi?.issueRestoreCapability) {
+        if (progressUnsub) progressUnsub();
         return {
           ok: false,
           error: 'bootstrap_restore_bridge_unavailable',
@@ -644,43 +676,74 @@
         };
       }
       const cap = await bootstrapApi.issueRestoreCapability({
-          bootFlow: true,
-          centerId: identity.centerId,
-          organizationId: lic?.organizationId || identity.centerId,
-          branchId: identity.branchId,
-          remotePath: point.path,
-          backupId: point.path || point.id || point.name,
-          licensedBranchIds: (lic?.branches || []).filter((b) => b && b.active !== false).map((b) => b.id),
-        });
-        if (!cap?.ok) {
-          return {
-            ok: false,
-            error: cap?.error || 'restore_authorization_required',
-            message: cap?.message || cap?.error || 'تعذّر تفويض استعادة Bootstrap',
-            diagnosticId,
-            preserved: preSnapshot,
-          };
-        }
+        bootFlow: true,
+        centerId: identity.centerId,
+        organizationId: lic?.organizationId || identity.centerId,
+        branchId: identity.branchId,
+        remotePath: point.path || point.remotePath,
+        googleFileId: point.googleFileId || point.id,
+        backupId: point.backupId || point.path || point.id || point.name,
+        expectedSize: point.expectedSize || point.sizeBytes,
+        expectedModifiedAt: point.expectedModifiedAt || point.modifiedAt,
+        licensedBranchIds: (lic?.branches || []).filter((b) => b && b.active !== false).map((b) => b.id),
+        licenseSnapshot: lic,
+        diagnosticId,
+      });
+      if (!cap?.ok) {
+        if (progressUnsub) progressUnsub();
+        const errCode = cap?.error || 'restore_authorization_required';
+        const errTruth = global.OperationalErrorTruth?.resolve?.(errCode) || null;
+        return {
+          ok: false,
+          error: errCode,
+          message: cap?.message || errTruth?.userMessageAr || errCode,
+          stage: cap?.stage || 'authorization',
+          diagnosticId: cap?.diagnosticId || diagnosticId,
+          detail: cap?.detail || cap?.reason || null,
+          preserved: preSnapshot,
+        };
+      }
       bootstrapRestoreCapabilityId = cap.capabilityId;
 
       emit('download_db', { lastActivity: 'تنزيل ملف Backup V2 من Drive', stageRatio: 0.35 });
 
-      const restoreRes = await api.v2RestoreFromCloudRemote({
-        remotePath: point.path,
+      const restorePayload = {
+        source: 'cloud',
+        context: 'bootstrap',
+        remotePath: point.path || point.remotePath,
+        googleFileId: point.googleFileId || point.id,
+        backupId: point.backupId || point.path || point.id || point.name,
+        expectedSize: point.expectedSize || point.sizeBytes,
+        expectedModifiedAt: point.expectedModifiedAt || point.modifiedAt,
         relaunch: false,
         centerId: identity.centerId,
         organizationId: lic?.organizationId || identity.centerId,
         branchId: identity.branchId,
         licensedBranchIds: (lic?.branches || []).filter((b) => b && b.active !== false).map((b) => b.id),
+        licenseSnapshot: lic,
         bootstrapRestoreCapabilityId,
-      });
+        diagnosticId,
+      };
+
+      const restoreRes = api.v2RestoreUnified
+        ? await api.v2RestoreUnified(restorePayload)
+        : await api.v2RestoreFromCloudRemote({
+          ...restorePayload,
+          remotePath: restorePayload.remotePath,
+        });
+
+      if (progressUnsub) progressUnsub();
 
       if (!restoreRes?.ok) {
+        const errCode = restoreRes?.error || 'backup_v2_restore_failed';
+        const errTruth = global.OperationalErrorTruth?.resolve?.(errCode) || null;
         return {
           ok: false,
-          error: restoreRes?.error || 'backup_v2_restore_failed',
-          message: restoreRes?.message || restoreRes?.error || 'فشل استعادة Backup V2',
-          diagnosticId,
+          error: errCode,
+          message: restoreRes?.message || errTruth?.userMessageAr || errCode,
+          stage: restoreRes?.stage || 'restoring',
+          diagnosticId: restoreRes?.diagnosticId || diagnosticId,
+          detail: restoreRes?.detail || null,
           preserved: preSnapshot,
           restore: restoreRes,
         };

@@ -93,7 +93,7 @@ bootstrapMod.configure({
       backupId: 'Backups/V2/missing.tdw',
     }
   );
-  check(!noDrive.ok && noDrive.error === 'drive_download_auth_failed', 'drive assert blocks capability');
+  check(!noDrive.ok && noDrive.error === 'backup_remote_probe_failed', 'drive assert blocks capability');
 
   check(typeof discoveryMainMod.assertDrivePathReadable === 'function', 'assertDrivePathReadable exported');
 

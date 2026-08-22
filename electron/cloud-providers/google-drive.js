@@ -427,6 +427,68 @@ async function downloadBackup(remotePath) {
   }
 }
 
+async function getFileMetadataById(fileId) {
+  try {
+    const { oauth2 } = await getAuthedClient();
+    const res = await driveApi.getFile(oauth2, fileId);
+    const file = res?.body || res?.files?.[0] || res;
+    if (!file?.id) return { ok: false, message: 'file_not_found' };
+    return {
+      ok: true,
+      item: {
+        id: file.id,
+        name: file.name,
+        size: Number(file.size || 0),
+        modifiedAt: file.modifiedTime || file.modifiedDate || null,
+        md5: file.md5Checksum || null,
+      },
+    };
+  } catch (err) {
+    return { ok: false, message: err.message || String(err), needsReauth: needsReauthError(err) };
+  }
+}
+
+async function downloadBackupByFileId(fileId, options = {}) {
+  const started = Date.now();
+  try {
+    const { oauth2 } = await getAuthedClient();
+    const metaRes = await getFileMetadataById(fileId);
+    if (!metaRes.ok) return { ok: false, error: 'backup_remote_not_found', message: metaRes.message };
+    const totalBytes = Number(metaRes.item.size || options.expectedSize || 0);
+    options.onProgress?.({
+      downloadedBytes: 0,
+      totalBytes,
+      percent: 0,
+      elapsedMs: 0,
+    });
+    const buf = await driveApi.downloadFile(oauth2, fileId);
+    const elapsedMs = Date.now() - started;
+    const downloadedBytes = buf.length;
+    options.onProgress?.({
+      downloadedBytes,
+      totalBytes: totalBytes || downloadedBytes,
+      percent: 100,
+      speed: elapsedMs > 0 ? Math.round((downloadedBytes / elapsedMs) * 1000) : null,
+      elapsedMs,
+      etaMs: 0,
+    });
+    return {
+      ok: true,
+      buffer: buf,
+      file: metaRes.item,
+      totalBytes: downloadedBytes,
+      remotePath: options.remotePath || null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: 'backup_remote_not_found',
+      message: err.message || String(err),
+      needsReauth: needsReauthError(err),
+    };
+  }
+}
+
 async function listBackups(_provider, prefix) {
   try {
     const { oauth2 } = await getAuthedClient();
@@ -647,6 +709,8 @@ module.exports = {
   uploadSyncFile,
   downloadSyncFile,
   downloadBackup,
+  getFileMetadataById,
+  downloadBackupByFileId,
   listBackups,
   deleteBackup,
   verifyRemote,
