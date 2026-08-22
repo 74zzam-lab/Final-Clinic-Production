@@ -12,6 +12,7 @@ const ALLOWED_INVOKE = new Set([
   'app:writeUninstallCenterMeta',
   'app:openExternal',
   'app:getDeviceFingerprintParts',
+  'bootstrap:issueRestoreCapability',
   'database:status',
   'database:hydrate',
   'database:persistTable',
@@ -307,6 +308,9 @@ const cuppingApi = {
     writeLocal: (sha256, buffer) => invoke('attachments:writeLocal', sha256, buffer),
     readLocal: (sha256) => invoke('attachments:readLocal', sha256),
     existsLocal: (sha256) => invoke('attachments:existsLocal', sha256),
+  },
+  bootstrap: {
+    issueRestoreCapability: (request) => invoke('bootstrap:issueRestoreCapability', request),
   },
 };
 

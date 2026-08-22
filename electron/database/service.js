@@ -172,6 +172,16 @@ function persistKv(key, value) {
   return { ok: true };
 }
 
+function readKv(key, def = null) {
+  try {
+    ensureDb();
+    const v = repos.kv.get(key);
+    return v === undefined || v === null ? def : v;
+  } catch {
+    return def;
+  }
+}
+
 /** Bootstrap only: seed users when main KV has none. Never overwrites existing users. */
 function seedUsersIfEmpty(users) {
   ensureDb();
@@ -474,6 +484,7 @@ module.exports = {
   hydrate,
   persistTable,
   persistKv,
+  readKv,
   seedUsersIfEmpty,
   enableSqlitePrimary,
   migrateFromBackupObject,

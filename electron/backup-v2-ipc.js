@@ -14,6 +14,7 @@ const backupV2ScopeTruth = require('./backup-v2-scope-truth');
 const { BackupV2Scheduler } = require('./backup-v2-scheduler');
 const { copyWithResume, uploadWithResume } = require('./backup-v2-transfer');
 const backupMain = require('./backup');
+const bootstrapRestoreCap = require('./bootstrap-restore-capability');
 
 function isBackupV2Enabled() {
   const raw = process.env.HYBRID_BACKUP_V2;
@@ -556,9 +557,19 @@ function registerBackupV2Ipc({
     fs.writeFileSync(filePath, buf);
     const inspected = backupV2.inspectBackupBuffer(buf, null, opts);
     const scope = backupV2ScopeTruth.extractScopeSummaryFromManifest(inspected.manifest);
+
+    if (opts.bootstrapRestoreCapabilityId) {
+      const cap = bootstrapRestoreCap.getCapability(opts.bootstrapRestoreCapabilityId);
+      const scopeGate = bootstrapRestoreCap.assertManifestScope(cap, inspected.manifest, scope);
+      if (!scopeGate.ok) {
+        return { ok: false, error: scopeGate.error || 'restore_scope_mismatch' };
+      }
+    }
+
     const restored = await runRestore(filePath, {
       ...opts,
       relaunch: opts.relaunch === true,
+      requireScopeTruth: opts.bootstrapRestoreCapabilityId ? true : opts.requireScopeTruth === true,
     });
     return {
       ok: restored?.ok !== false,
@@ -569,6 +580,7 @@ function registerBackupV2Ipc({
       scopeTruth: inspected.manifest?.scopeTruth || scope,
       recordCounts: scope?.recordCounts || inspected.manifest?.scopeTruth?.recordCounts || null,
       restore: restored,
+      bootstrapRestore: !!opts.bootstrapRestoreCapabilityId,
     };
   });
 

@@ -126,11 +126,29 @@ function assertTrustedSender(event) {
   }
 }
 
+const bootstrapRestoreCap = require('./bootstrap-restore-capability');
+
 function handle(channel, handler) {
   ipcMain.handle(channel, V.guard(async (event, ...args) => {
     assertTrustedSender(event);
-    rbacSession.assertChannelAllowed(event, channel);
-    return handler(event, ...args);
+    const opts = args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]) ? args[0] : null;
+    const capGate = bootstrapRestoreCap.tryAuthorizeChannel(event, channel, opts);
+    if (!capGate.ok) {
+      if (bootstrapRestoreCap.BOOTSTRAP_RESTORE_CHANNELS.has(channel) && opts?.bootstrapRestoreCapabilityId) {
+        const err = new Error(capGate.error || 'restore_authorization_required');
+        err.code = capGate.error || 'restore_authorization_required';
+        err.ok = false;
+        throw err;
+      }
+      rbacSession.assertChannelAllowed(event, channel);
+    }
+    try {
+      return await handler(event, ...args);
+    } finally {
+      if (capGate.ok && capGate.consumeOnComplete) {
+        bootstrapRestoreCap.consumeCapability(capGate.capabilityId);
+      }
+    }
   }));
 }
 
@@ -567,6 +585,19 @@ require('./attachments-ipc').registerAttachmentsIpc(handle);
 
 // Hybrid Backup V2 (main-process; feature flag HYBRID_BACKUP_V2, default on)
 const dbServiceForBackup = require('./database/service');
+bootstrapRestoreCap.configure({
+  getUserDataPath: () => app.getPath('userData'),
+  readKv: (key, def) => dbServiceForBackup.readKv(key, def),
+  getCloudStatus: backupGetCloudStatus,
+  readLicense: (centerId) => getDeviceCache().readLicense(centerId),
+  getSession: (event) => rbacSession.getSession(event),
+});
+
+handle('bootstrap:issueRestoreCapability', async (event, request) => {
+  const req = V.asObject(request || {}, { name: 'request' });
+  return bootstrapRestoreCap.issueRestoreCapability(event, req);
+});
+
 require('./backup-v2-ipc').registerBackupV2Ipc({
   handle,
   V,

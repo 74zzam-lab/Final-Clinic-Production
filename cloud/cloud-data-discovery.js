@@ -579,13 +579,17 @@
 
       emit('verify_point', { lastActivity: 'التحقق من نقطة Backup V2' });
       if (point.validation && point.validation !== 'metadata_ok' && point.validation !== 'ready') {
-        return {
-          ok: false,
-          error: 'invalid_restore_point',
-          message: 'النسخة غير صالحة للاستعادة.',
-          diagnosticId,
-          preserved: preSnapshot,
-        };
+        if (point.validation === 'metadata_suspicious_small') {
+          emit('verify_point', { lastActivity: 'تحذير: نسخة صغيرة جداً — قد تكون فارغة' });
+        } else {
+          return {
+            ok: false,
+            error: 'invalid_restore_point',
+            message: 'النسخة غير صالحة للاستعادة.',
+            diagnosticId,
+            preserved: preSnapshot,
+          };
+        }
       }
 
       emit('local_safety', { lastActivity: 'الاحتفاظ بلقطة أمان محلية قبل الاستبدال' });
@@ -609,6 +613,39 @@
 
       const identity = getIdentity();
       const lic = identity.lic || global.LicenseCloud?.loadLocal?.() || null;
+      emit('download_db', { lastActivity: 'تفويض استعادة Bootstrap (pre-login)', stageRatio: 0.32 });
+
+      let bootstrapRestoreCapabilityId = null;
+      const bootstrapApi = global.cuppingElectron?.bootstrap || global.tadawiElectron?.bootstrap;
+      if (!bootstrapApi?.issueRestoreCapability) {
+        return {
+          ok: false,
+          error: 'bootstrap_restore_bridge_unavailable',
+          message: 'تفويض Bootstrap Restore غير متاح — حدّث التطبيق',
+          diagnosticId,
+          preserved: preSnapshot,
+        };
+      }
+      const cap = await bootstrapApi.issueRestoreCapability({
+          bootFlow: true,
+          centerId: identity.centerId,
+          organizationId: lic?.organizationId || identity.centerId,
+          branchId: identity.branchId,
+          remotePath: point.path,
+          backupId: point.path || point.id || point.name,
+          licensedBranchIds: (lic?.branches || []).filter((b) => b && b.active !== false).map((b) => b.id),
+        });
+        if (!cap?.ok) {
+          return {
+            ok: false,
+            error: cap?.error || 'restore_authorization_required',
+            message: cap?.message || cap?.error || 'تعذّر تفويض استعادة Bootstrap',
+            diagnosticId,
+            preserved: preSnapshot,
+          };
+        }
+      bootstrapRestoreCapabilityId = cap.capabilityId;
+
       emit('download_db', { lastActivity: 'تنزيل ملف Backup V2 من Drive', stageRatio: 0.35 });
 
       const restoreRes = await api.v2RestoreFromCloudRemote({
@@ -618,6 +655,7 @@
         organizationId: lic?.organizationId || identity.centerId,
         branchId: identity.branchId,
         licensedBranchIds: (lic?.branches || []).filter((b) => b && b.active !== false).map((b) => b.id),
+        bootstrapRestoreCapabilityId,
       });
 
       if (!restoreRes?.ok) {
