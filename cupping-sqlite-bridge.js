@@ -873,6 +873,15 @@
     return res || { ok: false, error: 'boot_hydrate_failed' };
   }
 
+  function invalidateOperationalCaches() {
+    state.bootPromise = null;
+    state.ready = false;
+    state.lastCommitted = {};
+    state.pendingKeys.clear();
+    state.staleLsOverridden = [];
+    state.lastError = null;
+  }
+
   function bootFromSQLiteSoTOnce() {
     if (!state.bootPromise) {
       state.bootPromise = bootFromSQLiteSoT();
@@ -918,6 +927,7 @@
     migrateAndEnable,
     hydrateIntoMemory,
     rehydrateBranchView,
+    invalidateOperationalCaches,
     bootFromSQLiteSoT,
     bootFromSQLiteSoTOnce,
     ensureSqlitePrimaryEnabled,

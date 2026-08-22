@@ -16802,6 +16802,7 @@ window.__LICENSE_VAULT_DEFAULTS__ = window.__LICENSE_VAULT_DEFAULTS__ || {
 <script src="cloud/pre-install-safety-snapshot.js"></script>
 <script src="cloud/bootstrap-google-disconnect.js"></script>
 <script src="cloud/restore-verification.js"></script>
+<script src="cloud/restore-runtime-rehydrate.js"></script>
 <script src="cloud/boot-flow-ui.js"></script>
 <script src="cloud/activation-sync-defaults.js"></script>
 <script src="cloud/cloud-v2-init.js"></script>
@@ -17807,30 +17808,68 @@ async function runBackupV2RestoreFromEntry(entry) {
   if (!entry) return;
   if (typeof LicenseReadOnlyMode !== 'undefined' && !LicenseReadOnlyMode.guardRestore('استعادة النسخ الاحتياطية')) return;
   const api = getBackupV2Api();
-  if (!api?.v2Restore) {
+  if (!api?.v2Restore && !api?.v2RestoreUnified) {
     notify('Backup V2 unavailable', 'danger');
     return;
   }
-  let filePath = entry.path || entry.filePath || null;
-  if (!filePath && entry.source === 'cloud') {
-    notify('⏳ جاري تنزيل النسخة السحابية…', 'warning');
-    const staged = await api.v2StageRemote?.({ remotePath: entry.remotePath || entry.path, provider: 'google' });
-    filePath = staged?.filePath || staged?.localPath || null;
-  }
-  if (!filePath) {
-    notify('⚠️ مسار النسخة غير متاح', 'danger');
-    return;
-  }
-  const typed = window.prompt('اكتب «استعادة» للتأكيد', '');
-  if (!window.DangerConfirm?.restoreOverwriteConfirm?.({ typedPhrase: typed })?.ok) {
-    notify('تم الإلغاء', 'warning');
-    return;
-  }
+  const isCloud = entry.source === 'cloud' || entry.source === 'cloud_discovery' || entry.remotePath;
+  let progressUnsub = null;
   try {
+    if (api.onRestoreProgress) {
+      progressUnsub = api.onRestoreProgress((snap) => {
+        notify(`${snap.stageLabel || snap.stage} — ${snap.percent || 0}%`, 'warning');
+      });
+    }
+    if (isCloud && api.v2RestoreUnified) {
+      const typed = window.prompt('اكتب «استعادة» للتأكيد', '');
+      if (!window.DangerConfirm?.restoreOverwriteConfirm?.({ typedPhrase: typed })?.ok) {
+        notify('تم الإلغاء', 'warning');
+        return;
+      }
+      const res = await api.v2RestoreUnified({
+        source: 'cloud',
+        context: 'authenticated',
+        remotePath: entry.remotePath || entry.path,
+        googleFileId: entry.googleFileId || entry.id,
+        expectedSize: entry.expectedSize || entry.size,
+        expectedModifiedAt: entry.expectedModifiedAt || entry.modifiedAt,
+        relaunch: true,
+        ...getBackupV2IdentityMeta(),
+      });
+      notify(res?.ok ? '✅ تمت الاستعادة — إعادة تشغيل' : ('⚠️ ' + (res?.message || res?.error || 'restore_failed')), res?.ok ? 'success' : 'danger');
+      return;
+    }
+    let filePath = entry.path || entry.filePath || null;
+    if (!filePath && isCloud) {
+      notify('⏳ جاري تنزيل النسخة السحابية…', 'warning');
+      const dlApi = api.v2DownloadCloud || api.v2StageRemote;
+      if (!dlApi) {
+        notify('⚠️ التنزيل غير متاح — حدّث التطبيق', 'danger');
+        return;
+      }
+      const staged = await dlApi({
+        remotePath: entry.remotePath || entry.path,
+        googleFileId: entry.googleFileId || entry.id,
+        expectedSize: entry.expectedSize || entry.size,
+        provider: 'google',
+      });
+      filePath = staged?.filePath || staged?.localPath || null;
+    }
+    if (!filePath) {
+      notify('⚠️ مسار النسخة غير متاح', 'danger');
+      return;
+    }
+    const typed = window.prompt('اكتب «استعادة» للتأكيد', '');
+    if (!window.DangerConfirm?.restoreOverwriteConfirm?.({ typedPhrase: typed })?.ok) {
+      notify('تم الإلغاء', 'warning');
+      return;
+    }
     const res = await api.v2Restore({ filePath, relaunch: true, ...getBackupV2IdentityMeta() });
     notify(res?.ok ? '✅ تمت الاستعادة — إعادة تشغيل' : ('⚠️ ' + (res?.error || 'restore_failed')), res?.ok ? 'success' : 'danger');
   } catch (err) {
     notify('⚠️ ' + (err?.message || err), 'danger');
+  } finally {
+    if (progressUnsub) progressUnsub();
   }
 }
 
@@ -17862,14 +17901,20 @@ async function deleteBackupV2Entry(entry, kind) {
 async function downloadCloudBackupV2Entry(entry) {
   if (!entry) return;
   const api = getBackupV2Api();
-  if (!api?.v2StageRemote) {
-    notify('⚠️ التنزيل غير متاح', 'danger');
+  const dlApi = api?.v2DownloadCloud || api?.v2StageRemote;
+  if (!dlApi) {
+    notify('⚠️ التنزيل غير متاح — حدّث التطبيق', 'danger');
     return;
   }
   notify('⏳ جاري تنزيل النسخة إلى الجهاز…', 'warning');
   try {
-    const staged = await api.v2StageRemote({ remotePath: entry.remotePath || entry.path, provider: 'google' });
-    if (!staged?.ok && !staged?.filePath) throw new Error(staged?.error || 'download_failed');
+    const staged = await dlApi({
+      remotePath: entry.remotePath || entry.path,
+      googleFileId: entry.googleFileId || entry.id,
+      expectedSize: entry.expectedSize || entry.size,
+      provider: 'google',
+    });
+    if (!staged?.ok && !staged?.filePath) throw new Error(staged?.error || staged?.message || 'download_failed');
     notify('✅ تم حفظ النسخة محلياً: ' + (staged.filePath || ''), 'success');
     await refreshBackupDualPanelsUi();
   } catch (err) {
@@ -17988,10 +18033,14 @@ async function scanDriveBackupsV2() {
     const latest = scan.latestBackups || [];
     const cloudEntries = latest.map((bp, i) => ({
       id: bp.id || bp.path,
+      googleFileId: bp.googleFileId || bp.id,
       label: `#${i + 1} ${bp.name || 'Backup V2'}${i === 0 ? ' (الأحدث)' : ''}`,
       size: bp.sizeBytes || 0,
+      expectedSize: bp.expectedSize || bp.sizeBytes || 0,
       modifiedAt: bp.modifiedAt,
+      expectedModifiedAt: bp.expectedModifiedAt || bp.modifiedAt,
       path: bp.path,
+      remotePath: bp.remotePath || bp.path,
       source: 'cloud_discovery',
       validation: bp.validation || 'metadata_ok',
       scope: bp.scope || null,
@@ -19872,10 +19921,14 @@ function refreshAfterBackupRestore(data, res) {
   if (typeof refreshLeaveRequestsUI === 'function') refreshLeaveRequestsUI();
   initBackupUI();
   const summary = imported.length ? imported.join(' | ') : (res?.localOnly?.join?.(' | ') || 'بيانات متزامنة');
+  const migrationReport = data?.__migrationImportReport || res?.merged?.report || null;
   logBackupEntry('success', `استيراد: ${summary}`, 'migration_import');
   if (typeof logAudit === 'function') logAudit('BACKUP_IMPORTED', `استيراد: ${summary}`, { items: imported, via: 'restore_staging' });
   const integrity = verifyRestoredDataIntegrity(data);
-  if (integrity.issues.length) {
+  const credentialSkip = migrationReport?.skipped?.find((s) => s.key === 'users.credentials');
+  if (credentialSkip) {
+    notify('✅ تم الاستيراد — ' + (credentialSkip.labelAr || 'تم تجاهل بيانات تسجيل الدخول عمداً لأسباب السلامة'), 'success');
+  } else if (integrity.issues.length) {
     notify(`⚠️ استيراد مكتمل مع ${integrity.issues.length} مشكلة حرجة — راجع فحص الجاهزية`, 'danger');
   } else if (integrity.warnings.length) {
     notify(`✅ تم الاستيراد — ${integrity.warnings.length} تنبيه بسيط في سلامة البيانات`, 'success');
@@ -19921,13 +19974,15 @@ async function applyImportedBackup(data, meta) {
 function verifyRestoredDataIntegrity(data) {
   const issues = [];
   const warnings = [];
+  const migrationReport = data?.__migrationImportReport || null;
+  const credentialSkipped = migrationReport?.skipped?.some((s) => s.key === 'users.credentials');
   const uList = data.users || users || [];
   const caseList = data.cases || cases || [];
   const registry = data.clientsRegistry || clientsRegistry || [];
   const regIds = new Set(registry.map(r => r.id));
   const regByFile = new Set(registry.map(r => String(r.fileNo || '').trim()).filter(Boolean));
 
-  if (uList.length && !(typeof RolePolicy !== 'undefined' && RolePolicy.hasManagerAccount(uList))) {
+  if (uList.length && !credentialSkipped && !(typeof RolePolicy !== 'undefined' && RolePolicy.hasManagerAccount(uList))) {
     issues.push('لا يوجد مدير نظام نشط في النسخة المستعادة');
   }
   if (caseList.length && !registry.length) {

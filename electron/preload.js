@@ -63,8 +63,11 @@ const ALLOWED_INVOKE = new Set([
   'backup:v2:pickFile',
   'backup:v2:gate',
   'backup:v2:stageRemote',
+  'backup:v2:downloadCloud',
+  'backup:v2:restoreUnified',
   'backup:v2:downloadAndRestore',
   'backup:v2:restoreFromCloudRemote',
+  'backup:restoreRehydrateResult',
   'backup:v2:prune',
   'backup:v2:formatPolicy',
   'backup:v2:scheduleStatus',
@@ -221,6 +224,19 @@ const cuppingApi = {
     v2PickFile: () => invoke('backup:v2:pickFile'),
     v2Gate: () => invoke('backup:v2:gate'),
     v2StageRemote: (options) => invoke('backup:v2:stageRemote', options),
+    v2DownloadCloud: (options) => invoke('backup:v2:downloadCloud', options),
+    v2RestoreUnified: (options) => invoke('backup:v2:restoreUnified', options),
+    onRestoreProgress: (handler) => {
+      const listener = (_event, payload) => { try { handler(payload); } catch { /* observer */ } };
+      ipcRenderer.on('backup:restoreProgress', listener);
+      return () => ipcRenderer.removeListener('backup:restoreProgress', listener);
+    },
+    onRestoreRehydrateRequest: (handler) => {
+      const listener = (_event, payload) => { try { handler(payload); } catch { /* observer */ } };
+      ipcRenderer.on('backup:restoreRehydrateRequest', listener);
+      return () => ipcRenderer.removeListener('backup:restoreRehydrateRequest', listener);
+    },
+    restoreRehydrateResult: (payload) => invoke('backup:restoreRehydrateResult', payload),
     v2DownloadAndRestore: (options) => invoke('backup:v2:downloadAndRestore', options),
     v2RestoreFromCloudRemote: (options) => invoke('backup:v2:restoreFromCloudRemote', options),
     v2Prune: (options) => invoke('backup:v2:prune', options),

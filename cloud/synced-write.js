@@ -106,14 +106,6 @@
         applied.push(key);
       }
     });
-    if (data.license?.meta) {
-      try { localStorage.setItem('__tdw_lic_meta__', data.license.meta); } catch { /* empty */ }
-      applied.push('license.meta');
-    }
-    if (data.license?.data) {
-      try { localStorage.setItem('__tdw_lic__', data.license.data); } catch { /* empty */ }
-      applied.push('license.data');
-    }
     return applied;
   }
 

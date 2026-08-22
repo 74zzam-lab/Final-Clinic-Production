@@ -113,6 +113,16 @@ async function downloadCloudBackup(remotePath, providerId) {
   return getProvider(providerKey).downloadBackup(remotePath, providerKey === 'local-vault' ? 'google' : id);
 }
 
+async function downloadCloudBackupByFileId(fileId, providerId, options = {}) {
+  const id = resolveProviderId(providerId);
+  const providerKey = await resolveActiveProviderKey(id);
+  const p = getProvider(providerKey);
+  if (typeof p.downloadBackupByFileId === 'function') {
+    return p.downloadBackupByFileId(fileId, options);
+  }
+  return { ok: false, error: 'file_id_download_unsupported' };
+}
+
 async function deleteCloudBackup(remotePath, providerId) {
   const id = resolveProviderId(providerId);
   const providerKey = await resolveActiveProviderKey(id);
@@ -146,6 +156,7 @@ module.exports = {
   downloadSyncFile,
   listCloudBackups,
   downloadCloudBackup,
+  downloadCloudBackupByFileId,
   deleteCloudBackup,
   verifyCloudBackup,
   registerCloudAccount,

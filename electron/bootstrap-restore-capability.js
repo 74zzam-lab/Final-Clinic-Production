@@ -12,6 +12,7 @@ const { assertCloudProviderAuthenticated } = require('./cloud-provider-auth');
 const CAPABILITY_TTL_MS = 5 * 60 * 1000;
 
 const BOOTSTRAP_RESTORE_CHANNELS = new Set([
+  'backup:v2:restoreUnified',
   'backup:v2:restoreFromCloudRemote',
 ]);
 
@@ -20,9 +21,20 @@ let deps = {
   readKv: () => null,
   getCloudStatus: async () => ({ connected: false }),
   assertDriveReadable: null,
+  verifyFileIdMetadata: null,
   readLicense: () => ({ ok: false }),
   getSession: () => null,
 };
+
+const BOOTSTRAP_ERROR_ALIASES = Object.freeze({
+  google_not_connected: 'bootstrap_restore_google_unavailable',
+  google_token_unavailable: 'bootstrap_restore_google_unavailable',
+  google_status_contract_mismatch: 'bootstrap_restore_google_unavailable',
+  license_not_verified: 'bootstrap_restore_license_missing',
+  restore_scope_mismatch: 'bootstrap_restore_center_mismatch',
+  drive_download_auth_failed: 'backup_remote_probe_failed',
+  invalid_backup_path: 'backup_remote_not_found',
+});
 
 const capabilities = new Map();
 
@@ -49,6 +61,27 @@ function revokeForSender(webContentsId) {
   for (const [id, cap] of capabilities) {
     if (cap.webContentsId === webContentsId) capabilities.delete(id);
   }
+}
+
+function mapBootstrapError(error, extra = {}) {
+  const code = BOOTSTRAP_ERROR_ALIASES[error] || error || 'restore_authorization_required';
+  if (error === 'restore_scope_mismatch' && extra.branchMismatch) {
+    return 'bootstrap_restore_branch_mismatch';
+  }
+  if (error === 'restore_scope_mismatch' && extra.centerMismatch) {
+    return 'bootstrap_restore_center_mismatch';
+  }
+  return code;
+}
+
+function resolveLicense(centerId, req = {}) {
+  const cached = deps.readLicense(centerId);
+  if (cached?.ok && cached.data?.centerId) return { ok: true, data: cached.data, source: 'device_cache' };
+  const snap = req.licenseSnapshot || req.licenseContext || null;
+  if (snap && String(snap.centerId || '') === centerId) {
+    return { ok: true, data: snap, source: 'bootflow_snapshot' };
+  }
+  return { ok: false, error: 'license_not_verified' };
 }
 
 function readSettingsIdentity(userDataPath) {
@@ -92,49 +125,141 @@ async function issueRestoreCapability(event, request) {
   const centerId = String(req.centerId || '').trim();
   const branchId = String(req.branchId || '').trim();
   const remotePath = normalizePath(req.remotePath);
-  const backupId = String(req.backupId || remotePath || '').trim();
+  const googleFileId = String(req.googleFileId || req.fileId || '').trim();
+  const localPathRaw = String(req.localPath || req.filePath || '').trim();
+  const localPath = localPathRaw ? path.resolve(localPathRaw) : null;
+  const source = req.source === 'local' || (localPath && !remotePath && !googleFileId) ? 'local' : 'cloud';
+  let backupId = String(req.backupId || googleFileId || remotePath || (localPath ? path.basename(localPath) : '') || '').trim();
+  const expectedSize = Number(req.expectedSize || req.expectedSizeBytes || 0) || null;
+  const expectedModifiedAt = req.expectedModifiedAt || null;
+  const diagnosticId = String(req.diagnosticId || '').trim() || null;
 
-  if (!centerId || !remotePath || !backupId) {
-    return { ok: false, error: 'restore_authorization_required' };
-  }
-  if (!/\.tdw$/i.test(remotePath) || !remotePath.includes('Backups/V2')) {
-    return { ok: false, error: 'invalid_backup_path' };
-  }
-
-  const google = await deps.getCloudStatus('google');
-  const authGate = assertCloudProviderAuthenticated(google);
-  if (!authGate.ok) {
+  if (!centerId || !backupId) {
     return {
       ok: false,
-      error: authGate.error || 'google_not_connected',
-      reason: authGate.reason || 'google_status_contract_mismatch',
-      message: authGate.detail || undefined,
+      error: mapBootstrapError('restore_authorization_required'),
+      stage: 'authorization',
+      diagnosticId,
     };
   }
 
-  if (typeof deps.assertDriveReadable === 'function') {
-    const driveGate = await deps.assertDriveReadable(remotePath);
-    if (!driveGate?.ok) {
+  let boundFileMeta = null;
+  if (source === 'local') {
+    if (!localPath || !/\.tdw$/i.test(localPath)) {
       return {
         ok: false,
-        error: driveGate.error || 'drive_download_auth_failed',
-        reason: driveGate.reason || 'drive_path_unreachable',
+        error: mapBootstrapError('invalid_backup_path'),
+        stage: 'authorization',
+        diagnosticId,
       };
+    }
+    if (!fs.existsSync(localPath)) {
+      return {
+        ok: false,
+        error: 'backup_remote_not_found',
+        message: 'Local backup file not found',
+        stage: 'authorization',
+        diagnosticId,
+      };
+    }
+    backupId = backupId || path.basename(localPath);
+    try {
+      boundFileMeta = { size: fs.statSync(localPath).size, name: path.basename(localPath) };
+    } catch { /* best effort */ }
+  } else {
+    if (!remotePath && !googleFileId) {
+      return {
+        ok: false,
+        error: mapBootstrapError('restore_authorization_required'),
+        stage: 'authorization',
+        diagnosticId,
+      };
+    }
+    if (remotePath && (!/\.tdw$/i.test(remotePath) || !remotePath.includes('Backups/V2'))) {
+      return {
+        ok: false,
+        error: mapBootstrapError('invalid_backup_path'),
+        stage: 'authorization',
+        diagnosticId,
+      };
+    }
+
+    const google = await deps.getCloudStatus('google');
+    const authGate = assertCloudProviderAuthenticated(google);
+    if (!authGate.ok) {
+      return {
+        ok: false,
+        error: mapBootstrapError(authGate.error || 'google_not_connected'),
+        reason: authGate.reason || 'google_status_contract_mismatch',
+        message: authGate.detail || undefined,
+        stage: 'authorization',
+        diagnosticId,
+      };
+    }
+
+    if (googleFileId && typeof deps.verifyFileIdMetadata === 'function') {
+      const fileGate = await deps.verifyFileIdMetadata(googleFileId, {
+        expectedSize,
+        expectedModifiedAt,
+        remotePath,
+      });
+      if (!fileGate?.ok) {
+        return {
+          ok: false,
+          error: mapBootstrapError(fileGate.error || 'drive_download_auth_failed'),
+          reason: fileGate.reason || 'file_id_unreachable',
+          stage: 'authorization',
+          diagnosticId,
+          detail: fileGate.detail || null,
+        };
+      }
+      boundFileMeta = fileGate.item || null;
+    } else if (typeof deps.assertDriveReadable === 'function' && remotePath) {
+      const driveGate = await deps.assertDriveReadable(remotePath);
+      if (!driveGate?.ok) {
+        return {
+          ok: false,
+          error: driveGate.error === 'drive_download_auth_failed' && driveGate.reason === 'path_not_found'
+            ? 'backup_remote_not_found'
+            : mapBootstrapError(driveGate.error || 'drive_download_auth_failed'),
+          reason: driveGate.reason || 'drive_path_unreachable',
+          stage: 'authorization',
+          diagnosticId,
+          detail: driveGate.detail || null,
+        };
+      }
+      boundFileMeta = driveGate.item || null;
     }
   }
 
   const settingsId = readSettingsIdentity(deps.getUserDataPath());
   if (settingsId.centerId && settingsId.centerId !== centerId) {
-    return { ok: false, error: 'restore_scope_mismatch' };
+    return {
+      ok: false,
+      error: mapBootstrapError('restore_scope_mismatch', { centerMismatch: true }),
+      stage: 'authorization',
+      diagnosticId,
+    };
   }
 
-  const licRes = deps.readLicense(centerId);
+  const licRes = resolveLicense(centerId, req);
   const lic = licRes?.ok ? licRes.data : null;
   if (!lic || !lic.centerId) {
-    return { ok: false, error: 'license_not_verified' };
+    return {
+      ok: false,
+      error: mapBootstrapError('license_not_verified'),
+      stage: 'authorization',
+      diagnosticId,
+      licenseSource: licRes?.source || null,
+    };
   }
   if (String(lic.centerId) !== centerId) {
-    return { ok: false, error: 'restore_scope_mismatch' };
+    return {
+      ok: false,
+      error: mapBootstrapError('restore_scope_mismatch', { centerMismatch: true }),
+      stage: 'authorization',
+      diagnosticId,
+    };
   }
 
   const licensedBranchIds = (Array.isArray(req.licensedBranchIds) ? req.licensedBranchIds : (lic.branches || []))
@@ -144,7 +269,12 @@ async function issueRestoreCapability(event, request) {
 
   const effectiveBranch = branchId || settingsId.branchId || lic.branchId || '';
   if (effectiveBranch && licensedBranchIds.length && !licensedBranchIds.includes(effectiveBranch)) {
-    return { ok: false, error: 'restore_scope_mismatch' };
+    return {
+      ok: false,
+      error: mapBootstrapError('restore_scope_mismatch', { branchMismatch: true }),
+      stage: 'authorization',
+      diagnosticId,
+    };
   }
 
   const webContentsId = event?.sender?.id;
@@ -156,11 +286,16 @@ async function issueRestoreCapability(event, request) {
   const cap = {
     id: capId,
     webContentsId,
+    source,
     centerId,
     organizationId: String(req.organizationId || lic.organizationId || centerId).slice(0, 128),
     branchId: effectiveBranch,
     remotePath,
+    localPath: source === 'local' ? localPath : null,
+    googleFileId: googleFileId || boundFileMeta?.id || null,
     backupId,
+    expectedSize: expectedSize || Number(boundFileMeta?.size || 0) || null,
+    expectedModifiedAt: expectedModifiedAt || boundFileMeta?.modifiedAt || null,
     licensedBranchIds,
     issuedAt: Date.now(),
     expiresAt: Date.now() + CAPABILITY_TTL_MS,
@@ -175,8 +310,14 @@ async function issueRestoreCapability(event, request) {
     bound: {
       centerId: cap.centerId,
       branchId: cap.branchId,
+      source: cap.source,
       remotePath: cap.remotePath,
+      localPath: cap.localPath,
+      googleFileId: cap.googleFileId,
+      expectedSize: cap.expectedSize,
     },
+    stage: 'authorization',
+    diagnosticId,
   };
 }
 
@@ -199,7 +340,18 @@ function tryAuthorizeChannel(event, channel, opts) {
   }
 
   const remotePath = normalizePath(opts?.remotePath);
-  if (remotePath && remotePath !== cap.remotePath) {
+  const googleFileId = String(opts?.googleFileId || opts?.fileId || '').trim();
+  const localPathRaw = String(opts?.localPath || opts?.filePath || '').trim();
+  const localPath = localPathRaw ? path.resolve(localPathRaw) : null;
+  if (cap.localPath) {
+    if (!localPath || path.resolve(cap.localPath) !== localPath) {
+      return { ok: false, error: 'restore_scope_mismatch' };
+    }
+  }
+  if (googleFileId && cap.googleFileId && googleFileId !== cap.googleFileId) {
+    return { ok: false, error: 'restore_scope_mismatch' };
+  }
+  if (remotePath && cap.remotePath && remotePath !== cap.remotePath) {
     return { ok: false, error: 'restore_scope_mismatch' };
   }
   const reqCenter = String(opts?.centerId || '').trim();
@@ -243,6 +395,8 @@ function getCapability(capabilityId) {
 module.exports = {
   CAPABILITY_TTL_MS,
   BOOTSTRAP_RESTORE_CHANNELS,
+  BOOTSTRAP_ERROR_ALIASES,
+  mapBootstrapError,
   configure,
   issueRestoreCapability,
   tryAuthorizeChannel,

@@ -94,6 +94,10 @@ async function downloadCloudBackup(remotePath, provider) {
   return cloud.downloadCloudBackup(remotePath, provider || 'google');
 }
 
+async function downloadCloudBackupByFileId(fileId, provider, options) {
+  return cloud.downloadCloudBackupByFileId(fileId, provider || 'google', options || {});
+}
+
 async function deleteCloudBackup(remotePath, provider) {
   return cloud.deleteCloudBackup(remotePath, provider || 'google');
 }
@@ -162,6 +166,7 @@ module.exports = {
   listCloudBackups,
   discoverCloudRestorePoints,
   downloadCloudBackup,
+  downloadCloudBackupByFileId,
   deleteCloudBackup,
   verifyCloudBackup,
   startOAuth,

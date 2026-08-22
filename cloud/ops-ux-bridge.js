@@ -263,13 +263,18 @@
 
     const typed = await new Promise((resolve) => {
       const btn = document.getElementById('ops-ux-btn-confirm-restore');
+      const input = document.getElementById('ops-ux-typed-confirm');
       if (!btn) return resolve(options.typedPhrase || '');
-      btn.onclick = () => resolve(document.getElementById('ops-ux-typed-confirm')?.value || '');
-      if (options.typedPhrase) {
-        const input = document.getElementById('ops-ux-typed-confirm');
-        if (input) input.value = options.typedPhrase;
+      if (options.typedPhrase && input) input.value = options.typedPhrase;
+      if (options.autoConfirm === true && options.typedPhrase) {
         resolve(options.typedPhrase);
+        return;
       }
+      btn.onclick = () => {
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        resolve(input?.value || '');
+      };
     });
 
     const confirm = Wizard.confirmOverwrite({ typedPhrase: typed });
@@ -308,6 +313,7 @@
     renderProgress(Progress.getSnapshot(sid));
 
     let result = { ok: false };
+    const confirmBtn = document.getElementById('ops-ux-btn-confirm-restore');
     try {
       if (typeof options.execute === 'function') {
         Progress.setStage(sid, 'replace');
@@ -339,15 +345,33 @@
         setStep();
         return { ok: true, postSummary: post.postSummary || post, session: Progress.getSnapshot(sid) };
       }
-      Progress.markFailed(sid, result?.error || 'restore_failed');
-      Wizard.finish({ ok: false, postSummary: { error: result?.error || 'restore_failed' } });
+      const errCode = result?.error || result?.code || 'restore_failed';
+      Progress.markFailed(sid, errCode);
+      Wizard.finish({ ok: false, postSummary: { error: errCode, message: result?.message || null } });
       renderProgress(Progress.getSnapshot(sid));
-      return { ok: false, error: result?.error || 'restore_failed' };
+      if (body) {
+        body.innerHTML += `<p class="tdw-field-error" style="margin-top:10px">❌ ${errCode}${result?.message ? `: ${result.message}` : ''}</p>`;
+      }
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.removeAttribute('aria-busy');
+      }
+      setStep();
+      return { ok: false, error: errCode, message: result?.message || null };
     } catch (err) {
-      Progress.markFailed(sid, String(err && err.message || err));
-      Wizard.finish({ ok: false, postSummary: { error: String(err && err.message || err) } });
+      const errCode = String(err?.code || err?.message || err || 'restore_failed');
+      Progress.markFailed(sid, errCode);
+      Wizard.finish({ ok: false, postSummary: { error: errCode } });
       renderProgress(Progress.getSnapshot(sid));
-      return { ok: false, error: String(err && err.message || err) };
+      if (body) {
+        body.innerHTML += `<p class="tdw-field-error" style="margin-top:10px">❌ ${errCode}</p>`;
+      }
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.removeAttribute('aria-busy');
+      }
+      setStep();
+      return { ok: false, error: errCode };
     }
   }
 

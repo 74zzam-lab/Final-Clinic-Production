@@ -246,6 +246,44 @@ async function assertDrivePathReadable(remotePath) {
   }
 }
 
+async function verifyFileIdMetadata(googleFileId, options = {}) {
+  const googleDrive = require('./cloud-providers/google-drive');
+  const fileId = String(googleFileId || '').trim();
+  if (!fileId) return { ok: false, error: 'backup_remote_not_found', reason: 'missing_file_id' };
+  try {
+    const meta = await googleDrive.getFileMetadataById(fileId);
+    if (!meta?.ok || !meta.item) {
+      return { ok: false, error: 'backup_remote_not_found', reason: 'file_id_not_found' };
+    }
+    const item = meta.item;
+    const expectedSize = Number(options.expectedSize || 0) || null;
+    if (expectedSize && Number(item.size || 0) !== expectedSize) {
+      return {
+        ok: false,
+        error: 'backup_remote_probe_failed',
+        reason: 'size_mismatch',
+        detail: { expectedSize, actualSize: Number(item.size || 0) },
+      };
+    }
+    const expectedModifiedAt = options.expectedModifiedAt || null;
+    if (expectedModifiedAt && item.modifiedAt && String(item.modifiedAt) !== String(expectedModifiedAt)) {
+      return {
+        ok: false,
+        error: 'backup_remote_probe_failed',
+        reason: 'modified_at_mismatch',
+        detail: { expectedModifiedAt, actualModifiedAt: item.modifiedAt },
+      };
+    }
+    return { ok: true, item, requests: 1 };
+  } catch (err) {
+    const msg = err?.message || String(err);
+    if (/google_not_connected|google_no_access_token|unauthorized|401|invalid_grant/i.test(msg)) {
+      return { ok: false, error: 'google_token_unavailable', reason: 'drive_auth_failed', detail: msg };
+    }
+    return { ok: false, error: 'backup_remote_probe_failed', reason: 'probe_failed', detail: msg };
+  }
+}
+
 function finalizeRestorePoints(out) {
   out.restorePoints.sort((a, b) => String(b.modifiedAt || '').localeCompare(String(a.modifiedAt || '')));
   const backupFiles = filterBackupRestorePoints(out.restorePoints);
@@ -464,9 +502,13 @@ async function discoverCloudRestorePoints(options = {}) {
         kind: 'backup_v2',
         source: 'cloud_backup',
         id: item.id,
+        googleFileId: item.id,
         name: item.name,
         path: item.path,
+        remotePath: item.path,
         sizeBytes: item.size || 0,
+        expectedSize: item.size || 0,
+        expectedModifiedAt: item.modifiedAt,
         modifiedAt: item.modifiedAt,
         md5: item.md5,
         centerId,
@@ -729,5 +771,6 @@ module.exports = {
   finalizeRestorePoints,
   discoverCloudRestorePoints,
   assertDrivePathReadable,
+  verifyFileIdMetadata,
   isBackupRestorePoint,
 };

@@ -27,8 +27,8 @@ const preload = fs.readFileSync(path.join(root, 'electron/preload.js'), 'utf8');
 const ipc = fs.readFileSync(path.join(root, 'electron/backup-v2-ipc.js'), 'utf8');
 
 check(/sanitizeMigrationImport/.test(staging), 'JSON import sanitizes migration payload');
-check(/delete providers\.google|providers\.google/.test(staging), 'JSON import strips Google provider');
-check(/MIGRATION_DENY_TOP_KEYS/.test(staging), 'JSON import deny list exists');
+check(/MIGRATION_ALLOW_TOP_KEYS/.test(staging), 'JSON import allowlist exists');
+check(/buildMigrationImportReport/.test(staging), 'JSON import report builder exists');
 
 check(/compareExpectedCounts/.test(verify) && /restore_count_mismatch/.test(verify), 'restore count mismatch gate');
 check(/getCommittedRaw/.test(verify), 'restore verify reads SQLite committed raw');
@@ -79,8 +79,8 @@ const dirty = {
 };
 const clean = RestoreStaging.sanitizeMigrationImport(dirty, { migrationOnly: true });
 check(!clean.license, 'sanitized import removes license');
-check(!clean.settings.backup?.providers?.google, 'sanitized import removes google provider');
-check(clean.settings.centerName === 'Clinic', 'sanitized import keeps operational settings');
+check(!clean.settings?.centerId, 'sanitized import strips identity settings fields');
+check(clean.settings?.centerName === 'Clinic', 'sanitized import keeps operational settings');
 check(Array.isArray(clean.clientsRegistry) && clean.clientsRegistry.length === 1, 'sanitized import keeps clients');
 
 vm.runInNewContext(verify, sandbox);

@@ -23,6 +23,34 @@
     attachments_meta: 'attachments_meta'
   };
 
+  const MIGRATION_ALLOW_TOP_KEYS = new Set([
+    'clientsRegistry',
+    'clients',
+    'cases',
+    'visits',
+    'bookings',
+    'invoices',
+    'inventoryItems',
+    'inventorySuppliers',
+    'inventoryMovements',
+    'employees',
+    'doctors',
+    'users',
+    'expenses',
+    'ledger',
+    'ledgerEntries',
+    'employeeLedgerEntries',
+    'employeeLedgerPayments',
+    'employeeLedgerAccruals',
+    'attendance',
+    'packages',
+    'services',
+    'settings',
+    'attachments_meta',
+    'invoiceCounter',
+    'clientFileCounter',
+  ]);
+
   const MIGRATION_DENY_TOP_KEYS = new Set([
     'license',
     '__tdw_wizard__',
@@ -31,6 +59,25 @@
     'deviceConfig',
     'oauth',
     'wizard',
+    'google',
+    'cloud',
+    'cloudV2',
+    'syncBaseline',
+    'bootFlags',
+    'activation',
+  ]);
+
+  const SETTINGS_ALLOW_KEYS = new Set([
+    'centerName',
+    'branchName',
+    'prices',
+    'printReports',
+    'bookingStatuses',
+    'communication',
+    'tax',
+    'locale',
+    'theme',
+    'colorScheme',
   ]);
 
   function cloneJson(value) {
@@ -46,33 +93,25 @@
     return settings && typeof settings === 'object' ? { ...settings } : {};
   }
 
-  /** Strip identity / OAuth / setup keys from JSON migration imports. */
+  /** Allowlist JSON migration imports — never import device/oauth/license identity. */
   function sanitizeMigrationImport(data, meta) {
     if (!data || typeof data !== 'object') return data;
     if (!meta || meta.migrationOnly !== true) return data;
-    const clean = cloneJson(data);
-    MIGRATION_DENY_TOP_KEYS.forEach((key) => { delete clean[key]; });
 
-    const settings = normalizeSettingsRow(clean.settings);
-    if (settings && typeof settings === 'object') {
-      delete settings.centerId;
-      delete settings.licenseId;
-      delete settings.deviceId;
-      delete settings.wizard;
-      delete settings.bootComplete;
-      delete settings.__tdw_wizard__;
-      if (settings.backup && typeof settings.backup === 'object') {
-        const backup = { ...settings.backup };
-        if (backup.providers && typeof backup.providers === 'object') {
-          const providers = { ...backup.providers };
-          delete providers.google;
-          delete providers.oauth;
-          backup.providers = providers;
-        }
-        settings.backup = backup;
-      }
-      if (Array.isArray(clean.settings)) clean.settings = [settings];
-      else clean.settings = settings;
+    const report = buildMigrationImportReport(data);
+    const clean = {};
+    report.imported.forEach(({ key }) => {
+      if (data[key] != null) clean[key] = cloneJson(data[key]);
+    });
+
+    if (clean.settings) {
+      const settings = normalizeSettingsRow(clean.settings);
+      const filtered = {};
+      SETTINGS_ALLOW_KEYS.forEach((key) => {
+        if (settings[key] != null) filtered[key] = settings[key];
+      });
+      if (Array.isArray(clean.settings)) clean.settings = [filtered];
+      else clean.settings = filtered;
     }
 
     if (Array.isArray(clean.users)) {
@@ -81,11 +120,49 @@
         const row = { ...u };
         delete row.password;
         delete row.passwordPlain;
+        delete row.passwordHash;
+        delete row.salt;
         return row;
       });
     }
 
+    clean.__migrationImportReport = report;
     return clean;
+  }
+
+  function buildMigrationImportReport(data) {
+    const imported = [];
+    const skipped = [];
+    const failed = [];
+    if (!data || typeof data !== 'object') {
+      return { imported, skipped, failed };
+    }
+
+    Object.keys(data).forEach((key) => {
+      if (MIGRATION_DENY_TOP_KEYS.has(key)) {
+        skipped.push({ key, reason: 'security_policy_device_identity' });
+        return;
+      }
+      if (MIGRATION_ALLOW_TOP_KEYS.has(key)) {
+        imported.push({ key, count: Array.isArray(data[key]) ? data[key].length : 1 });
+        return;
+      }
+      if (/^__tdw_|oauth|google|cloud|license|device|wizard|boot|sync/i.test(key)) {
+        skipped.push({ key, reason: 'security_policy_device_identity' });
+        return;
+      }
+      skipped.push({ key, reason: 'not_in_migration_allowlist' });
+    });
+
+    if (data.users) {
+      skipped.push({
+        key: 'users.credentials',
+        reason: 'security_policy_password_hashes',
+        labelAr: 'تم تجاهل بيانات تسجيل الدخول عمداً لأسباب السلامة',
+      });
+    }
+
+    return { imported, skipped, failed };
   }
 
   function stageBackup(data, meta) {
@@ -241,8 +318,10 @@
   global.RestoreStaging = {
     STAGING_KEY,
     SYNCED_MAP,
+    MIGRATION_ALLOW_TOP_KEYS,
     MIGRATION_DENY_TOP_KEYS,
     sanitizeMigrationImport,
+    buildMigrationImportReport,
     stageBackup,
     loadStaging,
     clearStaging,
