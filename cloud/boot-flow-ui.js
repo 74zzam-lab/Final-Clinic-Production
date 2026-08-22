@@ -1160,18 +1160,25 @@ body.bf-active #ops-ux-restore-wizard{z-index:100050!important}
 
         const renderBackupTable = (backups, hostEl, onSelect) => {
           if (!hostEl || !Array.isArray(backups) || !backups.length) return;
+          const formatValidation = (bp) => {
+            if (bp.validation === 'metadata_suspicious_small') return '⚠️ صغيرة جداً';
+            const type = bp.backupClassLabel || bp.backupClass || '—';
+            const scope = bp.scopeLabel || '—';
+            const sizeHint = (bp.sizeBytes || 0) < 100 * 1024 ? ' · قد تكون فارغة' : '';
+            return `${type} · ${scope}${sizeHint}`;
+          };
           const rows = backups.map((bp, i) => {
             const rec = i === 0 ? ' (الأحدث — موصى به)' : '';
             return `<tr>
               <td>#${i + 1}${rec}</td>
               <td>${Discovery.formatWhen(bp.modifiedAt)}</td>
               <td dir="ltr">${Discovery.formatBytes(bp.sizeBytes)}</td>
-              <td>${bp.validation || 'metadata_ok'}</td>
+              <td>${formatValidation(bp)}</td>
               <td><button type="button" class="btn btn-sm btn-accent bf-pick-backup" data-idx="${i}">استعادة Backup V2</button></td>
             </tr>`;
           }).join('');
           hostEl.innerHTML = `<table class="table table-sm" dir="rtl" style="width:100%;margin-top:8px">
-            <thead><tr><th>النسخة</th><th>التاريخ</th><th>الحجم</th><th>الحالة</th><th></th></tr></thead>
+            <thead><tr><th>النسخة</th><th>التاريخ</th><th>الحج</th><th>النوع / النطاق</th><th></th></tr></thead>
             <tbody>${rows}</tbody></table>`;
           hostEl.querySelectorAll('.bf-pick-backup').forEach((btn) => {
             btn.addEventListener('click', () => {

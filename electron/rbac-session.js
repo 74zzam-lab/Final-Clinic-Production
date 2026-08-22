@@ -57,6 +57,7 @@ const PUBLIC_CHANNELS = new Set([
   'cloudOAuth:getSettings',
   'cloudOAuth:testConnection',
   'license:readActivationBundle',
+  'bootstrap:issueRestoreCapability',
   'rbac:bindSession',
   'rbac:clearSession',
   'rbac:getSession',

@@ -1,8 +1,10 @@
 'use strict';
 
 /**
- * Backup V2 — Google Drive listing and retention (keep newest N full DR archives).
+ * Backup V2 — Google Drive listing and retention (keep newest N periodic archives).
  */
+const { classifyBackupFile, isPrunableAutomaticBackup } = require('./backup-v2-classify');
+
 const CLOUD_V2_PREFIX = 'Backups/V2';
 const DEFAULT_CLOUD_RETENTION = 3;
 
@@ -24,6 +26,7 @@ function normalizeCloudItem(item) {
     mtimeMs: Date.parse(modifiedAt || '') || 0,
     source: 'cloud',
     label: item?.name || item?.path || 'cloud-backup',
+    backupClass: classifyBackupFile(item?.name, item?.manifest),
   };
 }
 
@@ -51,17 +54,21 @@ async function pruneCloudV2Backups(listFn, deleteFn, retentionCount = DEFAULT_CL
   if (!listed.ok) return { ok: false, pruned: 0, error: listed.message };
   const keepMax = Math.max(1, Number(retentionCount) || DEFAULT_CLOUD_RETENTION);
   const keepNorm = keepRemotePath ? String(keepRemotePath).replace(/\\/g, '/') : null;
+
+  const automatic = listed.items.filter((item) => isPrunableAutomaticBackup(item.name, item.manifest));
+  const excluded = listed.items.filter((item) => !isPrunableAutomaticBackup(item.name, item.manifest));
+
   const removed = [];
-  let kept = 0;
-  for (const item of listed.items) {
+  let keptAutomatic = 0;
+  for (const item of automatic) {
     const remotePath = item.path || item.remotePath;
     if (!remotePath) continue;
     if (keepNorm && remotePath === keepNorm) {
-      kept += 1;
+      keptAutomatic += 1;
       continue;
     }
-    if (kept < keepMax) {
-      kept += 1;
+    if (keptAutomatic < keepMax) {
+      keptAutomatic += 1;
       continue;
     }
     if (typeof deleteFn !== 'function') continue;
@@ -72,7 +79,16 @@ async function pruneCloudV2Backups(listFn, deleteFn, retentionCount = DEFAULT_CL
       /* best effort */
     }
   }
-  return { ok: true, pruned: removed.length, removed, kept: Math.min(kept, keepMax) };
+
+  return {
+    ok: true,
+    pruned: removed.length,
+    removed,
+    keptAutomatic,
+    keptAutomaticMax: keepMax,
+    excludedCount: excluded.length,
+    totalListed: listed.items.length,
+  };
 }
 
 module.exports = {
@@ -83,4 +99,6 @@ module.exports = {
   filterV2FullBackups,
   listCloudV2Backups,
   pruneCloudV2Backups,
+  classifyBackupFile,
+  isPrunableAutomaticBackup,
 };

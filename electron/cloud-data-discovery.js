@@ -239,14 +239,7 @@ function finalizeRestorePoints(out) {
   return out.newest;
 }
 
-function classifyBackupFile(name) {
-  const n = String(name || '').toLowerCase();
-  if (/emergency|pre-?restore|safety|before-?restore/.test(n)) return 'safety';
-  if (/manual|custom|user/.test(n)) return 'manual';
-  if (/scheduled|auto|periodic/.test(n)) return 'automatic';
-  if (/pinned|keep/.test(n)) return 'pinned';
-  return 'automatic';
-}
+const { classifyBackupFile, classifyLabelAr } = require('./backup-v2-classify');
 
 function buildDiscoverySummary(out, options = {}) {
   const branchIds = new Set();
@@ -457,7 +450,10 @@ async function discoverCloudRestorePoints(options = {}) {
         revision: null,
         attachmentCount: null,
         recordCount: null,
-        validation: 'metadata_ok',
+        backupClass: classifyBackupFile(item.name),
+        backupClassLabel: classifyLabelAr(classifyBackupFile(item.name)),
+        scopeLabel: branchId ? 'فرع' : 'مؤسسة',
+        validation: (item.size || 0) > 0 && (item.size || 0) < 100 * 1024 ? 'metadata_suspicious_small' : 'metadata_ok',
         probedFolder: folder,
       });
       added += 1;
